@@ -1674,6 +1674,26 @@ describe('HeadlessNodeFactory', () => {
     expect(pty.sends).toEqual([{ nodeId: id, text: "claude 'brief'" }])
   })
 
+  it('open-agent --resume keeps the cold-restore grammar on the Server Edition (F1)', async () => {
+    const sid = 'b33aa29e-8996-4e33-b7af-f610b17d3b1f'
+    const reply = await factory.openAgent('term-source', { agent: 'claude', resume: sid }, true)
+    expect(reply.ok).toBe(true)
+    const id = (reply.result as { id: string }).id
+    expect(pty.sends).toEqual([{ nodeId: id, text: `claude --resume ${sid}` }])
+  })
+
+  it('grok --resume is refused by the SE v1 agent list — the resume initialPrompt wiring stays dormant until SE admits grok (F1)', async () => {
+    const reply = await factory.openAgent(
+      'term-source',
+      { agent: 'grok', resume: 'b33aa29e-8996-4e33-b7af-f610b17d3b1f', prompt: '首单 brief' },
+      true
+    )
+    expect(reply).toEqual({
+      ok: false,
+      error: 'open-agent: Server Edition v1 supports --agent claude|codex|gemini'
+    })
+  })
+
   it('refuses --run-now with --after on open-terminal before anything is created, saved or sent (#925)', async () => {
     states['term-upstream'] = 'working'
     const save = vi.spyOn(store, 'save')

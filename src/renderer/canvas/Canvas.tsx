@@ -13225,7 +13225,8 @@ export function Canvas() {
                     // `--model` was dropped here too, like `--prompt-file`: honoured as on every
                     // other open path (`withAgentModel` re-validates it at the interpolation site).
                     args.model,
-                    openPrompt.promptFile
+                    openPrompt.promptFile,
+                    (args.resume ?? '').trim() || undefined
                   ),
                   tgIssueRef
                 )
@@ -13618,7 +13619,8 @@ export function Canvas() {
                       coldMode,
                       owner.id,
                       args.model,
-                      openPrompt.promptFile
+                      openPrompt.promptFile,
+                      (args.resume ?? '').trim() || undefined
                     ),
                     coldIssueRef
                   )
@@ -14322,7 +14324,8 @@ export function Canvas() {
                       ? `, prompt from file ${promptFile}`
                       : args.prompt
                         ? `, prompt: "${args.prompt.slice(0, 80)}${args.prompt.length > 80 ? '…' : ''}"`
-                        : ''),
+                        : '') +
+                    (args.resume ? `, resume ${args.resume.trim()}` : ''),
                   ...(issueRef ? [`bound to GitHub issue ${formatIssueRef(issueRef)}`] : []),
                   ...(after?.length ? [`armed to wait for: ${after.join(', ')}`] : []),
                   ...prReplyLines,
@@ -14346,6 +14349,22 @@ export function Canvas() {
             // See the same list in open-terminal: which of these nodes end up ARMED is
             // `armAfter`'s per-node decision, recorded as it builds them.
             const openBatch = createControlOpenBatch()
+            // F3 duplicate-adoption guard: one provider session must never be held by two nodes
+            // (grok has no cross-pane conversation lock; a double resume corrupts cold-restore).
+            // Cold-restore and Open recent are human flows and pass their own guards.
+            const controlResumeId = (args.resume ?? '').trim() || undefined
+            if (controlResumeId) {
+              const holder = nodesRef.current.find(
+                (n) => (n.data as { agentSessionId?: string } | undefined)?.agentSessionId === controlResumeId
+              )
+              if (holder) {
+                reply({
+                  ok: false,
+                  error: `${verb}: session ${JSON.stringify(controlResumeId)} is already open on node ${holder.id} — close that node first or pick another session (duplicate-adoption guard)`
+                })
+                return
+              }
+            }
             // The prompt was decided above (`openPrompt`, #706): an over-budget `--prompt` rides a
             // spilled file through the same `"$(cat …)"` substitution `--prompt-file` uses, an
             // issue-bound session's prompt leads with the REFERENCE line, and an explicit
@@ -14369,7 +14388,11 @@ export function Canvas() {
                   // interpolation site and emits nothing for an agent outside MODEL_SWITCH_CAPABLE,
                   // so an unsupported agent's command line stays byte-identical.
                   args.model,
-                  openPrompt.promptFile
+                  openPrompt.promptFile,
+                  // `--resume`: same 12th argument Open recent passes. Main already ran
+                  // resumeFlagRefusal + the duplicate-adoption guard above; an empty/absent
+                  // flag is a fresh launch.
+                  controlResumeId
                 ),
                 after ?? [],
                 intoGroupId,
@@ -14379,9 +14402,18 @@ export function Canvas() {
               if (issueRef) issueNodes.push(bound)
               return openBatch.add(bound)
             }
-            const ids = intoGroupId
-              ? addGrouped(intoGroupId, count, make)
-              : Array.from({ length: count }, (_, i) => addAndConnect(make(i)))
+            let ids: string[]
+            try {
+              ids = intoGroupId
+                ? addGrouped(intoGroupId, count, make)
+                : Array.from({ length: count }, (_, i) => addAndConnect(make(i)))
+            } catch (e) {
+              reply({
+                ok: false,
+                error: `${verb}: ${e instanceof Error ? e.message : String(e)}`
+              })
+              return
+            }
             ropeDeps(ids, after)
             logRunsStarted(ctlProject?.id, issueNodes, issueRef)
             const openResult = openBatch.result(after ?? [])

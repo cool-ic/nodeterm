@@ -296,6 +296,19 @@ describe('assembleResumeCommand', () => {
       'claude --resume abc-123'
     )
   })
+  it('grok resume + first prompt appends the brief as one positional argv (T173 adopt-with-task)', () => {
+    expect(
+      assembleResumeCommand(
+        { agentId: 'grok', sessionId: 'b33aa29e-1', initialPrompt: '跑   curl 状态接口 并汇报' },
+        ENV
+      ).command
+    ).toBe("grok --resume b33aa29e-1 '跑 curl 状态接口 并汇报'")
+  })
+  it('resume without a prompt is unchanged', () => {
+    expect(assembleResumeCommand({ agentId: 'grok', sessionId: 'abc-123' }, ENV).command).toBe(
+      'grok --resume abc-123'
+    )
+  })
   it('codex resumes with the subcommand form', () => {
     expect(assembleResumeCommand({ agentId: 'codex', sessionId: 'abc-123' }, ENV).command).toBe(
       'codex resume abc-123'

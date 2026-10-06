@@ -718,6 +718,9 @@ export function createAgentNode(
     customAgent,
     launchCmdOverride,
     sessionId: resumeSessionId,
+    // Adopt-with-task (T173): pass the first brief into the resume launch; undefined for
+    // cold-restore and Open recent, which resume without a prompt.
+    initialPrompt,
     permissionMode,
     model,
     sharedIdentity: codexSharedIdentity(ssh),

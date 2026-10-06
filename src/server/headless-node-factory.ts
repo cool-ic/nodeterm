@@ -32,10 +32,11 @@ import {
   hasHooks,
   resolvePermissionMode,
   supportsSessionIdFlag,
+  canResumeWith,
   type AgentId,
   type BuiltinAgentId
 } from '../shared/agents/config'
-import { assembleLaunchCommand } from '../shared/agents/launch'
+import { assembleLaunchCommand, assembleResumeCommand } from '../shared/agents/launch'
 import type { AgentState, NormalizedAgentEvent } from '../shared/agents/normalize'
 import { oneLine } from '../shared/one-line'
 import { RUN_NOW_AFTER_REFUSAL, runNowRequested } from '../shared/control-verbs'
@@ -1451,6 +1452,7 @@ export class HeadlessNodeFactory {
               'project',
               'model',
               'issue',
+              'resume',
               'run-now'
             ])
       )
@@ -1594,25 +1596,49 @@ export class HeadlessNodeFactory {
             caps?.sessionIdFlag === true,
             grokCaps?.sessionIdFlag === true
           )
-          mintedSessionId = sessionIdFlagSupported ? randomUUID() : undefined
-          command = assembleLaunchCommand(
-            {
-              agentId: agentId as AgentId,
-              // An issue-bound session's first prompt is the REFERENCE line, never the issue's text.
-              initialPrompt: issueRef ? issueLaunchPrompt(issueRef, args.prompt) : args.prompt,
-              permissionMode,
-              sessionId: mintedSessionId,
-              sessionIdFlagSupported,
-              launchCmdOverride: settings.agentLaunchCommands?.[agentId as BuiltinAgentId],
-              sharedIdentity: codexSharedIdentity,
-              approvalCaps: {
-                codexApprovalValues: codexCaps.approvalValues,
-                codexNoDaemon: codexCaps.noDaemon ?? null
+          const resumeId = (args.resume ?? '').trim() || undefined
+          // F2: the four identity/permission fields are shared by both branches — compose once,
+          // extend per branch, so a new field lands in one place.
+          const baseInputs = {
+            agentId: agentId as AgentId,
+            permissionMode,
+            model: args.model,
+            launchCmdOverride: settings.agentLaunchCommands?.[agentId as BuiltinAgentId],
+            sharedIdentity: codexSharedIdentity,
+            approvalCaps: {
+              codexApprovalValues: codexCaps.approvalValues,
+              codexNoDaemon: codexCaps.noDaemon ?? null
+            }
+          }
+          if (resumeId) {
+            if (!canResumeWith(agentId as AgentId, resumeId)) {
+              return {
+                ok: false,
+                error: `open-agent: --resume cannot resume ${agentId} session ${JSON.stringify(resumeId)}`
+              }
+            }
+            mintedSessionId = resumeId
+            command = assembleResumeCommand(
+              {
+                ...baseInputs,
+                sessionId: resumeId,
+                initialPrompt: args.prompt
               },
-              model: args.model
-            },
-            this.deps.env ?? process.env
-          ).command
+              this.deps.env ?? process.env
+            ).command
+          } else {
+            mintedSessionId = sessionIdFlagSupported ? randomUUID() : undefined
+            command = assembleLaunchCommand(
+              {
+                ...baseInputs,
+                // An issue-bound session's first prompt is the REFERENCE line, never the issue's text.
+                initialPrompt: issueRef ? issueLaunchPrompt(issueRef, args.prompt) : args.prompt,
+                sessionId: mintedSessionId,
+                sessionIdFlagSupported
+              },
+              this.deps.env ?? process.env
+            ).command
+          }
         }
 
         const id = nextId('term')

@@ -274,6 +274,42 @@ describe('parseControlRequest', () => {
     expect(isDestructiveVerb('open-agent')).toBe(false)
   })
 
+  it('open-agent --resume accepts a safe session id and refuses the combinations that would drop the brief', () => {
+    const sid = 'b33aa29e-8996-4e33-b7af-f610b17d3b1f'
+    expect(parseControlRequest('open-agent', { agent: 'grok', resume: sid })).toEqual({
+      verb: 'open-agent',
+      args: { agent: 'grok', resume: sid }
+    })
+    expect(parseControlRequest('open-agent', { agent: 'grok', resume: sid, model: 'grok-4.6' })).toMatchObject({
+      verb: 'open-agent'
+    })
+    expect(parseControlRequest('open-agent', { agent: 'grok', resume: '-rf' })).toEqual({
+      error: expect.stringContaining('--resume cannot resume')
+    })
+    expect(parseControlRequest('open-agent', { agent: 'grok', resume: sid, prompt: '先跑 curl 状态接口并汇报' })).toMatchObject({
+      verb: 'open-agent',
+      args: { agent: 'grok', resume: sid, prompt: '先跑 curl 状态接口并汇报' }
+    })
+    expect(parseControlRequest('open-agent', { agent: 'claude', resume: sid, prompt: 'hi' })).toEqual({
+      error: expect.stringContaining('--resume + --prompt is only supported for grok')
+    })
+    expect(parseControlRequest('open-agent', { agent: 'grok', resume: sid, 'prompt-file': '/tmp/x' })).toEqual({
+      error: 'open-agent: --resume cannot be combined with --prompt-file'
+    })
+    expect(parseControlRequest('open-agent', { agent: 'grok', resume: sid, issue: '#1' })).toEqual({
+      error: 'open-agent: --resume cannot be combined with --issue'
+    })
+    expect(parseControlRequest('open-agent', { agent: 'grok', resume: sid, count: '2' })).toEqual({
+      error: 'open-agent: --resume cannot be combined with --count'
+    })
+    expect(parseControlRequest('open-terminal', { resume: sid })).toEqual({
+      error: 'open-terminal: --resume applies only to open-agent'
+    })
+    expect(parseControlRequest('open-claude', { resume: sid })).toEqual({
+      error: 'open-claude: --resume applies only to open-agent'
+    })
+  })
+
   it('open-worktree requires --branch, close-worktree requires --group; neither destructive', () => {
     expect(parseControlRequest('open-worktree', {})).toEqual({ error: 'open-worktree requires --branch <name>' })
     expect(parseControlRequest('open-worktree', { branch: 'feat/x' })).toEqual({
@@ -524,6 +560,14 @@ describe('parseControlRequest', () => {
       // a body that names only "may be denied" leaves a caller reading its own timeout as refusal.
       expect(body).toContain('denied by user')
       expect(body).toContain('no answer within 120s')
+    }
+  })
+
+  it('both agent-facing texts document open-agent --resume', () => {
+    for (const body of [buildCanvasSkillBody('/x/shim.sh'), buildCanvasControlInstructions('/tmp/nodeterm.sh')]) {
+      expect(body).toContain('--resume <session-id>')
+      expect(body).toContain('Open recent')
+      expect(body).toContain('For grok you may pass `--prompt` too')
     }
   })
 

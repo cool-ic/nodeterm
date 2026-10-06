@@ -80,6 +80,10 @@ export interface ResumeInputs {
   launchCmdOverride?: string
   /** The provider session id to resume (live hook id, or the minted id persisted on the node). */
   sessionId?: string
+  /** First task delivered in the resume launch command (grok accepts `--resume <id> '<prompt>'`).
+   *  Cold-restore / Open recent pass nothing; an adopt-with-task open passes the first brief so the
+   *  station reports idle after its first turn instead of sitting unconfirmed at a prompt. */
+  initialPrompt?: string
   permissionMode?: AgentPermissionMode
   /** Per-node model override, applied through the effective base harness. */
   model?: string
@@ -274,8 +278,24 @@ export function assembleResumeCommand(
   const withMode = inputs.permissionMode
     ? withPermissionMode(base, capId, inputs.permissionMode, inputs.approvalCaps ?? {})
     : base
+  // First-prompt append for adopt-with-task (T173): same per-agent injection rules as the fresh
+  // path (flag-prompt vs positional argv), same single-line quoting. promptFile stays a fresh-only
+  // feature — the control layer refuses --resume + --prompt-file.
+  const resumePromptArg = inputs.initialPrompt
+    ? shellSingleQuote(inputs.initialPrompt.replace(/\s+/g, ' ').trim())
+    : null
+  const resumePromptFlag = eff.promptInjectionMode === 'flag-prompt'
+    ? '--prompt'
+    : eff.promptInjectionMode === 'flag-interactive'
+      ? (eff.promptFlag ?? '--interactive')
+      : null
+  const withResumePrompt = !resumePromptArg
+    ? withMode
+    : resumePromptFlag
+      ? `${withMode} ${resumePromptFlag} ${resumePromptArg}`
+      : `${withMode} ${resumePromptArg}`
   const command = withCodexNoDaemon(
-    withAgentModel(withMode, capId, inputs.model),
+    withAgentModel(withResumePrompt, capId, inputs.model),
     capId,
     inputs.approvalCaps ?? {}
   )

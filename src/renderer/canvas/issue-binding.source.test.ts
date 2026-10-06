@@ -37,6 +37,13 @@ describe('--issue in the desktop control dispatch', () => {
     expect(gate).toBeLessThan(handler.indexOf("'window unavailable'"))
   })
 
+  it('main refuses a bad --resume before the renderer ever sees it', () => {
+    const handler = mainSrc.slice(mainSrc.indexOf('hookServer.setControlHandler('))
+    const gate = handler.indexOf('resumeFlagRefusal(verb, args)')
+    expect(gate).toBeGreaterThan(-1)
+    expect(gate).toBeLessThan(handler.indexOf("'window unavailable'"))
+  })
+
   it('resolves --issue ONCE, before any open path snapshots the projects store', () => {
     // `#N` may cost a host round trip. An await inside a path (after it captured the store) let a
     // tab switch in that window write the node into the wrong project — the #443 class.

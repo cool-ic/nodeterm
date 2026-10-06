@@ -323,7 +323,7 @@ import { initContextLink, setNodeTranscript } from '../core/context-link'
 import { transcriptPathOf } from '../core/context-link-core'
 import { initCanvasControl, installCanvasSkillInto } from './canvas-control'
 import { DRY_RUN_VERBS, dryRunRequested, dryRunRefusal } from '../shared/control-verbs'
-import { issueFlagRefusal } from '../core/canvas-control-core'
+import { issueFlagRefusal, resumeFlagRefusal } from '../core/canvas-control-core'
 import { afterPrFlagRefusal } from '../shared/pr-wait'
 import { CONTROL_REQUEST_TIMEOUT_MS } from '../shared/control-confirm'
 import { createControlForwarder, type ControlForwardReply } from './control-forward'
@@ -4148,6 +4148,8 @@ app.whenReady().then(async () => {
     // renderer resolves `#N` against the project's repository and re-parses with the same grammar.
     const issueRefusal = issueFlagRefusal(verb, args)
     if (issueRefusal) return { ok: false, error: issueRefusal, message: issueRefusal }
+    const resumeRefusal = resumeFlagRefusal(verb, args)
+    if (resumeRefusal) return { ok: false, error: resumeRefusal, message: resumeRefusal }
     // `--after-pr` / `--pr-deadline`: same placement and same reason. Whether the pull request
     // exists in the board's repository is the renderer's question (`resolvePrWaitFor`).
     const afterPrRefusal = afterPrFlagRefusal(verb, args)

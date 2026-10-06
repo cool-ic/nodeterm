@@ -14,7 +14,13 @@ import {
 } from './agents/hook-endpoint-failover-sh'
 import { codexSandboxGuidanceLines } from './context-link-core'
 import { NODE_TOKEN_READ_SH } from './agents/node-token-sh'
-import { AGENT_CONFIG, AGENT_HOOK_TARGETS, BUILTIN_AGENT_IDS } from '@shared/agents/config'
+import {
+  AGENT_CONFIG,
+  AGENT_HOOK_TARGETS,
+  BUILTIN_AGENT_IDS,
+  canResumeWith,
+  type AgentId
+} from '@shared/agents/config'
 import { RETRYABLE } from './agents/agent-message-decide'
 import { FANOUT_PER_TURN, PAIR_MIN_INTERVAL_MS } from './agents/agent-message-flow'
 import { BROWSER_RETRYABLE, BROWSER_OUTCOME_LABEL } from './browser-outcomes'
@@ -692,6 +698,53 @@ export function issueFlagRefusal(verb: string, args: Record<string, string | und
   return issue.ok ? null : `${verb}: ${issue.error}`
 }
 
+/**
+ * `--resume <session-id>` on `open-agent`: open a NEW node that launches the agent CLI on an
+ * existing conversation (same assembler Open recent / cold-restore use). Desktop main runs this
+ * before forwarding; the Server Edition runs it inside `parseControlRequest`.
+ *
+ * Combined with `--prompt` / `--prompt-file` / `--issue` / `--count≠1` the resume command would
+ * silently drop the extra brief, so those are refused rather than ignored.
+ */
+export function resumeFlagRefusal(verb: string, args: Record<string, string | undefined>): string | null {
+  if (args.resume === undefined) return null
+  if (verb !== 'open-agent') {
+    return `${verb}: --resume applies only to open-agent`
+  }
+  const agent = (args.agent ?? '').trim()
+  if (!agent) return 'open-agent: --resume requires --agent <id>'
+  const sid = args.resume.trim()
+  if (!sid) return 'open-agent: --resume requires a session id'
+  if (!canResumeWith(agent as AgentId, sid)) {
+    return `open-agent: --resume cannot resume ${agent} session ${JSON.stringify(sid)}`
+  }
+  const RESUME_PROMPT_CAPABLE = new Set(['grok'])
+  if (args.prompt && !RESUME_PROMPT_CAPABLE.has(agent)) {
+    return `open-agent: --resume + --prompt is only supported for ${[...RESUME_PROMPT_CAPABLE].join('/')} (verified: grok CLI accepts a first prompt alongside --resume; other CLIs are not verified)`
+  }
+  if (args['prompt-file']) return 'open-agent: --resume cannot be combined with --prompt-file'
+  if (args.issue !== undefined) return 'open-agent: --resume cannot be combined with --issue'
+  const count = parseInt(args.count || '1', 10)
+  if (args.count !== undefined && args.count !== '' && count !== 1) {
+    return 'open-agent: --resume cannot be combined with --count'
+  }
+  return null
+}
+
+function resumeDocLines(): string[] {
+  return [
+    '`--resume <session-id>` (open-agent only) opens a NEW node that launches the agent on an',
+    'existing conversation — the same resume assembler Open recent uses (`grok --resume <id>`).',
+    'The node is a normal agent station: you can `send` to it, and it can open stations of its own.',
+    'For grok you may pass `--prompt` too — the first task is delivered in the launch command',
+    '(`grok --resume <id> \'<prompt>\'`), so the node reports idle after its first turn instead of',
+    'sitting UNCONFIRMED until someone types into it. Prefer this over open-then-send for adopted',
+    'stations. The prompt text must arrive on ONE line. Cannot combine with `--prompt-file`,',
+    '`--issue`, or `--count` other than 1. An id the resume grammar refuses is refused at open time,',
+    'never silently started as a fresh conversation.'
+  ]
+}
+
 /** Validate a raw (verb, args) pair into a ControlCommand, or return an { error }. */
 export function parseControlRequest(
   verb: string,
@@ -713,6 +766,8 @@ export function parseControlRequest(
   if (v === 'open-agent' && !args.agent) return { error: 'open-agent requires --agent <id>' }
   const issueRefusal = issueFlagRefusal(v, args)
   if (issueRefusal) return { error: issueRefusal }
+  const resumeRefusal = resumeFlagRefusal(v, args)
+  if (resumeRefusal) return { error: resumeRefusal }
   // `--after-pr`: the same shape gate desktop main runs before forwarding. The Server Edition then
   // refuses the well-formed flag as unsupported (its open allowlist), since it keeps no PR watch.
   const afterPrRefusal = afterPrFlagRefusal(v, args)
@@ -855,7 +910,7 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `help` — print the verb list. Answered by the shim itself, so it works even if the app is down.',
     '- `open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--run-now]` — open N plain terminals. `--cmd` requires verified node identity.',
     '- `open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--run-now]` — open N Claude sessions.',
-    `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--run-now]\` — open`,
+    `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--resume <session-id>] [--run-now]\` — open`,
     '  any agent CLI. `--group` parents the node(s) into a group frame; a worktree-bound group also',
     '  hands its worktree path down as the cwd. `--after <id,id>` opens the node ARMED: it does not',
     '  start until every listed station has finished a turn SUCCESSFULLY. It is',
@@ -878,6 +933,7 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  24 hours and flushed after the node starts and finishes its first turn (`targetNotStarted` when',
     '  it cannot be queued; a message queued before the node started does not survive an app restart).',
     '  To coordinate with a station now, open it with `--run-now` or start it with `run --node <id> [--project <id>]`.',
+    ...resumeDocLines(),
     '  A station started a moment ago that has not reported its status yet is queued the same way.',
     '  Add `--run-now` to start a cold-opened session immediately instead. Put it LAST on the line,',
     '  in either form (`--run-now` or `--run-now=1`): an older shim can still sit on an SSH host (it',
@@ -1421,7 +1477,7 @@ Verbs:
   is also what to run when you are unsure whether the control endpoint is alive.
 - \`open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--run-now]\` — open N plain terminals (default 1). \`--cmd\` requires verified node identity.
 - \`open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--run-now]\` — open N Claude sessions (default 1).
-- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--run-now]\` — open N sessions of any agent CLI.
+- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--resume <session-id>] [--run-now]\` — open N sessions of any agent CLI.
   \`--group\` parents the node(s) into an existing group frame; a worktree-bound group also
   hands its worktree path down as the cwd.
   \`--after <id,id>\` opens the node **armed**: it does NOT start yet, and launches itself once
@@ -1509,6 +1565,8 @@ Verbs:
   as it would have — the flag is never an error, so a mixed fan-out needs no special-casing. The
   id goes to the CLI verbatim: an unknown name fails inside the session on its first turn, not at
   open time, so name a model you know that CLI accepts rather than guessing.
+
+${resumeDocLines().join('\n')}
 ${issueBindingDocLines().join('\n')}
 ${afterPrDocLines().join('\n')}
 ${afterHandoverDocLines().join('\n')}
