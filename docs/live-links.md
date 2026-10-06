@@ -1142,15 +1142,15 @@ Added while building it:
 
 Visual checks (renderer, Mac and a Server Edition browser tab):
 
-25. Node right-click: "Share live link…" right after Refresh terminal, the broadcast glyph at 16 px; a
+25. Node right-click: "Share live link…" right after Refresh terminal, the chain-link glyph at 16 px; a
     DISABLED row's tooltip (relay tab, 5 links).
 26. Sessions sidebar row menu — active project and a non-active project (Duplicate · Share live link… ·
     End session).
 27. Kanban card menu (per-project, after the account rows) and the Omni board lane card menu.
-28. Terminal node header: the broadcast button between Comments and the eye, 22 px like its
+28. Terminal node header: the share-link (chain) button between Comments and the eye, 22 px like its
     neighbours; disabled look + tooltip on a relay tab, in a Server Edition tab and at 5 links; hidden
     from Settings → Appearance → Terminal header buttons.
-    Card modal header: the broadcast action between ✦ and the comments button; disabled look + tooltip
+    Card modal header: the share-link (chain) action between ✦ and the comments button; disabled look + tooltip
     (Chromium shows `title` on disabled buttons — confirm on the packaged build).
 29. The create dialog: 440 px `.confirm` shell, the grouped rows, the menus, the URL row with
     Copy link/Copied!, "until HH:MM" in 12/24 h locales; a long node title ellipsizes in the head (full
@@ -1260,7 +1260,7 @@ From the build:
 
 Visual checks (Mac, default look and Liquid Glass, dark and light) — the create dialog:
 
-58. The form is one grouped list of rows (globe, lock, clock, person icons): "Anyone with the link ·
+58. The form is one grouped list of rows (chain, lock, clock, person icons): "Anyone with the link ·
     can watch ▾", "Expires · in 1 hour ▾", "Viewers see you as · Enes" (no box until hover/focus).
     The role and expiry menus open under their trigger, right-aligned, opaque, over the rows and the
     warnings; a check marks the current choice; hints are muted, one line each. Under Liquid Glass

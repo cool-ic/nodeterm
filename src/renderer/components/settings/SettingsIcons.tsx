@@ -132,12 +132,12 @@ const PATHS: Record<StaticSettingsSectionId, React.JSX.Element> = {
       <path d="M10.6 3.6a2.2 2.2 0 0 1 0 4.2M11.4 9.3c1.5.4 2.4 1.6 2.4 3.2" />
     </>
   ),
-  // A dot inside two pairs of arcs: this terminal is being broadcast (the same glyph as the
-  // node menu's "Share live link…" row, `IconBroadcast`).
+  // Two chain links: a terminal shared by a link (the same glyph as the node menu's "Share live
+  // link…" row, `IconShareLink`, at this set's 16-unit scale).
   'live-links': (
     <>
-      <circle cx="8" cy="8" r="1.6" />
-      <path d="M5.2 5.2a4 4 0 0 0 0 5.6M10.8 5.2a4 4 0 0 1 0 5.6M3.3 3.3a6.6 6.6 0 0 0 0 9.4M12.7 3.3a6.6 6.6 0 0 1 0 9.4" />
+      <path d="M6.67 8.67a3.33 3.33 0 0 0 5.03.36l2-2a3.33 3.33 0 0 0-4.71-4.71l-1.15 1.14" />
+      <path d="M9.33 7.33a3.33 3.33 0 0 0-5.03-.36l-2 2a3.33 3.33 0 0 0 4.71 4.71l1.14-1.14" />
     </>
   ),
   ssh: (

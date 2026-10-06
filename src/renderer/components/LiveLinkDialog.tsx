@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useDialogStack } from './dialog-stack'
-import { IconClock, IconClose, IconLock, IconReload, IconUser, IconWeb } from './icons'
+import { IconClock, IconClose, IconLock, IconReload, IconShareLink, IconUser } from './icons'
 import { MenuSelect } from './MenuSelect'
 import { newControlPassword, PasswordField, useCopied } from './LiveLinkPassword'
 import {
@@ -208,7 +208,7 @@ export function LiveLinkDialogBody(p: {
       <div className="live-dialog__rows">
         <div className="live-dialog__row">
           <span className="live-dialog__icon" aria-hidden="true">
-            <IconWeb />
+            <IconShareLink />
           </span>
           <span className="live-dialog__row-label">Anyone with the link</span>
           {/* Keyboard focus lands here when the dialog opens (D2/M3): keys stay inside the dialog

@@ -2,7 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { isTopDialog, nextDialogId, popDialog, pushDialog } from '../dialog-stack'
 import {
-  IconBroadcast,
+  IconShareLink,
   IconChat,
   IconClose,
   IconExternal,
@@ -567,7 +567,7 @@ export function CardModal({ session, projectId, projectName, projectColor, colum
                   )
                 }
               >
-                <IconBroadcast />
+                <IconShareLink />
               </button>
             </>
           )}

@@ -224,7 +224,7 @@ import {
   useMdModeFocus
 } from '../terminal/useMdModeFocus'
 import { canvasOwnsMarkdownChord } from '../lib/markdownChord'
-import { IconBroadcast, IconChat, IconChevronDown, IconChevronRight, IconClose, IconEye, IconEyeOff, IconGrid, IconMic, IconMoveTo, IconPlay, IconReload, IconSearch, IconSparkle } from '../components/icons'
+import { IconShareLink, IconChat, IconChevronDown, IconChevronRight, IconClose, IconEye, IconEyeOff, IconGrid, IconMic, IconMoveTo, IconPlay, IconReload, IconSearch, IconSparkle } from '../components/icons'
 import { NodeLabels } from '../components/kanban/NodeLabels'
 import { MdViewHintButton } from '../components/MdViewHintButton'
 import { mdViewHint } from '../lib/mdViewHint'
@@ -6510,7 +6510,7 @@ export function TerminalNode({
                 )
               }}
             >
-              <IconBroadcast />
+              <IconShareLink />
             </button>
           </Tooltip>
         )}

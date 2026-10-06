@@ -24,7 +24,7 @@ describe('TerminalNode header: Share live link', () => {
     expect(b).toContain('nodeId: id')
     // A canvas node only ever lives in the active project's canvas.
     expect(b).toContain('projectId: owningProjectId()')
-    expect(b).toContain('<IconBroadcast />')
+    expect(b).toContain('<IconShareLink />')
   })
 
   it('is disabled, with the reason as its tooltip, wherever sharing is unavailable', () => {

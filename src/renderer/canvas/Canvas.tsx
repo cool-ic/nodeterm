@@ -115,7 +115,7 @@ import { CommandPalette, type Command } from '../components/CommandPalette'
 import { Tooltip } from '../components/Tooltip'
 import {
   IconBranch,
-  IconBroadcast,
+  IconShareLink,
   IconChat,
   IconCanvasView,
   IconClose,
@@ -3765,7 +3765,7 @@ export function Canvas() {
         stored: (pid) => store.getProject(pid)?.nodes,
         hidden: useSettings.getState().settings.hiddenNodeMenuItems,
         facts: liveLinkFacts,
-        icon: <IconBroadcast />,
+        icon: <IconShareLink />,
         open: openLiveLinkFor
       })
     },
@@ -18212,7 +18212,7 @@ export function Canvas() {
         activeLinks: useWatchLinks.getState().links.length,
         entitled: useEntitlement.getState().isPremium,
         serverEdition: isBrowserRuntime(),
-        icon: <IconBroadcast />,
+        icon: <IconShareLink />,
         chatIcon: <IconChat />,
         manage: () => {
           setSettingsSection('live-links')
