@@ -64,8 +64,10 @@ import {
   type StationOutcome,
   type StationOutcomeRecord
 } from '../shared/station-outcome'
+import { stationOutcomeNoticeBody, type StationRecipient } from '../shared/station-notice'
 import type { CorePlatform } from './platform'
 import type { MessageHandover } from './agents/agent-messaging'
+import type { AgentMessageOutcome } from './agents/agent-message-decide'
 import type { DurableFactFile, DurableFactSpec } from './durable-state'
 
 /** Which conversation a report was made in. */
@@ -350,6 +352,15 @@ export interface ReportOutcomeDeps {
   /** After a record lands. The Server Edition re-evaluates its armed launches here; the desktop's
    *  renderer hears the store's push instead. */
   onRecorded?(record: StationOutcomeRecord): void
+  /** Who opened this station (`openedBy` + rope, or the SE creator ledger). Absent / undefined
+   *  ⇒ no pane notice (a hand-opened node has nobody to wake). */
+  recipientFor?(stationNodeId: string): StationRecipient | undefined
+  /** Pane leg: `deliverStationNotice`. Best-effort; a refused notice does not fail the report. */
+  deliver?(notice: {
+    stationNodeId: string
+    recipientNodeId: string
+    body: string
+  }): Promise<AgentMessageOutcome>
 }
 
 export interface ReportOutcomeReply {
@@ -409,6 +420,22 @@ export async function handleReportOutcome(
     logged = await deps.appendBoardLog(projectId, entry).catch(() => false)
   }
   deps.onRecorded?.(record)
+  const recipient = deps.recipientFor?.(req.nodeId)
+  if (recipient && deps.deliver) {
+    try {
+      await deps.deliver({
+        stationNodeId: req.nodeId,
+        recipientNodeId: recipient.recipientNodeId,
+        body: stationOutcomeNoticeBody(
+          { id: req.nodeId, title: recipient.stationTitle },
+          parsed.outcome,
+          parsed.note
+        )
+      })
+    } catch {
+      // The report already stands; the opener notice is a wake-up, not a gate.
+    }
+  }
   const message = [
     `recorded: your task ${parsed.outcome}${parsed.note ? ` — "${parsed.note}"` : ''}.`,
     RELEASE_TEXT[parsed.outcome],

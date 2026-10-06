@@ -30,10 +30,13 @@ describe('desktop main', () => {
     const at = handler.indexOf("if (verb === 'report-outcome') {")
     expect(at).toBeGreaterThan(-1)
     expect(at).toBeLessThan(handler.indexOf('controlForwarder.forward('))
-    const block = handler.slice(at, at + 600)
+    const block = handler.slice(at, at + 900)
     expect(block).toContain('handleReportOutcome(')
     expect(block).toContain('store: stationOutcomes')
     expect(block).toContain('{ nodeId, args, verified }')
+    expect(block).toContain('recipientFor:')
+    expect(block).toContain('stationRecipient(workspaceStore.persistedCanvases(), id)')
+    expect(block).toContain('deliverStationNotice(notice, messagingDeps)')
   })
 
   it('withdraws a station\'s report after new work lands — in the finishing step both answers take', () => {
@@ -92,9 +95,12 @@ describe('Server Edition', () => {
   it('routes report-outcome through the SAME core handler and re-evaluates its arms', () => {
     const at = serverControl.indexOf('reportOutcome: (sourceNodeId, args, verified) =>')
     expect(at).toBeGreaterThan(-1)
-    const block = serverControl.slice(at, at + 900)
+    const block = serverControl.slice(at, at + 1400)
     expect(block).toContain('handleReportOutcome(')
     expect(block).toContain('onRecorded: () => void factory.refreshArmed()')
+    expect(block).toContain('recipientFor:')
+    expect(block).toContain('stationRecipientFromOwner(')
+    expect(block).toContain('deliverStationNotice(notice, messaging)')
   })
 
   it('wires the same hand-over events into its messaging deps', () => {

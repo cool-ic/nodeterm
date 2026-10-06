@@ -19,7 +19,7 @@ import {
 import type { BoardLogEntry } from '../shared/types'
 import { RETRYABLE, type AgentMessageOutcome } from '../core/agents/agent-message-decide'
 import { resetMessageFlow, FANOUT_PER_TURN } from '../core/agents/agent-message-flow'
-import { NOTIFY_BODY } from '../shared/agents/agent-messaging'
+import { NOTIFY_BODY, STATION_NOTICE_VERB } from '../shared/agents/agent-messaging'
 import { resetAgentMessageTraceForTests } from '../core/agents/agent-message-trace'
 import { MANAGED_SCRIPT_REVISION } from '../core/agents/hooks/managed-script'
 import { DeliveryQueue } from '../core/agents/delivery-queue'
@@ -574,5 +574,57 @@ describe('a target that has not started yet (launch held off screen)', () => {
     const { deps } = unstarted({ heldLaunch: () => false })
     const { outcome } = await deliverFromControl(req(), deps)
     expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+  })
+})
+
+describe('station notice to an attached opener (T185)', () => {
+  const notice = () =>
+    req({ verb: STATION_NOTICE_VERB, sourceNodeId: 'a1', targetNodeId: 'b1', body: 'app-authored' })
+  const attached = (over: Partial<AgentMessagingDeps> = {}) =>
+    fakeDeps({
+      paneOwnerProject: () => undefined,
+      hasLiveSession: () => true,
+      heldLaunch: () => false,
+      subscribeReceipts: (cb) => {
+        const t = setTimeout(() => cb({ nodeId: 'b1', newTurn: true, verified: true }), 5)
+        return () => clearTimeout(t)
+      },
+      ...over
+    })
+
+  it('types the app-authored notice into a live attached opener', async () => {
+    const deps = attached()
+    const { outcome } = await deliverFromControl(notice(), deps)
+    expect(outcome.kind).toBe('delivered')
+    expect(deps.rec.sent).toHaveLength(1)
+    expect(deps.rec.sent[0].nodeId).toBe('b1')
+  })
+
+  it('send/reply to the same attached pane stay unproven', async () => {
+    const deps = attached()
+    const { outcome } = await deliverFromControl(req(), deps)
+    expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+    expect(deps.rec.sent).toEqual([])
+  })
+
+  it('a station notice with no live session stays unproven', async () => {
+    const deps = attached({ hasLiveSession: () => false })
+    const { outcome } = await deliverFromControl(notice(), deps)
+    expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+    expect(deps.rec.sent).toEqual([])
+  })
+
+  it('a disputed owner is still refused, even for a station notice', async () => {
+    const deps = attached({ paneOwnerProject: () => 'p-hostile' })
+    const { outcome } = await deliverFromControl(notice(), deps)
+    expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+    expect(deps.rec.sent).toEqual([])
+  })
+
+  it('the project messaging switch still gates the notice', async () => {
+    const deps = attached({ messagingEnabled: () => false })
+    const { outcome } = await deliverFromControl(notice(), deps)
+    expect(outcome).toEqual({ kind: 'notPermitted', reason: 'switch-off' })
+    expect(deps.rec.sent).toEqual([])
   })
 })

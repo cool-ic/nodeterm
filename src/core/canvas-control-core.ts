@@ -124,6 +124,11 @@ function stationNoticeDocLines(): string[] {
     ...STATION_NOTICE_COMMON_OPTIONS.map(
       ([name, text]) => `  - ${name}: ${text.replace(/<station>/g, '<station id>')}`
     ),
+    '- A station YOU opened that runs `report-outcome --outcome succeeded|failed` also notifies you',
+    '  (same framed message, same `openedBy` recipient). Succeeded and failed both fire; the note is',
+    '  data inside the app-authored text. Do not poll `list` and do not use `send`/`reply` as a done',
+    '  signal. An attached opener (session restored after an app restart) can receive THIS notice;',
+    '  `send`/`reply` to that pane stay refused (`unproven-target-owner`).',
     '- Nobody opened the station through you? You are not told about it. On the Server Edition you are',
     '  told only about stations you opened during this server run, and a dead CLI (DROPPED) is noticed',
     '  only while a browser tab shows that station. `list` still marks LAST TURN ERRORED and DROPPED.'
@@ -340,8 +345,9 @@ function reportOutcomeDocLines(): string[] {
     '  are unsure: that is `failed`, with the reason in `--note`. Report last, when nothing is left to do.',
     '  You report only about yourself — `--node` naming another node is refused — and a later report',
     `  replaces the earlier one. The note (one line, at most ${OUTCOME_NOTE_MAX} characters) is shown in \`list\`, on your`,
-    "  card and on the waiting node; it is never typed into anyone's session. Reporting does not end your",
-    '  session or your turn, and it moves no kanban card.'
+    "  card and on the waiting node. The agent that OPENED you also gets an app-authored station",
+    '  notice in its pane (station id + this note), succeeded and failed both, so it does not poll.',
+    '  Reporting does not end your session or your turn, and it moves no kanban card.'
   ]
 }
 

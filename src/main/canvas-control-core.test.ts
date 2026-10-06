@@ -843,6 +843,10 @@ describe('parseControlRequest', () => {
       expect(section).toMatch(/A PERMISSION prompt[\s\S]*is never a notice/)
       // The Server Edition's ownership rule, in the same words it keeps for every verb.
       expect(section).toMatch(/stations you opened during this server run/)
+      // Fleet completion bus (T185): report-outcome wakes the opener; attach can receive it.
+      expect(section).toMatch(/report-outcome --outcome succeeded\|failed/)
+      expect(section).toMatch(/Succeeded and failed both fire/)
+      expect(section).toMatch(/unproven-target-owner/)
     }
   })
 
@@ -1601,7 +1605,8 @@ describe('--after-success + report-outcome: a dependent that waits for a reporte
     expect(flat).toContain('not merely that you stopped')
     expect(flat).toContain('`--node` naming another node is refused')
     expect(flat).toContain(`at most ${OUTCOME_NOTE_MAX} characters`)
-    expect(flat).toContain('never typed into anyone\'s session')
+    expect(flat).toContain('app-authored station')
+    expect(flat).toContain('notice in its pane')
     // And orchestrators are told to ask for it.
     expect(flat).toMatch(/--after-success <upstream-id>/)
     expect(flat).toMatch(/report-outcome/)

@@ -366,7 +366,14 @@ export async function initServerCanvasControl(
             return ids.length === 1 ? ids[0] : undefined
           },
           appendBoardLog: (projectId, entry) => deps.boardLog.append(projectId, entry),
-          onRecorded: () => void factory.refreshArmed()
+          onRecorded: () => void factory.refreshArmed(),
+          recipientFor: (id) =>
+            stationRecipientFromOwner(
+              deps.workspaceStore.persistedCanvases(),
+              id,
+              factory.openerOf(id)
+            ),
+          deliver: (notice) => deliverStationNotice(notice, messaging)
         }
       ),
     // The board's GitHub lane, read-only, from the GitHub service's cache — the same core module the

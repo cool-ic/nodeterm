@@ -4167,7 +4167,9 @@ app.whenReady().then(async () => {
           store: stationOutcomes,
           now: () => Date.now(),
           projectIdOfNode,
-          appendBoardLog: (projectId, entry) => appendBoardLogVia(boardLogRouter, projectId, entry)
+          appendBoardLog: (projectId, entry) => appendBoardLogVia(boardLogRouter, projectId, entry),
+          recipientFor: (id) => stationRecipient(workspaceStore.persistedCanvases(), id),
+          deliver: (notice) => deliverStationNotice(notice, messagingDeps)
         }
       )
     }

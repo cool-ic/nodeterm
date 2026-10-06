@@ -688,13 +688,13 @@ export async function runDelivery(
   const now = deps.now ?? ((): number => Date.now())
   const board = req.verb === 'board-comment' ? req : null
   const ident = requestIdentity(req)
-  // The app's own station-failure notice (station-notice.ts): the SOURCE is the station the notice
-  // is about and the TARGET is the agent that opened it. It runs every gate below — scope, the
+  // The app's own station notice (station-notice.ts): the SOURCE is the station the notice is
+  // about and the TARGET is the agent that opened it. It runs every gate below — scope, the
   // per-project switch, runtime pane ownership, flow limits, the pane probes, the receipt — with
-  // two differences, both because the app, not the station, is the author: the body was composed
-  // in core from a closed table, and the creator check runs the OTHER way round (the recipient must
-  // have opened the station, which is how the recipient was chosen; re-asked here so a queued
-  // notice is re-validated at flush time like every other delivery).
+  // three differences, all because the app, not the station, is the author: the body was composed
+  // in core from a closed table; the creator check runs the OTHER way round (the recipient must
+  // have opened the station; re-asked at flush); and a LIVE attached opener (empty spawn ledger
+  // after restart) may receive THIS notice, while send/reply to that pane stay unproven.
   const stationNotice = req.verb === STATION_NOTICE_VERB
 
   const projects = deps.projects()
@@ -736,14 +736,16 @@ export async function runDelivery(
       // `targetNotStarted`, which the queue holds, and the flush re-runs this whole chain against
       // the pane the spawn will have proven. Only for NO owner and NO session — a live pane whose
       // owner is unproven or disputed stays refused, which is the security property this gate is.
-      if (
-        projectId &&
-        !owner &&
-        deps.heldLaunch?.(projectId, req.targetNodeId) &&
-        !(await deps.hasLiveSession(req.targetNodeId))
-      ) {
+      const live = projectId ? await deps.hasLiveSession(req.targetNodeId) : false
+      if (projectId && !owner && deps.heldLaunch?.(projectId, req.targetNodeId) && !live) {
         if (!deps.messagingEnabled(projectId)) notPermitted = 'switch-off'
         else return { kind: 'targetNotStarted' }
+      } else if (stationNotice && projectId && !owner && live) {
+        // Attach opener (T185): after an app restart the spawn ledger is empty, so send/reply
+        // stay `unproven-target-owner`. A station notice's recipient was already resolved as
+        // `openedBy` (+ rope); a live session is enough to type the APP-authored notice. The
+        // grant is the shared canvas project's switch — never a blank cheque for send.
+        if (!deps.messagingEnabled(projectId)) notPermitted = 'switch-off'
       } else notPermitted = 'unproven-target-owner'
     } else if (!deps.messagingEnabled(owner)) notPermitted = 'switch-off'
   }

@@ -40,8 +40,8 @@ export function isStationOutcome(value: unknown): value is StationOutcome {
 export interface StationOutcomeRecord {
   nodeId: string
   outcome: StationOutcome
-  /** Display text only: one line, capped, controls stripped (`sanitizeOutcomeNote`). Never typed
-   *  into a pane, never read as a gate. */
+  /** Display text only: one line, capped, controls stripped (`sanitizeOutcomeNote`). Shown in
+   *  `list`, on the card, and inside the app-authored opener station notice; never a gate. */
   note?: string
   at: number
   /** New work (a `send` / `reply`) is QUEUED for this station and has not reached it yet: this
@@ -69,9 +69,9 @@ const FORMAT_CHARS = /\p{Cf}+/gu
 
 /**
  * The note as it may be shown: one line, no control or format characters, capped, or `undefined`
- * when nothing visible is left. It reaches `list` output (read by agents), the QUEUED tooltip and the
- * board log — never a pane — so this is a display rule, not an injection defence; `oneLine` is the
- * rule every other one-line value in the app follows.
+ * when nothing visible is left. It reaches `list` output (read by agents), the QUEUED tooltip, the
+ * board log, and the app-authored opener station notice — so this is a display rule, not an
+ * injection defence; `oneLine` is the rule every other one-line value in the app follows.
  */
 export function sanitizeOutcomeNote(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return undefined

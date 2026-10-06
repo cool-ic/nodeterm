@@ -9,6 +9,7 @@ import {
   type ReportOutcomeDeps
 } from './station-outcome-store'
 import { REPORT_OUTCOME_CONTROL_REFUSAL } from '../shared/station-outcome'
+import { stationOutcomeNoticeBody } from '../shared/station-notice'
 import { IPC } from '../shared/ipc'
 import type { BoardLogEntry } from '../shared/types'
 
@@ -98,6 +99,47 @@ describe('handleReportOutcome', () => {
     await handleReportOutcome({ nodeId: 'st1', args: { outcome: 'succeeded' }, verified: true }, d)
     expect(d.store.get('st1')?.outcome).toBe('succeeded')
     expect(d.store.list()).toHaveLength(1)
+  })
+
+  it('report-outcome succeeded and failed each deliver an app-authored notice to the opener only', async () => {
+    const delivered: { stationNodeId: string; recipientNodeId: string; body: string }[] = []
+    const d = deps({
+      recipientFor: (id) =>
+        id === 'st1'
+          ? { projectId: 'p1', recipientNodeId: 'orch', stationTitle: 'Worker' }
+          : undefined,
+      deliver: async (n) => {
+        delivered.push(n)
+        return { kind: 'delivered', traceId: 't', traced: 'memory', receipt: 'observed', signal: 'newTurn' }
+      }
+    })
+    await handleReportOutcome(
+      { nodeId: 'st1', args: { outcome: 'succeeded', note: 'tests pass' }, verified: true },
+      d
+    )
+    await handleReportOutcome({ nodeId: 'st1', args: { outcome: 'failed', note: 'lint red' }, verified: true }, d)
+    await handleReportOutcome({ nodeId: 'loner', args: { outcome: 'succeeded' }, verified: true }, d)
+    expect(delivered).toHaveLength(2)
+    expect(delivered[0]).toEqual({
+      stationNodeId: 'st1',
+      recipientNodeId: 'orch',
+      body: stationOutcomeNoticeBody({ id: 'st1', title: 'Worker' }, 'succeeded', 'tests pass')
+    })
+    expect(delivered[1]).toMatchObject({
+      stationNodeId: 'st1',
+      recipientNodeId: 'orch'
+    })
+    expect(delivered[1].body).toContain('outcome: failed.')
+    expect(delivered.some((n) => n.recipientNodeId !== 'orch')).toBe(false)
+  })
+
+  it('a missing opener is not invented — no notice, report still recorded', async () => {
+    const deliver = vi.fn()
+    const d = deps({ recipientFor: () => undefined, deliver })
+    const r = await handleReportOutcome({ nodeId: 'st1', args: { outcome: 'succeeded' }, verified: true }, d)
+    expect(r.ok).toBe(true)
+    expect(d.store.get('st1')?.outcome).toBe('succeeded')
+    expect(deliver).not.toHaveBeenCalled()
   })
 })
 
