@@ -239,6 +239,7 @@ import { ConflictBar } from '../components/ConflictBar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { CapabilityNotice } from '../components/CapabilityNotice'
 import { ClosedTranscriptDialog } from '../components/ClosedTranscriptDialog'
+import { TrustViewDialog } from '../components/TrustViewDialog'
 import { SetupConsentDialog } from '../components/SetupConsentDialog'
 import { ConsentNotice } from '../remote/ConsentNotice'
 import { approvePhoneWithFeedback } from '../lib/phone-approval'
@@ -801,7 +802,7 @@ import {
   CONTROL_REQUEST_TIMEOUT_MS
 } from '@shared/control-confirm'
 import { useControlConfirm } from '../state/controlConfirm'
-import { autoApproveForTargets, controlConfirmDecision, waiveControlConfirmForProject } from '../state/controlConfirmGate'
+import { autoApproveForGate, controlConfirmDecision, waiveControlConfirmForProject } from '../state/controlConfirmGate'
 import {
   bulkCloseMessage,
   parseCloseTargets,
@@ -1657,6 +1658,8 @@ export function Canvas() {
   // The closed-session entry whose transcript is on screen (issue #531), or null. A SNAPSHOT of
   // the ledger row, not a reference into the store: reading it needs only the pointer it carries.
   const [closedTranscript, setClosedTranscript] = useState<ClosedSessionEntry | null>(null)
+  // T201: the read-only trust view. Opened from the command palette; a diagnostic, no actions.
+  const [trustViewOpen, setTrustViewOpen] = useState(false)
   // Node to center once its project finishes loading (cross-project notification click).
   const pendingFocusRef = useRef<string | null>(null)
   // "Open recent": a conversation to resume once the project it belongs to is on the canvas.
@@ -15482,7 +15485,12 @@ export function Canvas() {
             // `control-auto-approved` board-log line under the caller's card. Anything that does
             // not resolve to the opener (no lineage, a foreign node, the caller's own pane) falls
             // through to the waiver + dialog path below, unchanged.
-            if (autoApproveForTargets(verb, sourceNodeId, [args.node], ctlProject?.id)) {
+            // T204: the auto-approval is GATE-ALIGNED — every target that would pass the delivery
+            // gate's ownership check (proven this run, or the caller is its recorded opener) runs
+            // without a dialog. Fail-visible: a notice here, a durable `control-auto-approved`
+            // board-log line. Anything less (attach-restored non-opener, foreign node, the
+            // caller's own pane) falls through to the waiver + dialog path below, unchanged.
+            if (await autoApproveForGate(verb, sourceNodeId, [args.node], ctlProject?.id)) {
               setNotice({
                 kind: 'info',
                 text: `Agent "${srcTitle}" wrote to ${args.node} — auto-approved (recorded opener)`
@@ -15506,7 +15514,12 @@ export function Canvas() {
             // `ctlProject?.id`, not the active project: the per-project waiver — and the
             // permission mode the bypass lock reads — belong to the project this call ACTS ON,
             // which since @shared/control-off-screen need not be the one on screen.
-            const writeWaiver = controlConfirmDecision(verb, ctlProject?.id)
+            // A waiver covers only its OWN project's panes (T204): a target outside the acting
+            // project is the cross-project case and is ALWAYS asked, whatever was waived before.
+            const writeTargetInProject = ctlProject?.nodes.some((n) => n.id === args.node) ?? false
+            const writeWaiver = writeTargetInProject
+              ? controlConfirmDecision(verb, ctlProject?.id)
+              : { skip: false, via: undefined }
             if (writeWaiver.via) {
               // A waived destructive action still ANNOUNCES itself, and names the waiver that let
               // it through. Losing the dialog must not mean losing the record.
@@ -15538,9 +15551,11 @@ export function Canvas() {
               reply({ ok: false, error: 'a confirmation is already pending — try again' })
               return
             }
-            // Destructive → confirm. Replies on confirm AND cancel.
+            // Destructive → confirm. Replies on confirm AND cancel. The checkbox defaults to the
+            // PERSISTED per-project scope (T204): the session-only grant died with the process,
+            // which is why the same dialog kept coming back after every restart.
             setControlWaive(false)
-            setControlWaiveScope('session')
+            setControlWaiveScope('project')
             setConfirm({
               message: `Agent "${srcTitle}" wants to send to ${args.node}:\n\n${args.text ?? ''}`,
               confirmLabel: 'Send',
@@ -15627,7 +15642,7 @@ export function Canvas() {
             // T191: the DEFAULT approval — an opener closing its OWN stations runs without a
             // dialog (a comma LIST must resolve to the opener for EVERY id, or the dialog stays).
             // Fail-visible: notice + durable board-log line. Anything less falls through.
-            if (autoApproveForTargets(verb, sourceNodeId, closeIds, ctlProject?.id)) {
+            if (await autoApproveForGate(verb, sourceNodeId, closeIds, ctlProject?.id)) {
               const closedText =
                 closeIds.length === 1
                   ? `node ${closeIds[0]}`
@@ -15653,7 +15668,13 @@ export function Canvas() {
               return
             }
             // Waived? Same decision table as `write` (@shared/control-confirm).
-            const closeWaiver = controlConfirmDecision(verb, ctlProject?.id)
+            // A waiver covers only its OWN project's panes (T204): EVERY target must be in the
+            // acting project, or the cross-project case is asked regardless of any waiver.
+            const closeTargetsInProject =
+              ctlProject?.nodes != null && closeIds.every((id) => ctlProject.nodes.some((n) => n.id === id))
+            const closeWaiver = closeTargetsInProject
+              ? controlConfirmDecision(verb, ctlProject?.id)
+              : { skip: false, via: undefined }
             if (closeWaiver.via) {
               setNotice({
                 kind: 'info',
@@ -15675,9 +15696,11 @@ export function Canvas() {
               reply({ ok: false, error: 'a confirmation is already pending — try again' })
               return
             }
-            // Destructive → confirm. Replies on confirm AND cancel.
+            // Destructive → confirm. Replies on confirm AND cancel. The checkbox defaults to the
+            // PERSISTED per-project scope (T204): the session-only grant died with the process,
+            // which is why the same dialog kept coming back after every restart.
             setControlWaive(false)
-            setControlWaiveScope('session')
+            setControlWaiveScope('project')
             setConfirm({
               message: closeMessage,
               requestedBy: srcTitle,
@@ -19122,7 +19145,16 @@ export function Canvas() {
           onOpenFile={openProjectFile}
           onRevealFile={revealProjectFile}
           onQueryChange={onPaletteQuery}
-          extraCommands={transcriptCommands}
+          extraCommands={[
+            ...transcriptCommands,
+            {
+              id: 'trust-view',
+              label: '查看信任关系（只读）',
+              hint: '各幸存节点本轮的投递可达性',
+              section: 'Project',
+              run: () => setTrustViewOpen(true)
+            }
+          ]}
           onClose={() => {
             setPaletteOpen(false)
             setTranscriptHits([])
@@ -19283,6 +19315,10 @@ export function Canvas() {
         <ClosedTranscriptDialog entry={closedTranscript} onClose={() => setClosedTranscript(null)} />
       )}
 
+      {trustViewOpen && (
+        <TrustViewDialog projectId={activeProjectId ?? ''} onClose={() => setTrustViewOpen(false)} />
+      )}
+
       {/* The trust gate for a git-shared setup/archive script, mounted ONCE for the whole app on
           the same layer as the clone notice: main raises it (a manual run, or a worktree's setup)
           and it must be answerable wherever the user is, not only while a settings pane happens to
@@ -19349,6 +19385,23 @@ export function Canvas() {
                 controlWaiveScope === 'project' &&
                 waiveControlConfirmForProject(confirm.waiveVerb, confirm.waiveProjectId)
               if (!scoped) useControlConfirm.getState().waiveForSession(confirm.waiveVerb)
+              // T204 audit: a PERSISTED human grant is recorded durably, so "auto-approved" and
+              // "the user ticked the box" stay distinguishable in the board log's history.
+              if (scoped && confirm.waiveProjectId) {
+                void window.nodeTerminal.boardLog.append(confirm.waiveProjectId, {
+                  id: `waiver-granted-${confirm.waiveVerb}-${Date.now()}`,
+                  ts: Date.now(),
+                  author: { name: 'user', color: '#8b8b8b' },
+                  nodeId: confirm.waiveProjectId,
+                  kind: 'event',
+                  event: {
+                    type: 'control-waiver-granted',
+                    from: 'user',
+                    to: confirm.waiveProjectId,
+                    title: confirm.waiveVerb
+                  }
+                })
+              }
             }
             confirm.onConfirm()
           }}

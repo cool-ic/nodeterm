@@ -632,7 +632,12 @@ export function buildStubApi(): Omit<
         ok: false as const,
         error: 'Board comments reach agents only in the desktop app.',
         result: { kind: 'notPermitted', reason: 'unsupported-edition' }
-      })
+      }),
+      // T201 read-only trust view: no ledger to read in a browser/relay tab — an empty snapshot
+      // with `wired: false` says exactly that instead of pretending every node is unproven.
+      trust: {
+        snapshot: async (projectId: string) => ({ projectId, wired: false, rows: [] })
+      }
     },
     // Board-dispatch report: the Server Edition's `buildStationNoticeApi` carries the real one, and a
     // relay tab keeps this no-op (its board is the host's).

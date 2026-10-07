@@ -432,6 +432,10 @@ export const IPC = {
   workspaceLoad: 'workspace:load',
   workspaceSave: 'workspace:save',
   workspaceProbeFolder: 'workspace:probe-folder',
+  /** Read-only trust snapshot for ONE project (T201): per surviving agent node, whether the
+   *  runtime ownership ledger can vouch for it this run, and why not when it cannot. No action
+   *  surface — the view is a diagnostic, never a grant. Arg: the project's entry id. */
+  trustSnapshot: 'trust:snapshot',
   /** Is a folder's .nodeterm/project.json present / absent / unreadable — the distinction
    *  `probeFolder`'s null collapses. Recovery of an `unavailable` project needs it (issue #385). */
   workspaceProjectFileState: 'workspace:project-file-state',

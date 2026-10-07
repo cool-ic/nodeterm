@@ -193,6 +193,51 @@ describe('DeliveryQueue', () => {
     expect(h.expired[0].info.traceId).toBeTruthy()
   })
 
+  // ── T205: a LIVE target never lets its entries expire ────────────────────────────────────────
+  it('a TTL lapse on a LIVE target re-arms instead of expiring (a busy turn may outlive the TTL)', async () => {
+    const h = harness({ hasLiveSession: async () => true })
+    const q = new DeliveryQueue(h.deps, { ttlMs: 1000 })
+    await q.enqueue(req())
+    h.setClock(1000 + 1000)
+    const timersBefore = h.timers.length
+    h.fireLatestTimer()
+    await Promise.resolve()
+    await Promise.resolve()
+    // Still queued; a fresh timer was armed; nothing was traced expired and the sender was not told.
+    expect(q.depth('dst')).toBe(1)
+    expect(h.timers.length).toBeGreaterThan(timersBefore)
+    expect(h.expired).toHaveLength(0)
+    expect(h.traced.map((t) => t.outcome)).not.toContain('expired')
+  })
+
+  it('a TTL lapse on a DEAD target expires loudly (dead-letter unchanged)', async () => {
+    const h = harness({ hasLiveSession: async () => false })
+    const q = new DeliveryQueue(h.deps, { ttlMs: 1000 })
+    await q.enqueue(req())
+    h.setClock(1000 + 1000)
+    h.fireLatestTimer()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(q.depth('dst')).toBe(0)
+    expect(h.expired).toHaveLength(1)
+  })
+
+  it('a probe that THROWS fails closed toward expiry (today’s behavior, never a pin)', async () => {
+    const h = harness({
+      hasLiveSession: async () => {
+        throw new Error('pty gone')
+      }
+    })
+    const q = new DeliveryQueue(h.deps, { ttlMs: 1000 })
+    await q.enqueue(req())
+    h.setClock(1000 + 1000)
+    h.fireLatestTimer()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(q.depth('dst')).toBe(0)
+    expect(h.expired).toHaveLength(1)
+  })
+
   it('an expiry timer that fires AFTER the entry already flushed is a no-op (no double drop)', async () => {
     const h = harness()
     const q = new DeliveryQueue(h.deps, { ttlMs: 1000 })

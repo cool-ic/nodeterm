@@ -101,6 +101,9 @@ import { afterSuccessFlagRefusal } from '../shared/station-outcome'
 import { stationRecipient } from '../shared/station-notice'
 import type { RemoteLogExec } from '../core/board-log'
 import type { PtyCreateOptions, TranscriptPresence } from '../shared/types'
+import type { TrustRow, TrustSnapshot } from '../shared/types'
+import { trustReason } from '../shared/trust-view'
+import { STATION_NOTICE_VERB } from '../shared/agents/agent-messaging'
 import { boardLogRemotePath } from '../core/board-log'
 import { PtyManager } from '../core/pty-manager'
 import { desktopHeadlessRequest, launchHeadless } from '../core/headless-launch'
@@ -241,7 +244,12 @@ import {
   pendingTicketsFor
 } from '../core/agent-status-mirror'
 import { mirrorCustomAgents } from '../core/mirror-custom-agents'
-import { initOwnershipPersistence, paneOwnerProject } from '../core/agents/pane-ownership'
+import {
+  initOwnershipPersistence,
+  ownershipRowOwner,
+  ownershipWired,
+  paneOwnerProject
+} from '../core/agents/pane-ownership'
 import { createPushNotify, createLiveUpdatePush } from '../core/push-notify'
 import { createGrantsAccessor, type PushGrant } from '../core/push-grants'
 import { createRemoteGrantsCache } from '../core/remote-push-grants'
@@ -2006,13 +2014,67 @@ app.whenReady().then(async () => {
   // attach-time re-proof (same machine-local entry id) can restore messaging reach for every
   // surviving node, not just openers. Unwired hosts simply keep today's fail-closed behavior.
   initOwnershipPersistence(corePlatform.userDataDir)
+  // T205: the queue's deps ARE composed inside the messaging service, so its new `hasLiveSession`
+  // probe (a LIVE target never lets its entries expire; a dead session expires them with the sender
+  // told) and the dead-letter hook below are wired through `messagingDeps`.
   messagingDeps.queue = createDeliveryQueue(messagingDeps, { durable: deliveryQueueFile })
+  // T205 dead-letter: a queued message whose target's session DIED expires loudly (trace + board
+  // line) — and the sender also hears it IN BAND, as an app-authored notice from the unreachable
+  // target, riding the same gates a station notice does (T185/T198). Best effort: a sender that
+  // cannot be reached still has the durable legs.
+  messagingDeps.onExpiredInBand = (req, info) => {
+    const projectId = workspaceStore
+      .persistedCanvases()
+      .find((c) => c.nodes.some((n) => n.id === req.sourceNodeId))?.id
+    void deliverFromControl(
+      {
+        verb: STATION_NOTICE_VERB,
+        sourceNodeId: req.targetNodeId,
+        targetNodeId: req.sourceNodeId,
+        body:
+          `nodeterm dead-letter: your queued message to ${req.targetNodeId} expired after ` +
+          `${Math.round(info.queuedForMs / 1000)}s because its session is gone. Re-send when it is back.`,
+        ...(projectId ? { projectId } : {})
+      },
+      messagingDeps
+    ).catch(() => {})
+  }
   setDeliveryQueue(messagingDeps.queue)
   ipcMain.handle(IPC.agentMessageDeliver, async (_e, raw: unknown) => {
     if (!isDeliverRequest(raw))
       return { ok: false, error: 'malformed agent-message request. Do not retry.' }
     const { reply } = await deliverFromControl(raw, messagingDeps)
     return reply
+  })
+
+  // T201 read-only trust view: per surviving agent node, whether the ownership ledger can vouch
+  // for the pane THIS run, and why not when it cannot (no durable row / entry-id mismatch /
+  // session gone). READ-ONLY on purpose — the view is a diagnostic, never a grant; there is no
+  // action behind it, and adding one would be the vouch-button the T198 design rejected.
+  ipcMain.handle(IPC.trustSnapshot, async (_e, projectId: string) => {
+    const canvas = workspaceStore.persistedCanvases().find((c) => c.id === projectId)
+    const wired = ownershipWired()
+    if (!canvas) return { projectId, wired, rows: [] } as TrustSnapshot
+    const rows: TrustRow[] = []
+    for (const node of canvas.nodes) {
+      if (!node.agentId) continue // plain terminals are not messaging participants
+      const live = await messagingDeps.hasLiveSession(node.id)
+      const proven = paneOwnerProject(node.id) === projectId
+      rows.push({
+        nodeId: node.id,
+        title: node.title ?? node.id,
+        live,
+        proven,
+        reason: trustReason({
+          live,
+          proven,
+          wired,
+          rowOwner: ownershipRowOwner(node.id),
+          entryId: projectId
+        })
+      })
+    }
+    return { projectId, wired, rows } as TrustSnapshot
   })
   // A board comment that @mentions a session (the comment composer's send). Raw ipcMain on purpose —
   // invisible to relay peers (platform-electron.ts, invariant 4c) — and guarded to the live main

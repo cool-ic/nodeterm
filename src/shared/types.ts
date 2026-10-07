@@ -949,6 +949,12 @@ export interface BoardLogEvent {
      *  left no record would be indistinguishable from a skipped gate. `from` = the caller node
      *  id, `to` = the comma-joined target ids, `title` = the verb. */
     | 'control-auto-approved'
+    /** A destructive verb's "Don't ask again" was ticked and PERSISTED (T204): the durable grant
+     *  lives in `settings.controlConfirmWaivers.projects[projectId][verb]`, so this line is the
+     *  audit that distinguishes it from the automatic approval above. `from` = 'user' (the human
+     *  checked the box), `to` = the project id, `title` = the verb. Revoking = Settings → Agents
+     *  (or clearing the key). */
+    | 'control-waiver-granted'
   from?: string
   to?: string
   /** Column title for column-added/deleted; card title for card-created; outcome for agent-message;
@@ -4436,6 +4442,11 @@ export interface NodeTerminalApi {
      *  the same gates. `result` carries the typed outcome the comment row renders. Desktop only: the
      *  browser and relay bridges answer `notPermitted: unsupported-edition`. */
     deliverBoardComment(req: BoardCommentDeliverRequest): Promise<AgentMessageReply>
+    /** T201 read-only trust view: per surviving agent node of ONE project, whether the ownership
+     *  ledger can vouch for the pane this run, and why not when it cannot. A diagnostic. */
+    trust: {
+      snapshot(projectId: string): Promise<TrustSnapshot>
+    }
   }
   /** Board dispatch (#1051): the renderer REPORTS its in-memory dispatch map to core, replaced
    *  whole on each change, so the read-only `issues` control verb can show it beside an issue
@@ -4474,4 +4485,23 @@ export interface NodeTerminalApi {
    *  the real bridge, whose create answers `unsupported` until that edition has a license layer.
    *  Relay tab: an inert stub (a peer's terminals are not this machine's to publish). */
   watchLink: import('./watch-link-types').WatchLinkApi
+}
+
+/** T201 read-only trust view: one surviving agent node's reach, as the ownership ledger sees it.
+ *  A diagnostic — there is deliberately NO action surface behind it. */
+export interface TrustRow {
+  nodeId: string
+  title: string
+  /** The pane has a live tmux session this run. */
+  live: boolean
+  /** The runtime ledger names the viewing project as this pane's owner. */
+  proven: boolean
+  reason: import('./trust-view').TrustReason
+}
+
+export interface TrustSnapshot {
+  projectId: string
+  /** Whether the host wired the durable ownership half at all (T198). */
+  wired: boolean
+  rows: TrustRow[]
 }

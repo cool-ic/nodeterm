@@ -7,6 +7,7 @@ import {
   type ControlConfirmDecision,
   type ControlConfirmWaivers
 } from '@shared/control-confirm'
+import { targetsProven } from '@shared/trust-view'
 import { resolvePermissionModeWithSource } from '@shared/agents/config'
 
 import { useProjects } from './projects'
@@ -100,20 +101,32 @@ export function activeControlConfirmWaivers(): ControlConfirmWaivers {
 }
 
 /**
- * T191: may this destructive verb run WITHOUT a dialog? The pure `openerAutoApproved` bound to the
- * live project store — the caller must verifiably own EVERY target (the `stationRecipient` opener
- * rule over the project the call acts on, on-canvas or off). Anything less keeps the dialog.
+ * T204: the confirm dialog's auto-approval, aligned ONE-TO-ONE with the delivery gate. A verb is
+ * auto-approved when EVERY target would pass the delivery gate's ownership check without a
+ * dialog: the pane is provable THIS run (the runtime ledger names this project — fresh spawn or
+ * T198 re-proof, asked over the trust snapshot), or the caller is the target's recorded opener
+ * (T191's attach-restored case). The CALLER must also belong to the acting project — a foreign
+ * caller is the cross-project case and keeps its dialog. The non-waivable verbs
+ * (`open-project`, `settings`) never auto-approve.
  */
-export function autoApproveForTargets(
+export async function autoApproveForGate(
   verb: string,
   callerNodeId: string | undefined,
   targetIds: readonly string[],
   projectId?: string
-): boolean {
+): Promise<boolean> {
+  if (!isWaivableVerb(verb)) return false
+  if (!callerNodeId || targetIds.length === 0) return false
   const { getProject, activeProjectId } = useProjects.getState()
   const project = getProject(projectId ?? activeProjectId ?? '')
   if (!project) return false
-  return openerAutoApproved(verb, callerNodeId, targetIds, [
-    { id: project.id, nodes: project.nodes, ropes: project.ropes ?? [] }
-  ])
+  if (!project.nodes.some((n) => n.id === callerNodeId)) return false
+  const canvases = [{ id: project.id, nodes: project.nodes, ropes: project.ropes ?? [] }]
+  if (openerAutoApproved(verb, callerNodeId, targetIds, canvases)) return true
+  try {
+    const snap = await window.nodeTerminal.agentMessage.trust.snapshot(project.id)
+    return targetsProven(snap.rows, targetIds)
+  } catch {
+    return false // the snapshot is a diagnostic; its failure must not open the dialog path wider
+  }
 }

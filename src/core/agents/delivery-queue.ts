@@ -142,6 +142,13 @@ export interface DeliveryQueueDeps {
    * "never a silent drop" guarantee into "durable-only", so the desktop always supplies it.
    */
   onExpired?(req: QueuedDeliveryRequest, info: { traceId: string; queuedForMs: number }): void
+  /**
+   * T205: is the target's tmux session alive right now? Drives the expiry rule — a LIVE target
+   * never lets its queued entries expire (its busy turn merely outlived the TTL; the next idle
+   * flush delivers), while a dead session expires them with the sender told. Optional so the core
+   * is testable without a pty probe; unwired ⇒ expiry behaves exactly as before.
+   */
+  hasLiveSession?(nodeId: string): Promise<boolean>
   /** Tell the sender how a flush ended (delivered, or refused because the world changed under it).
    *  Same optionality reasoning as `onExpired`. */
   onFlushed?(req: QueuedDeliveryRequest, outcome: AgentMessageOutcome): void
@@ -487,6 +494,27 @@ export class DeliveryQueue {
     if (!list) return
     const i = list.indexOf(entry)
     if (i < 0) return // already delivered/re-queued with a fresh timer — this fire is stale
+    // T205: a LIVE target never lets its entries expire. A busy turn can easily outlive the 5-minute
+    // TTL (agents routinely run 10-20 minutes), and expiring a reachable message is the silent loss
+    // this queue exists to refuse. Re-arm instead: the entry stays queued and the target's next
+    // `done` flushes it. An ERRORED last turn is still a live, waitable state — the CLI sits at its
+    // prompt, the turn's own end posted a done, and typing reaches it. Only a DEAD session expires,
+    // with the sender told (the dead-letter below).
+    if (this.deps.hasLiveSession) {
+      let live = false
+      try {
+        live = await this.deps.hasLiveSession(nodeId)
+      } catch {
+        live = false // probe failed ⇒ fail closed toward expiry (today's behavior)
+      }
+      if (live) {
+        entry.cancelTimer()
+        entry.cancelTimer = this.schedule(DELIVERY_QUEUE_TTL_MS, () =>
+          void this.expire(nodeId, entry)
+        )
+        return
+      }
+    }
     list.splice(i, 1)
     if (list.length === 0) this.queues.delete(nodeId)
     entry.cancelTimer()
@@ -573,6 +601,27 @@ export class DeliveryQueue {
         // must not be able to deliver a board comment or an empty (body-omitted) entry.
         lapsed.push(entry)
         continue
+      }
+      // T205: a lapsed entry whose target is STILL ALIVE does not expire at restore — the deadline
+      // passing while the app was down (or mid-SIGKILL) must not eat a message the target can still
+      // be handed. Re-queue it with a fresh TTL; the next idle flush delivers, and a session that
+      // dies later expires it with the sender told.
+      if (this.deps.hasLiveSession) {
+        let live = false
+        try {
+          live = await this.deps.hasLiveSession(p.req.targetNodeId)
+        } catch {
+          live = false
+        }
+        if (live) {
+          const list = this.queues.get(p.req.targetNodeId) ?? []
+          list.push(entry)
+          this.queues.set(p.req.targetNodeId, list)
+          entry.cancelTimer = this.schedule(DELIVERY_QUEUE_TTL_MS, () =>
+            void this.expire(p.req.targetNodeId, entry)
+          )
+          continue
+        }
       }
       const list = this.queues.get(p.req.targetNodeId) ?? []
       list.push(entry)

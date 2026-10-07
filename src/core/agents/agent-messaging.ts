@@ -210,6 +210,14 @@ export interface AgentMessagingDeps {
    */
   onQueuedResult?(req: QueuedDeliveryRequest, outcome: AgentMessageOutcome): void
   /**
+   * T205: a queued message really expired (its target's session died, or the probe failed). The
+   * board-log line and the trace already exist (`senderBoardLog` + `trace` above); THIS hook is
+   * the in-band leg — the shell hands the SENDER an app-authored notice from the unreachable
+   * target, over the same gates a station notice rides. Optional: a shell without it keeps the
+   * durable-only guarantee.
+   */
+  onExpiredInBand?(req: QueuedDeliveryRequest, info: { traceId: string; queuedForMs: number }): void
+  /**
    * Where a message stands on its way INTO a target's pane — the facts a station's task-outcome
    * report depends on (src/core/station-outcome-store.ts: new work handed to a station ends its
    * previous report). Emitted for every verb; the listener picks the ones it counts:
@@ -388,6 +396,7 @@ export function createDeliveryQueue(
       onExpired: (req, info) => {
         handover({ phase: 'settled', verb: String(req.verb), targetNodeId: req.targetNodeId, landed: false })
         senderBoardLog(req, 'expired')
+        deps.onExpiredInBand?.(req, info)
         deps.onQueuedResult?.(req, {
           kind: 'expired',
           traceId: info.traceId,

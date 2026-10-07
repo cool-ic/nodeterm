@@ -124,6 +124,16 @@ export function reproveOnAttach(nodeId: string, claimedProjectId: string | undef
   return true
 }
 
+/** T201 read-only view accessors: whether the durable half is wired, and who a node's durable
+ *  spawn row names (or `undefined` when there is no row). No mutation surface on purpose. */
+export function ownershipWired(): boolean {
+  return durableRows !== null
+}
+
+export function ownershipRowOwner(nodeId: string): string | undefined {
+  return durableRows?.get(nodeId)?.ownerEntryId
+}
+
 /**
  * THE FRESH-GATE, pure and pinned: may this create() record pane ownership? True ONLY for a
  * genuine fresh spawn (`fresh === true`) of a persistent node (`persistKey`) whose owner is known

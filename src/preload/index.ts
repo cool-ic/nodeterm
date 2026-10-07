@@ -920,7 +920,10 @@ const api: NodeTerminalApi = {
   sendHostChatReply: (reply) => ipcRenderer.send(IPC.hostChatReply, reply),
   agentMessage: {
     deliver: (req) => ipcRenderer.invoke(IPC.agentMessageDeliver, req),
-    deliverBoardComment: (req) => ipcRenderer.invoke(IPC.agentBoardCommentDeliver, req)
+    deliverBoardComment: (req) => ipcRenderer.invoke(IPC.agentBoardCommentDeliver, req),
+    trust: {
+      snapshot: (projectId: string) => ipcRenderer.invoke(IPC.trustSnapshot, projectId)
+    }
   },
   boardDispatch: {
     report: (entries) => {
