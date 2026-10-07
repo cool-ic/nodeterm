@@ -902,10 +902,18 @@ describe('parseControlRequest', () => {
       expect(section).toMatch(/A PERMISSION prompt[\s\S]*is never a notice/)
       // The Server Edition's ownership rule, in the same words it keeps for every verb.
       expect(section).toMatch(/stations you opened during this server run/)
-      // Fleet completion bus (T185): report-outcome wakes the opener; attach can receive it.
+      // Fleet completion bus (T185): report-outcome wakes the opener; attach can receive it —
+      // and since T187/T198/T190 the attach story is a POSITIVE one: the durable spawn record
+      // re-proves ownership when the pane comes back, so send/reply keep working and a send wakes
+      // a station that has not finished a turn. This pin used to require the words
+      // `unproven-target-owner`, i.e. it held the doc to a sentence that told agents to route
+      // around a wall those tickets had already removed (f30143af corrected the doc; the pin
+      // lagged behind it).
       expect(section).toMatch(/report-outcome --outcome succeeded\|failed/)
       expect(section).toMatch(/Succeeded and failed both fire/)
-      expect(section).toMatch(/unproven-target-owner/)
+      expect(section).toMatch(/durable spawn record re-proves[\s\S]*?keep working/)
+      expect(section).toMatch(/wakes it instead of queueing/)
+      expect(section).toMatch(/A refusal always[\s\S]*?names its reason/)
     }
   })
 
