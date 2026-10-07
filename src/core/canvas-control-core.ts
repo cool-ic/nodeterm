@@ -128,8 +128,10 @@ function stationNoticeDocLines(): string[] {
     '- A station YOU opened that runs `report-outcome --outcome succeeded|failed` also notifies you',
     '  (same framed message, same `openedBy` recipient). Succeeded and failed both fire; the note is',
     '  data inside the app-authored text. Do not poll `list` and do not use `send`/`reply` as a done',
-    '  signal. An attached opener (session restored after an app restart) can receive THIS notice;',
-    '  `send`/`reply` to that pane stay refused (`unproven-target-owner`).',
+    '  signal. An app restart does not cut the opener loose: the durable spawn record re-proves',
+    '  ownership when the pane is attached again, so `send`/`reply` keep working — and a `send` to a',
+    '  station that has not finished a turn this run wakes it instead of queueing. A refusal always',
+    '  names its reason; read it before working around anything.',
     '- Nobody opened the station through you? You are not told about it. On the Server Edition you are',
     '  told only about stations you opened during this server run, and a dead CLI (DROPPED) is noticed',
     '  only while a browser tab shows that station. `list` still marks LAST TURN ERRORED and DROPPED.'
