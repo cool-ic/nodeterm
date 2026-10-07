@@ -55,7 +55,20 @@ export type TraceKind = 'board-log' | 'memory'
 
 export type AgentMessageOutcome =
   | { kind: 'delivered'; traceId: string; traced: TraceKind; receipt: 'observed'; signal: ReceiptSignal }
-  | { kind: 'queued'; traceId: string; position: number; ttlMs: number }
+  /**
+   * `queuedBecause` is the gate that held the message, in the sender's terms; `liveWait` says the
+   * queue can probe the target's session, so a LIVE one re-arms instead of expiring (T205) and
+   * `ttlMs` is a floor for a dead session rather than a deadline. T207: a bare position and TTL
+   * told the sender nothing about why its mail was parked or when it would end.
+   */
+  | {
+      kind: 'queued'
+      traceId: string
+      position: number
+      ttlMs: number
+      queuedBecause?: string
+      liveWait?: boolean
+    }
   | { kind: 'stalled'; traceId: string; traced: TraceKind; waitedMs: number }
   | {
       kind: 'deliveredToReplacedTarget'

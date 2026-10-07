@@ -13441,7 +13441,7 @@ export function Canvas() {
           }
           if (!needsLiveCanvas(verb)) {
             const rows = storedNodeListing(projects.find((p) => p.id === route.projectId)?.nodes ?? [], useAgentStatus.getState().byId, useLaunchDelivery.getState().byId, Date.now(), useStationOutcomes.getState().byId, useStationHandovers.getState().byId)
-            const trustOf = await trustLookupForProject(route.projectId)
+            const trustOf = await trustLookupForProject([route.projectId, activeProjectId])
             reply({
               ok: true,
               result: rows,
@@ -14177,7 +14177,7 @@ export function Canvas() {
             })), st, useLaunchDelivery.getState().byId, Date.now(), useStationOutcomes.getState().byId, useStationHandovers.getState().byId)
             // T201: the read-only trust column. ONE snapshot read for the listing; a failed read
             // omits the column rather than guessing (the helper returns undefined for every node).
-            const trustOf = await trustLookupForProject(activeProjectId)
+            const trustOf = await trustLookupForProject([ctlProject?.id, activeProjectId])
             reply({ ok: true, result: list, message: controlListingText(list, trustOf) })
             return
           }
@@ -15553,11 +15553,12 @@ export function Canvas() {
               reply({ ok: false, error: 'a confirmation is already pending — try again' })
               return
             }
-            // Destructive → confirm. Replies on confirm AND cancel. The checkbox defaults to the
-            // PERSISTED per-project scope (T204): the session-only grant died with the process,
-            // which is why the same dialog kept coming back after every restart.
+            // Destructive → confirm. Replies on confirm AND cancel. The checkbox starts UNTICKED
+            // and its scope starts at the bounded app-run default, so a dialog that appears under
+            // the user's hands buys exactly what it always bought unless they tick and pick the
+            // project scope themselves (T204 added that scope; it is not the default).
             setControlWaive(false)
-            setControlWaiveScope('project')
+            setControlWaiveScope('session')
             setConfirm({
               message: `Agent "${srcTitle}" wants to send to ${args.node}:\n\n${args.text ?? ''}`,
               confirmLabel: 'Send',
@@ -15698,11 +15699,10 @@ export function Canvas() {
               reply({ ok: false, error: 'a confirmation is already pending — try again' })
               return
             }
-            // Destructive → confirm. Replies on confirm AND cancel. The checkbox defaults to the
-            // PERSISTED per-project scope (T204): the session-only grant died with the process,
-            // which is why the same dialog kept coming back after every restart.
+            // Destructive → confirm. Replies on confirm AND cancel. Same reset as the write case:
+            // nothing (tick or scope) carries over from the previous dialog.
             setControlWaive(false)
-            setControlWaiveScope('project')
+            setControlWaiveScope('session')
             setConfirm({
               message: closeMessage,
               requestedBy: srcTitle,

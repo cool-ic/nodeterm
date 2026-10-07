@@ -353,25 +353,32 @@ describe('storedNodeListing', () => {
     expect(controlListingText(rows)).toBe('term-1 [terminal] Claude — issue o/r#7\nterm-2 [terminal] Hostile')
   })
 
-  it('T201: prints the read-only trust column per agent node, and omits it without a lookup', () => {
+  it('T201/T207: prints the read-only trust column per AGENT node, and makes failures visible', () => {
     const nodes = [
       { id: 'a', kind: 'terminal', title: 'Alpha', agentId: 'claude' },
       { id: 'plain', kind: 'terminal', title: 'Shell' }
     ]
     const rows = storedNodeListing(nodes)
-    const trust = (id: string): { proven: boolean; reason: TrustReason } | undefined =>
-      id === 'a' ? { proven: true, reason: 'proven' } : undefined
-    const text = controlListingText(rows, trust)
+    const text = controlListingText(rows, {
+      lookup: (id) => (id === 'a' ? { proven: true, reason: 'proven' } : undefined)
+    })
     expect(text.split('\n')[0]).toBe('a [terminal] Alpha — AGENT STATUS UNCONFIRMED — 信任：已证明')
     // A plain terminal is not a messaging participant — no column even with a lookup.
     expect(text.split('\n')[1]).toBe('plain [terminal] Shell')
-    // No lookup (older shell, failed read) ⇒ no column at all, never a guess.
+    // No lookup (older shell) ⇒ no column at all, never a guess.
     expect(controlListingText(rows)).toBe('a [terminal] Alpha — AGENT STATUS UNCONFIRMED\nplain [terminal] Shell')
     // An unproven agent node carries its reason.
-    const unproven = controlListingText(rows, (id) =>
-      id === 'a' ? { proven: false, reason: 'no-durable-row' } : undefined
-    )
+    const unproven = controlListingText(rows, {
+      lookup: (id) => (id === 'a' ? { proven: false, reason: 'no-durable-row' } : undefined)
+    })
     expect(unproven.split('\n')[0]).toContain('未证明（无持久行')
+    // T207: an agent row absent from the snapshot says so instead of showing nothing.
+    const missing = controlListingText(rows, { lookup: () => undefined })
+    expect(missing.split('\n')[0]).toContain('信任：未证明（快照无记录）')
+    // T207: a failed read is PRINTED on agent rows — the exact gap the field test hit.
+    const failed = controlListingText(rows, { failure: 'no canvas for project "p1"' })
+    expect(failed.split('\n')[0]).toContain('信任：读取失败（no canvas for project')
+    expect(failed.split('\n')[1]).not.toContain('信任')
   })
 })
 

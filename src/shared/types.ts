@@ -4504,4 +4504,8 @@ export interface TrustSnapshot {
   /** Whether the host wired the durable ownership half at all (T198). */
   wired: boolean
   rows: TrustRow[]
+  /** T207: set when the snapshot could not be produced (no canvas for the id, a failing probe).
+   *  The renderer prints it as 「信任：读取失败（<此字段>）」 — a read that failed must never look
+   *  like a project with nothing to say. */
+  error?: string
 }

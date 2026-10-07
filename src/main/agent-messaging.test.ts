@@ -317,6 +317,31 @@ describe('renderMessageOutcome', () => {
     const r = renderMessageOutcome({ kind: 'rateLimited', retryAfterMs: 4321 })
     expect(r.error).toContain('4321')
   })
+
+  it('T207: a queued receipt says what held it and never promises a TTL the queue will not keep', () => {
+    // The field complaint: a bare "queued at position N, expires in 300000ms" reads as a bounded
+    // wait, while T205 makes a LIVE target re-arm instead of dropping the entry — so the sender
+    // waited for a deadline that never came, then saw silence. The receipt must carry the hold
+    // reason and the real end conditions.
+    const bounded = renderMessageOutcome({ kind: 'queued', traceId: 't', position: 2, ttlMs: 5000 })
+    expect(bounded.message).toContain('bytes have NOT reached the pane')
+    expect(bounded.message).toContain('position 2')
+    expect(bounded.message).toContain('5000ms')
+    expect(bounded.message).not.toMatch(/expires in/)
+
+    const live = renderMessageOutcome({
+      kind: 'queued',
+      traceId: 't',
+      position: 1,
+      ttlMs: 5000,
+      queuedBecause: 'the target is mid-turn (state: working)',
+      liveWait: true
+    })
+    expect(live.message).toContain('the target is mid-turn (state: working)')
+    expect(live.message).toContain('floor for a dead session, not a deadline')
+    expect(live.message).toContain('dropped and you are told')
+    expect(live.message).not.toMatch(/expires in/)
+  })
 })
 
 describe('notify (folded in from #98)', () => {
@@ -375,6 +400,47 @@ describe('deliver-on-idle wiring (PR 7)', () => {
     expect(outcome.kind).toBe('queued')
     expect(queue.depth('b1')).toBe(1)
     expect(deps.rec.sent).toEqual([]) // queued is NOT delivered — no bytes yet
+  })
+
+  it('T207: the queued receipt names the gate that parked it, kind by kind', async () => {
+    const { queue } = fakeQueue()
+    const busy: MirrorEntry = { state: 'working', updatedAt: 1, stateVerified: true, clientRevision: MANAGED_SCRIPT_REVISION }
+    const busyDeps = fakeDeps({ mirrorEntry: () => busy, queue })
+    const busyRun = await deliverFromControl(req(), busyDeps)
+    expect(busyRun.outcome.kind === 'queued' && busyRun.outcome.queuedBecause).toMatch(/mid-turn \(state: working\)/)
+    expect(busyRun.reply.message).toContain('mid-turn (state: working)')
+    // `fakeQueue` wires no session probe, so the receipt must use the bounded wording.
+    expect(busyRun.reply.message).not.toContain('floor for a dead session')
+
+    // The field case: a `done` the CLI merely went idle at, or a state that expired — queued
+    // (QUEUE_ON_BUSY) yet reachable, and now the reason travels with the receipt.
+    const inferred: MirrorEntry = {
+      state: 'done',
+      updatedAt: 1,
+      stateVerified: true,
+      idleInferred: true,
+      clientRevision: MANAGED_SCRIPT_REVISION
+    }
+    const inferredRun = await deliverFromControl(req(), fakeDeps({ mirrorEntry: () => inferred, queue }))
+    expect(inferredRun.outcome.kind).toBe('queued')
+    expect(inferredRun.outcome.kind === 'queued' && inferredRun.outcome.queuedBecause).toMatch(
+      /inferred from the CLI going idle/
+    )
+    expect(inferredRun.reply.message).toContain('inferred from the CLI going idle')
+  })
+
+  it('T207: with a session probe wired, the receipt says the TTL is a floor for a dead session', async () => {
+    const queue = new DeliveryQueue({
+      now: () => 0,
+      deliver: async () => ({ kind: 'delivered', traceId: 'd', traced: 'memory', receipt: 'observed', signal: 'newTurn' }),
+      trace: async () => ({ traceId: 'q', traced: 'memory' }),
+      hasLiveSession: async () => true,
+      schedule: () => () => {}
+    })
+    const busy: MirrorEntry = { state: 'working', updatedAt: 1, stateVerified: true, clientRevision: MANAGED_SCRIPT_REVISION }
+    const { outcome, reply } = await deliverFromControl(req(), fakeDeps({ mirrorEntry: () => busy, queue }))
+    expect(outcome.kind === 'queued' && outcome.liveWait).toBe(true)
+    expect(reply.message).toContain('floor for a dead session, not a deadline')
   })
 
   it('the Server Edition explicit queue tap flushes a busy send on the target idle event', async () => {

@@ -255,6 +255,9 @@ export function storedNodeListing(
       : []
     return {
       id: n.id, kind: n.kind ?? 'terminal', title: n.title ?? '',
+      // T207: does this row belong to a messaging participant? The trust column needs to know
+      // which rows may carry it (plain terminals never do).
+      ...(n.agentId ? { agent: true } : {}),
       ...(issue ? { issue } : {}),
       ...(status?.lastTurnError ? { lastTurnErrored: true } : {}),
       ...(status?.lastTurnInterrupted && !status.lastTurnError ? { lastTurnInterrupted: true } : {}),
@@ -303,32 +306,53 @@ const launchLabels = {
 } as const
 
 /**
- * T201 (second landing): ONE main-side ledger snapshot read, returned as the per-node lookup
- * `controlListingText` prints as its 信任 column. A failed read (an older shell without the verb, an
- * IPC error) yields `undefined` — the column is then omitted for the whole listing, never guessed.
+ * T201 (second landing) + T207: the read-only trust answer for a listing, from the main-side ledger
+ * snapshot (`trust:snapshot`). T207 made this stop guessing AND stop swallowing:
+ *
+ *  - several candidate project ids are tried in order (the renderer's active id and the routed
+ *    one can differ from the id space `persistedCanvases()` reports — whichever answers with a
+ *    snapshot and no `error` wins), and
+ *  - a failure is RETURNED as `failure` instead of collapsing to `undefined`: the listing then
+ *    prints 「信任：读取失败（<原因>）」, so a broken read can never look like a project with nothing
+ *    to say.
  */
+export interface TrustLookup {
+  lookup?: (nodeId: string) => { proven: boolean; reason: TrustReason } | undefined
+  failure?: string
+}
+
 export async function trustLookupForProject(
-  projectId: string | undefined
-): Promise<((nodeId: string) => { proven: boolean; reason: TrustReason } | undefined) | undefined> {
-  if (!projectId) return undefined
-  try {
-    const snap = await window.nodeTerminal.agentMessage.trust.snapshot(projectId)
-    return (nodeId) => {
-      const row = snap.rows.find((r) => r.nodeId === nodeId)
-      return row ? { proven: row.proven, reason: row.reason } : undefined
+  projectIds: readonly (string | undefined)[]
+): Promise<TrustLookup> {
+  const tried: string[] = []
+  for (const id of projectIds) {
+    if (!id || tried.includes(id)) continue
+    tried.push(id)
+    try {
+      const snap = await window.nodeTerminal.agentMessage.trust.snapshot(id)
+      if (snap.error) continue
+      return {
+        lookup: (nodeId) => {
+          const row = snap.rows.find((r) => r.nodeId === nodeId)
+          return row ? { proven: row.proven, reason: row.reason } : undefined
+        }
+      }
+    } catch (err) {
+      // Keep the reason: if every candidate fails, the caller needs the last error, not "undefined".
+      tried.push(`!${String(err)}`)
     }
-  } catch {
-    return undefined
   }
+  const reason = tried.find((t) => t.startsWith('!'))
+  return { failure: reason ? reason.slice(1) : `no project id matched (tried: ${tried.join(', ')})` }
 }
 
 export function controlListingText(
   rows: ReturnType<typeof storedNodeListing>,
-  /** T201 (second landing): the read-only trust answer per agent node, from the main-side ledger
-   *  snapshot (`trust:snapshot`). Absent ⇒ the column is omitted entirely (older shells, a failed
-   *  read) — the listing never guesses at trust. Plain terminals get no column: they are not
-   *  messaging participants, and the snapshot does not cover them. */
-  trust?: (nodeId: string) => { proven: boolean; reason: TrustReason } | undefined
+  /** T201/T207: the read-only trust answer per agent node. Absent ⇒ no column (an old shell).
+   *  A `failure` prints 「信任：读取失败（…）」 on every AGENT row; a successful lookup that has no
+   *  record for an agent row prints 「未证明（快照无记录）」. Plain terminals get no column: they are
+   *  not messaging participants. */
+  trust?: TrustLookup
 ): string {
   return rows.map((n) => `${n.id} [${n.kind}] ${n.title}` +
     (n.issue ? ` — issue ${n.issue}` : '') +
@@ -342,8 +366,11 @@ export function controlListingText(
     (n.lastTurnErrored ? ' — LAST TURN ERRORED' : '') +
     (n.lastTurnInterrupted ? ' — LAST TURN INTERRUPTED' : '') +
     ((): string => {
-      const t = trust?.(n.id)
-      return t ? ` — 信任：${trustReasonText(t.reason)}` : ''
+      // T201/T207: the trust column, on AGENT rows only. A failure is printed, never swallowed.
+      if (!trust || !n.agent) return ''
+      if (trust.failure) return ` — 信任：读取失败（${trust.failure}）`
+      const t = trust.lookup?.(n.id)
+      return ` — 信任：${t ? trustReasonText(t.reason) : '未证明（快照无记录）'}`
     })()
   ).join('\n')
 }

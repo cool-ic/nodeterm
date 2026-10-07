@@ -568,12 +568,26 @@ export function renderMessageOutcome(o: AgentMessageOutcome): AgentMessageReply 
           `would deliver the message twice.${trace}`,
         result: o
       }
-    case 'queued':
+    case 'queued': {
+      // T207: `queued` is the one receipt whose consequences the sender cannot see, so it must carry
+      // all three facts. (1) The bytes have NOT reached the pane — this is not a delivery. (2) WHAT
+      // held it: the gate that refused and parked it (`queuedBecause`). (3) How the wait really ends:
+      // after T205 a LIVE target re-arms its entry instead of expiring it, so `${ttlMs}ms` was a
+      // promise the queue did not keep for the case that bit us — a target busy far longer than the
+      // TTL, whose parked mail read as "expires in 5 minutes" and then simply went quiet.
+      const because = o.queuedBecause ? ` Held by: ${o.queuedBecause}.` : ''
+      const end = o.liveWait
+        ? `Delivery is on the target's next idle, and a target whose session is alive keeps the ` +
+          `entry queued until then — the ${o.ttlMs}ms TTL is a floor for a dead session, not a ` +
+          `deadline. If its session dies first, the message is dropped and you are told.`
+        : `Delivery is on the target's next idle; if that has not happened within ${o.ttlMs}ms the ` +
+          `entry is dropped and you are told.`
       return {
         ok: true,
-        message: `queued at position ${o.position}, expires in ${o.ttlMs}ms.${trace}`,
+        message: `queued at position ${o.position}: the bytes have NOT reached the pane.${because} ${end}${trace}`,
         result: o
       }
+    }
     case 'deliveredToReplacedTarget':
       return {
         ok: false,
@@ -969,7 +983,11 @@ async function deliverWithQueue(
   const queue = deps.queue
   if (queue) {
     const ident = requestIdentity(req)
-    const queued = (hibernated: boolean, ttlMs?: number): Promise<AgentMessageOutcome> =>
+    const queued = (
+      hibernated: boolean,
+      why: AgentMessageOutcome,
+      ttlMs?: number
+    ): Promise<AgentMessageOutcome> =>
       queue.enqueue(
         {
           ...req,
@@ -979,14 +997,18 @@ async function deliverWithQueue(
           sourceTitle: ident.sourceTitle,
           body: ident.body
         },
-        { hibernated, ...(ttlMs !== undefined ? { ttlMs } : {}) }
+        {
+          hibernated,
+          queuedBecause: queuedBecauseText(why),
+          ...(ttlMs !== undefined ? { ttlMs } : {})
+        }
       )
     if (QUEUE_ON_BUSY.has(outcome.kind))
       return answer(
-        await queued(false, outcome.kind === 'targetNotStarted' ? NOT_STARTED_TTL_MS : undefined)
+        await queued(false, outcome, outcome.kind === 'targetNotStarted' ? NOT_STARTED_TTL_MS : undefined)
       )
     if (req.verb === 'board-comment' && BOARD_QUEUE_ON.has(outcome.kind)) {
-      const held = await queued(false)
+      const held = await queued(false, outcome)
       // Held by the pair window, not by the target's turn: nothing will report "idle" when the
       // window ends (the target may be idle already), so the queue is re-offered on a timer.
       if (held.kind === 'queued' && outcome.kind === 'rateLimited')
@@ -996,9 +1018,35 @@ async function deliverWithQueue(
     // A hibernated target reads as `targetNotAgentPane` (its pane is a shell) — enqueue+wake ONLY
     // then, never for a real non-agent pane.
     if (outcome.kind === 'targetNotAgentPane' && deps.isHibernated?.(req.targetNodeId))
-      return answer(await queued(true))
+      return answer(await queued(true, outcome))
   }
   return answer(outcome)
+}
+
+/**
+ * T207: WHY a permitted-but-not-ready delivery was parked, in words the SENDER can act on. A bare
+ * `queued at position N` left the sender unable to tell "waiting out a 20-minute turn" from "this
+ * pane will never report idle", which is the difference between staying quiet and finding another
+ * route. Every kind that can reach `enqueue` has a word here; the default names the kind, so a new
+ * queue-on kind is readable rather than silently wordless.
+ */
+function queuedBecauseText(o: AgentMessageOutcome): string {
+  switch (o.kind) {
+    case 'targetBusy':
+      return `the target is mid-turn (state: ${o.state})`
+    case 'targetNotIdleUnknown':
+      return o.reason
+    case 'targetNotStarted':
+      return 'the node has never started — its project is not on screen, so a person must open it'
+    case 'targetStatusStale':
+      return 'the node holds a session identity but has posted no verified status yet'
+    case 'rateLimited':
+      return `the pair window is still open (${o.retryAfterMs}ms left)`
+    case 'targetNotAgentPane':
+      return 'the node is hibernated — its pane is on a shell, and it was woken for this message'
+    default:
+      return `the target is not ready (${o.kind})`
+  }
 }
 
 /**

@@ -2051,30 +2051,53 @@ app.whenReady().then(async () => {
   // for the pane THIS run, and why not when it cannot (no durable row / entry-id mismatch /
   // session gone). READ-ONLY on purpose — the view is a diagnostic, never a grant; there is no
   // action behind it, and adding one would be the vouch-button the T198 design rejected.
+  // T207: this handler NEVER throws and never returns a silently empty row set — a failure is
+  // reported through `error` (printed by the renderer as 读取失败) so a broken read can no longer
+  // masquerade as "no trust information".
   ipcMain.handle(IPC.trustSnapshot, async (_e, projectId: string) => {
-    const canvas = workspaceStore.persistedCanvases().find((c) => c.id === projectId)
     const wired = ownershipWired()
-    if (!canvas) return { projectId, wired, rows: [] } as TrustSnapshot
-    const rows: TrustRow[] = []
-    for (const node of canvas.nodes) {
-      if (!node.agentId) continue // plain terminals are not messaging participants
-      const live = await messagingDeps.hasLiveSession(node.id)
-      const proven = paneOwnerProject(node.id) === projectId
-      rows.push({
-        nodeId: node.id,
-        title: node.title ?? node.id,
-        live,
-        proven,
-        reason: trustReason({
-          live,
-          proven,
+    try {
+      const canvas = workspaceStore.persistedCanvases().find((c) => c.id === projectId)
+      if (!canvas)
+        return {
+          projectId,
           wired,
-          rowOwner: ownershipRowOwner(node.id),
-          entryId: projectId
-        })
-      })
+          rows: [],
+          error: `no canvas for project "${projectId}" (id space mismatch?)`
+        } as TrustSnapshot
+      const rows: TrustRow[] = []
+      const failures: string[] = []
+      for (const node of canvas.nodes) {
+        if (!node.agentId) continue // plain terminals are not messaging participants
+        try {
+          const live = await messagingDeps.hasLiveSession(node.id)
+          const proven = paneOwnerProject(node.id) === projectId
+          rows.push({
+            nodeId: node.id,
+            title: node.title ?? node.id,
+            live,
+            proven,
+            reason: trustReason({
+              live,
+              proven,
+              wired,
+              rowOwner: ownershipRowOwner(node.id),
+              entryId: projectId
+            })
+          })
+        } catch (err) {
+          failures.push(`${node.id}: ${String(err)}`)
+        }
+      }
+      return {
+        projectId,
+        wired,
+        rows,
+        ...(failures.length ? { error: `probe failures — ${failures.join('; ')}` } : {})
+      } as TrustSnapshot
+    } catch (err) {
+      return { projectId, wired, rows: [], error: `snapshot failed: ${String(err)}` } as TrustSnapshot
     }
-    return { projectId, wired, rows } as TrustSnapshot
   })
   // A board comment that @mentions a session (the comment composer's send). Raw ipcMain on purpose —
   // invisible to relay peers (platform-electron.ts, invariant 4c) — and guarded to the live main

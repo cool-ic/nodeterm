@@ -363,13 +363,14 @@ export class DeliveryQueue {
 
   /**
    * Enqueue a message whose initial delivery refused as `targetBusy` (or whose target is
-   * hibernated). Returns the `queued` receipt (with its position and TTL) or `queueFull` at the
-   * bound — never enqueues past capacity. A `hibernated` target is woken here, before it is idle;
-   * the wake's eventual idle event is what triggers the flush.
+   * hibernated). Returns the `queued` receipt (with its position, TTL and — since T207 — `queuedBecause`,
+   * the gate that held it, plus `liveWait` when a live target will re-arm rather than expire) or
+   * `queueFull` at the bound — never enqueues past capacity. A `hibernated` target is woken here,
+   * before it is idle; the wake's eventual idle event is what triggers the flush.
    */
   async enqueue(
     req: QueuedDeliveryRequest,
-    opts: { hibernated?: boolean; ttlMs?: number } = {}
+    opts: { hibernated?: boolean; ttlMs?: number; queuedBecause?: string } = {}
   ): Promise<
     Extract<AgentMessageOutcome, { kind: 'queued' } | { kind: 'queueFull' }>
   > {
@@ -406,7 +407,16 @@ export class DeliveryQueue {
     // event, not on the wake. A busy (non-hibernated) target needs nothing — it will go idle on its
     // own turn end.
     if (opts.hibernated) this.deps.wake?.(req.targetNodeId)
-    return { kind: 'queued', traceId: t.traceId, position: list.length, ttlMs }
+    return {
+      kind: 'queued',
+      traceId: t.traceId,
+      position: list.length,
+      ttlMs,
+      ...(opts.queuedBecause ? { queuedBecause: opts.queuedBecause } : {}),
+      // The receipt must not promise a deadline the queue will not keep: with a session probe
+      // wired, `expire` re-arms for a live target instead of dropping the entry.
+      ...(this.deps.hasLiveSession ? { liveWait: true } : {})
+    }
   }
 
   /**
