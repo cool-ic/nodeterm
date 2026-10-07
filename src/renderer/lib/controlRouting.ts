@@ -16,6 +16,7 @@
 import { canControlCanvas, type AgentId } from '@shared/agents/config'
 import { formatIssueRef } from '@shared/github-issue-ref'
 import { formatPrWaits, normalizePrWaitHold } from '@shared/pr-wait'
+import { trustReasonText, type TrustReason } from '@shared/trust-view'
 import {
   normalizeSuccessWaitHold,
   outcomeOf,
@@ -301,7 +302,34 @@ const launchLabels = {
   'blocked-failure': 'BLOCKED BY FAILURE (will not start on its own; run it with `run`)'
 } as const
 
-export function controlListingText(rows: ReturnType<typeof storedNodeListing>): string {
+/**
+ * T201 (second landing): ONE main-side ledger snapshot read, returned as the per-node lookup
+ * `controlListingText` prints as its 信任 column. A failed read (an older shell without the verb, an
+ * IPC error) yields `undefined` — the column is then omitted for the whole listing, never guessed.
+ */
+export async function trustLookupForProject(
+  projectId: string | undefined
+): Promise<((nodeId: string) => { proven: boolean; reason: TrustReason } | undefined) | undefined> {
+  if (!projectId) return undefined
+  try {
+    const snap = await window.nodeTerminal.agentMessage.trust.snapshot(projectId)
+    return (nodeId) => {
+      const row = snap.rows.find((r) => r.nodeId === nodeId)
+      return row ? { proven: row.proven, reason: row.reason } : undefined
+    }
+  } catch {
+    return undefined
+  }
+}
+
+export function controlListingText(
+  rows: ReturnType<typeof storedNodeListing>,
+  /** T201 (second landing): the read-only trust answer per agent node, from the main-side ledger
+   *  snapshot (`trust:snapshot`). Absent ⇒ the column is omitted entirely (older shells, a failed
+   *  read) — the listing never guesses at trust. Plain terminals get no column: they are not
+   *  messaging participants, and the snapshot does not cover them. */
+  trust?: (nodeId: string) => { proven: boolean; reason: TrustReason } | undefined
+): string {
   return rows.map((n) => `${n.id} [${n.kind}] ${n.title}` +
     (n.issue ? ` — issue ${n.issue}` : '') +
     (n.launchState ? ` — ${launchLabels[n.launchState]}` : '') +
@@ -312,6 +340,10 @@ export function controlListingText(rows: ReturnType<typeof storedNodeListing>): 
     (n.outcome ? ` — REPORTED ${n.outcome === 'succeeded' ? 'SUCCESS' : 'FAILURE'}${n.outcomeNote ? ` ("${n.outcomeNote}")` : ''}` : '') +
     (n.outcomeSuperseded ? ' (before new work queued for it; not counted until it reports again)' : '') +
     (n.lastTurnErrored ? ' — LAST TURN ERRORED' : '') +
-    (n.lastTurnInterrupted ? ' — LAST TURN INTERRUPTED' : '')
+    (n.lastTurnInterrupted ? ' — LAST TURN INTERRUPTED' : '') +
+    ((): string => {
+      const t = trust?.(n.id)
+      return t ? ` — 信任：${trustReasonText(t.reason)}` : ''
+    })()
   ).join('\n')
 }

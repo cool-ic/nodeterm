@@ -60,3 +60,21 @@ export function targetsProven(
     targetIds.every((id) => rows.find((r) => r.nodeId === id)?.proven === true)
   )
 }
+
+/** The `list` column's words (T201's second landing): one short line per reason. */
+export function trustReasonText(reason: TrustReason): string {
+  switch (reason) {
+    case 'proven':
+      return '已证明'
+    case 'session-gone':
+      return '未证明（会话已亡）'
+    case 'no-durable-row':
+      return '未证明（无持久行：attach 还原且本机无 spawn 记录）'
+    case 'entry-id-mismatch':
+      return '未证明（entry id 不匹配：持久行属别的项目）'
+    case 'reproof-pending':
+      return '未证明（待再证明：重开项目即恢复）'
+    case 'ownership-unwired':
+      return '未证明（宿主未接持久账本）'
+  }
+}

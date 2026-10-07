@@ -239,7 +239,6 @@ import { ConflictBar } from '../components/ConflictBar'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { CapabilityNotice } from '../components/CapabilityNotice'
 import { ClosedTranscriptDialog } from '../components/ClosedTranscriptDialog'
-import { TrustViewDialog } from '../components/TrustViewDialog'
 import { SetupConsentDialog } from '../components/SetupConsentDialog'
 import { ConsentNotice } from '../remote/ConsentNotice'
 import { approvePhoneWithFeedback } from '../lib/phone-approval'
@@ -341,6 +340,7 @@ import {
   sourceIsControlCapable,
   storedNodeListing,
   controlListingText,
+  trustLookupForProject,
   answerBrowserResolve,
   type BrowserResolveProject
 } from '../lib/controlRouting'
@@ -1658,8 +1658,6 @@ export function Canvas() {
   // The closed-session entry whose transcript is on screen (issue #531), or null. A SNAPSHOT of
   // the ledger row, not a reference into the store: reading it needs only the pointer it carries.
   const [closedTranscript, setClosedTranscript] = useState<ClosedSessionEntry | null>(null)
-  // T201: the read-only trust view. Opened from the command palette; a diagnostic, no actions.
-  const [trustViewOpen, setTrustViewOpen] = useState(false)
   // Node to center once its project finishes loading (cross-project notification click).
   const pendingFocusRef = useRef<string | null>(null)
   // "Open recent": a conversation to resume once the project it belongs to is on the canvas.
@@ -13443,10 +13441,11 @@ export function Canvas() {
           }
           if (!needsLiveCanvas(verb)) {
             const rows = storedNodeListing(projects.find((p) => p.id === route.projectId)?.nodes ?? [], useAgentStatus.getState().byId, useLaunchDelivery.getState().byId, Date.now(), useStationOutcomes.getState().byId, useStationHandovers.getState().byId)
+            const trustOf = await trustLookupForProject(route.projectId)
             reply({
               ok: true,
               result: rows,
-              message: controlListingText(rows)
+              message: controlListingText(rows, trustOf)
             })
             return
           }
@@ -14176,7 +14175,10 @@ export function Canvas() {
               pendingLaunch: n.data.pendingLaunch, agentId: n.data.agentId as string | undefined,
               issueRef: n.data.issueRef
             })), st, useLaunchDelivery.getState().byId, Date.now(), useStationOutcomes.getState().byId, useStationHandovers.getState().byId)
-            reply({ ok: true, result: list, message: controlListingText(list) })
+            // T201: the read-only trust column. ONE snapshot read for the listing; a failed read
+            // omits the column rather than guessing (the helper returns undefined for every node).
+            const trustOf = await trustLookupForProject(activeProjectId)
+            reply({ ok: true, result: list, message: controlListingText(list, trustOf) })
             return
           }
           case 'open-terminal': {
@@ -19145,16 +19147,7 @@ export function Canvas() {
           onOpenFile={openProjectFile}
           onRevealFile={revealProjectFile}
           onQueryChange={onPaletteQuery}
-          extraCommands={[
-            ...transcriptCommands,
-            {
-              id: 'trust-view',
-              label: '查看信任关系（只读）',
-              hint: '各幸存节点本轮的投递可达性',
-              section: 'Project',
-              run: () => setTrustViewOpen(true)
-            }
-          ]}
+          extraCommands={transcriptCommands}
           onClose={() => {
             setPaletteOpen(false)
             setTranscriptHits([])
@@ -19313,10 +19306,6 @@ export function Canvas() {
           (issue #531 — closing a node used to make its finished work unverifiable). */}
       {closedTranscript && (
         <ClosedTranscriptDialog entry={closedTranscript} onClose={() => setClosedTranscript(null)} />
-      )}
-
-      {trustViewOpen && (
-        <TrustViewDialog projectId={activeProjectId ?? ''} onClose={() => setTrustViewOpen(false)} />
       )}
 
       {/* The trust gate for a git-shared setup/archive script, mounted ONCE for the whole app on

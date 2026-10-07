@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import type { TrustReason } from '@shared/trust-view'
 import {
   routeControlSource,
   needsLiveCanvas,
@@ -350,6 +351,27 @@ describe('storedNodeListing', () => {
     expect(rows[0]).toMatchObject({ issue: 'o/r#7' })
     expect(rows[1]).not.toHaveProperty('issue')
     expect(controlListingText(rows)).toBe('term-1 [terminal] Claude — issue o/r#7\nterm-2 [terminal] Hostile')
+  })
+
+  it('T201: prints the read-only trust column per agent node, and omits it without a lookup', () => {
+    const nodes = [
+      { id: 'a', kind: 'terminal', title: 'Alpha', agentId: 'claude' },
+      { id: 'plain', kind: 'terminal', title: 'Shell' }
+    ]
+    const rows = storedNodeListing(nodes)
+    const trust = (id: string): { proven: boolean; reason: TrustReason } | undefined =>
+      id === 'a' ? { proven: true, reason: 'proven' } : undefined
+    const text = controlListingText(rows, trust)
+    expect(text.split('\n')[0]).toBe('a [terminal] Alpha — AGENT STATUS UNCONFIRMED — 信任：已证明')
+    // A plain terminal is not a messaging participant — no column even with a lookup.
+    expect(text.split('\n')[1]).toBe('plain [terminal] Shell')
+    // No lookup (older shell, failed read) ⇒ no column at all, never a guess.
+    expect(controlListingText(rows)).toBe('a [terminal] Alpha — AGENT STATUS UNCONFIRMED\nplain [terminal] Shell')
+    // An unproven agent node carries its reason.
+    const unproven = controlListingText(rows, (id) =>
+      id === 'a' ? { proven: false, reason: 'no-durable-row' } : undefined
+    )
+    expect(unproven.split('\n')[0]).toContain('未证明（无持久行')
   })
 })
 
