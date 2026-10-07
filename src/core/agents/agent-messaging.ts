@@ -58,10 +58,13 @@ import {
 } from '../../shared/board-comment'
 import {
   DeliveryQueue,
+  EXPIRY_REASON_TEXT,
   QUEUE_PERSIST_TTL_MAX,
   type DeliveryQueueDeps,
   type PersistedQueueEntry,
-  type QueuedDeliveryRequest
+  type QueueExpiryReason,
+  type QueuedDeliveryRequest,
+  type SessionLiveness
 } from './delivery-queue'
 import type { DurableFactFile } from '../durable-state'
 import { randomUUID } from 'crypto'
@@ -126,13 +129,18 @@ export interface AgentMessagingDeps {
   sendEnvelope(nodeId: string, envelope: string, expected?: PaneOwner): Promise<boolean>
   envelopePasteReady?(nodeId: string): Promise<boolean>
   /**
-   * Does a session exist for this node at all — attached in this process OR held by a backend
-   * after its client was released (`PtyManager.sessionExists`)? The delivery's `targetLive` fact.
-   * A probe that could not answer must answer true: only confirmed absence is `targetGone`, which
-   * is terminal and never queued. Asking only for an ATTACHED client told orchestrators that a
-   * parked or offscreen-released agent was gone while its session kept running.
+   * What the host can say about this node's session — attached in this process OR held by a backend
+   * after its client was released (`PtyManager.sessionLiveness`)? Three states, because two were
+   * not enough (T207b): reading it as a boolean folded "the probe could not answer" into "the
+   * session is gone", which turned a live pane's queued message into a dead letter and would make
+   * `targetGone` terminal for a pane that was merely unregistered.
+   *
+   * The `targetLive` fact is `liveness !== 'gone'` — unchanged for a positive answer and for an
+   * uncertain one, since only CONFIRMED absence may gate as gone. Asking only for an ATTACHED
+   * client told orchestrators that a parked or offscreen-released agent was gone while its session
+   * kept running, which is the same mistake one fold further along.
    */
-  hasLiveSession(nodeId: string): boolean | Promise<boolean>
+  hasLiveSession(nodeId: string): SessionLiveness | Promise<SessionLiveness>
   mirrorEntry?(nodeId: string): MirrorEntry | undefined
   /** The main-process projects store (`workspaceStore.persistedCanvases()` on the desktop). */
   projects(): readonly { id: string; nodes: readonly MessagingStoredNode[] }[]
@@ -210,13 +218,17 @@ export interface AgentMessagingDeps {
    */
   onQueuedResult?(req: QueuedDeliveryRequest, outcome: AgentMessageOutcome): void
   /**
-   * T205: a queued message really expired (its target's session died, or the probe failed). The
-   * board-log line and the trace already exist (`senderBoardLog` + `trace` above); THIS hook is
-   * the in-band leg — the shell hands the SENDER an app-authored notice from the unreachable
-   * target, over the same gates a station notice rides. Optional: a shell without it keeps the
-   * durable-only guarantee.
+   * T205: a queued message really expired (its target's session died, or the host could not confirm
+   * it). The board-log line and the trace already exist (`senderBoardLog` + `trace` above); THIS
+   * hook is the in-band leg — the shell hands the SENDER an app-authored notice from the
+   * unreachable target, over the same gates a station notice rides. `reason` says which of the two
+   * it was, so the notice can report uncertainty as uncertainty (T207b). Optional: a shell without
+   * it keeps the durable-only guarantee.
    */
-  onExpiredInBand?(req: QueuedDeliveryRequest, info: { traceId: string; queuedForMs: number }): void
+  onExpiredInBand?(
+    req: QueuedDeliveryRequest,
+    info: { traceId: string; queuedForMs: number; reason: QueueExpiryReason }
+  ): void
   /**
    * Where a message stands on its way INTO a target's pane — the facts a station's task-outcome
    * report depends on (src/core/station-outcome-store.ts: new work handed to a station ends its
@@ -400,7 +412,8 @@ export function createDeliveryQueue(
         deps.onQueuedResult?.(req, {
           kind: 'expired',
           traceId: info.traceId,
-          queuedForMs: info.queuedForMs
+          queuedForMs: info.queuedForMs,
+          reason: info.reason
         })
       },
       onFlushed: (req, outcome) => {
@@ -415,6 +428,15 @@ export function createDeliveryQueue(
       },
       // Injected so a test pins TTL expiry deterministically; production uses the default setTimeout.
       ...(opts.schedule ? { schedule: opts.schedule } : {}),
+      // T205's probe, FORWARDED (T207b). This object is built field by field, and `hasLiveSession`
+      // was added to `AgentMessagingDeps` in T205 without being added here — so every shell handed
+      // the queue a deps object whose probe was undefined, both re-arm paths (a live target's TTL,
+      // a lapsed entry at restore) were dead code, and a queued message to a pane that was alive
+      // expired on schedule and got a dead letter saying its session was gone. The unit tests
+      // construct the queue with the probe, so only the FACTORY was untested — same shape as the
+      // T187 self-check that grepped its own build output. `agent-messaging.queue-wiring.test.ts`
+      // now drives the factory for exactly this field.
+      sessionLiveness: (id: string) => Promise.resolve(deps.hasLiveSession(id)),
       ...(opts.durable ? { persist: (entries: PersistedQueueEntry[]) => opts.durable?.save(entries) } : {}),
       // Which conversation a message was queued for — compared when a RESTORED entry flushes.
       bindingOf: (id) => {
@@ -597,12 +619,17 @@ export function renderMessageOutcome(o: AgentMessageOutcome): AgentMessageReply 
           `recorded. ${advice}${trace}`,
         result: o
       }
-    case 'expired':
+    case 'expired': {
+      // T207b: the reason rides the receipt, so the sentence a caller acts on distinguishes "its
+      // session is gone" from "I could not confirm its session" — the two were one sentence before,
+      // and that sentence announced a death the queue had not established.
+      const why = o.reason ? ` ${EXPIRY_REASON_TEXT[o.reason]}.` : ''
       return {
         ok: false,
-        error: `expired: the message waited ${o.queuedForMs}ms queued and was dropped. ${advice}${trace}`,
+        error: `expired: the message waited ${o.queuedForMs}ms queued and was dropped.${why} ${advice}${trace}`,
         result: o
       }
+    }
     case 'rateLimited':
       return {
         ok: false,
@@ -768,7 +795,10 @@ export async function runDelivery(
       // `targetNotStarted`, which the queue holds, and the flush re-runs this whole chain against
       // the pane the spawn will have proven. Only for NO owner and NO session — a live pane whose
       // owner is unproven or disputed stays refused, which is the security property this gate is.
-      const live = projectId ? await deps.hasLiveSession(req.targetNodeId) : false
+      // T207b: `live` here means a POSITIVE answer. Everything it gates is either a wait
+      // (`targetNotStarted`, which the queue holds) or a trust exception that must fail closed
+      // (`unproven-target-owner`), so an `unknown` session is not permission for either.
+      const live = projectId ? (await deps.hasLiveSession(req.targetNodeId)) === 'live' : false
       if (projectId && !owner && deps.heldLaunch?.(projectId, req.targetNodeId) && !live) {
         if (!deps.messagingEnabled(projectId)) notPermitted = 'switch-off'
         else return { kind: 'targetNotStarted' }
@@ -892,7 +922,10 @@ export async function runDelivery(
         targetIsRemote: deps.isRemoteNode(req.targetNodeId),
         notPermitted,
         retryAfterMs,
-        targetLive: await deps.hasLiveSession(req.targetNodeId),
+        // T207b: only CONFIRMED absence is gone. A probe that could not answer leaves the target
+        // live for this fact, exactly as the boolean contract said before the tri-state made
+        // "confirmed" expressible instead of assumed.
+        targetLive: (await deps.hasLiveSession(req.targetNodeId)) !== 'gone',
         // T190: the recorded opener may WAKE its own station — a live attach-restored pane never
         // posts its first hook until something types into it, so the queue's flush trigger never
         // fires and a 5-minute TTL would silently eat every opener dispatch after a restart. Same

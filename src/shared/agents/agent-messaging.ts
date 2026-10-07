@@ -38,6 +38,22 @@ export const STATION_NOTICE_VERB = 'station-notice' as const
 /** Every verb the delivery service runs — the control verbs plus the app's own notice. */
 export type DeliveryVerb = AgentMessageVerb | typeof STATION_NOTICE_VERB
 
+/**
+ * What a host can say about a target's session right now (T207b). Shared because two projects name
+ * it: the main-side delivery/queue code that asks, and `TrustRow` (an IPC shape the renderer reads).
+ *
+ *   - `live`    — a positive answer: a recorded session, or a backend that found it.
+ *   - `gone`    — the host ASKED, and the answer was that nothing is there. Only this licenses the
+ *                 word "gone" on any sender-facing surface.
+ *   - `unknown` — could not ask, or could not understand the answer (no tmux to ask by name, a
+ *                 spawn failure, a timeout, no probe wired at all).
+ *
+ * Three states, not a boolean: the boolean version folded `unknown` into `gone`, which made a dead
+ * letter announce the death of a pane whose tmux session was alive and would have printed 会话已亡
+ * in the trust column for it.
+ */
+export type SessionLiveness = 'live' | 'gone' | 'unknown'
+
 /** A delivery as the SERVICE sees it: the IPC request, or an app-composed notice. */
 export interface AgentMessageDeliveryInput extends Omit<AgentMessageDeliverRequest, 'verb'> {
   verb: DeliveryVerb

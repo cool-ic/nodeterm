@@ -4492,8 +4492,10 @@ export interface NodeTerminalApi {
 export interface TrustRow {
   nodeId: string
   title: string
-  /** The pane has a live tmux session this run. */
-  live: boolean
+  /** T207b: what the host could say about the pane's session — `live`, `gone`, or `unknown` when
+   *  it could not ask. A boolean here folded the last two together, which is how this column came
+   *  to print 「未证明（会话已亡）」 for a pane that was alive. */
+  liveness: import('./agents/agent-messaging').SessionLiveness
   /** The runtime ledger names the viewing project as this pane's owner. */
   proven: boolean
   reason: import('./trust-view').TrustReason

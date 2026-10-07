@@ -23,13 +23,17 @@
 export type TrustReason =
   | 'proven'
   | 'session-gone'
+  | 'session-unconfirmed'
   | 'no-durable-row'
   | 'entry-id-mismatch'
   | 'reproof-pending'
   | 'ownership-unwired'
 
 export function trustReason(input: {
-  live: boolean
+  /** T207b: a tri-state, because the host can be unable to tell. A boolean here made "no session
+   *  found" and "could not ask" the same answer, and this column then printed 会话已亡 for a pane
+   *  whose tmux session was alive — the same false death the dead letter used to announce. */
+  liveness: 'live' | 'gone' | 'unknown'
   proven: boolean
   wired: boolean
   /** The durable spawn row's owner entry id for this node, when one exists. */
@@ -37,7 +41,9 @@ export function trustReason(input: {
   /** The viewing project's machine-local registry entry id. */
   entryId: string
 }): TrustReason {
-  if (!input.live) return 'session-gone'
+  if (input.liveness === 'gone') return 'session-gone'
+  // NOT an absence, and not a vouch either: the reach is unknowable until the host can be asked.
+  if (input.liveness === 'unknown') return 'session-unconfirmed'
   if (input.proven) return 'proven'
   if (!input.wired) return 'ownership-unwired'
   if (!input.rowOwner) return 'no-durable-row'
@@ -68,6 +74,8 @@ export function trustReasonText(reason: TrustReason): string {
       return '已证明'
     case 'session-gone':
       return '未证明（会话已亡）'
+    case 'session-unconfirmed':
+      return '未证明（无法确认会话是否还在）'
     case 'no-durable-row':
       return '未证明（无持久行：attach 还原且本机无 spawn 记录）'
     case 'entry-id-mismatch':

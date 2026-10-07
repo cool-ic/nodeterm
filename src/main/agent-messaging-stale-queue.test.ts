@@ -21,7 +21,7 @@ const deps = (): AgentMessagingDeps => {
   return {
     paneOwner: async () => ({ tty: '/dev/pts/9', panePid: 1, paneId: '%1', command: 'claude', argv: ['claude'], pids: [2] }),
     sendEnvelope: async () => true,
-    hasLiveSession: () => true,
+    hasLiveSession: () => 'live',
     // Never seen: no hook has arrived from the fresh session yet.
     mirrorEntry: () => undefined,
     projects,

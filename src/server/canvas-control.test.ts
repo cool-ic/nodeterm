@@ -162,7 +162,9 @@ describe('initServerCanvasControl', () => {
       destroySession: vi.fn(async () => undefined),
       paneOwner,
       sendEnvelope,
+      // PtyManager's own boolean, plus the tri-state the messaging layer reads (T207b).
       hasLiveSession: () => true,
+      sessionLiveness: async () => 'live',
       sessionExists: async () => true
     } as unknown as PtyManager
     const settings = (): Settings => ({ ...DEFAULT_SETTINGS })
@@ -320,7 +322,9 @@ describe('initServerCanvasControl', () => {
         pids: [200]
       })),
       sendEnvelope: legacySendEnvelope,
+      // PtyManager's own boolean, plus the tri-state the messaging layer reads (T207b).
       hasLiveSession: () => true,
+      sessionLiveness: async () => 'live',
       sessionExists: async () => true
     } as unknown as PtyManager
 
@@ -413,7 +417,9 @@ describe('initServerCanvasControl', () => {
       destroySession: vi.fn(async () => undefined),
       paneOwner: vi.fn(async () => null),
       sendEnvelope: vi.fn(async () => true),
+      // PtyManager's own boolean, plus the tri-state the messaging layer reads (T207b).
       hasLiveSession: () => true,
+      sessionLiveness: async () => 'live',
       sessionExists: async () => true
     } as unknown as PtyManager
 

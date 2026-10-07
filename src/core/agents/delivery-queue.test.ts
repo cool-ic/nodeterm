@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   DeliveryQueue,
   DELIVERY_QUEUE_CAPACITY,
   DELIVERY_QUEUE_TTL_MS,
   type DeliveryQueueDeps,
+  type QueueExpiryReason,
   type QueuedDeliveryRequest,
   type CancelTimer
 } from './delivery-queue'
@@ -25,8 +26,11 @@ interface FakeTimer {
 
 function harness(over: Partial<DeliveryQueueDeps> = {}) {
   let clock = 1000
-  const traced: { outcome: string; sourceNodeId: string; targetNodeId: string }[] = []
-  const expired: { req: QueuedDeliveryRequest; info: { traceId: string; queuedForMs: number } }[] = []
+  const traced: { outcome: string; sourceNodeId: string; targetNodeId: string; reason?: string }[] = []
+  const expired: {
+    req: QueuedDeliveryRequest
+    info: { traceId: string; queuedForMs: number; reason: QueueExpiryReason }
+  }[] = []
   const flushed: { req: QueuedDeliveryRequest; outcome: AgentMessageOutcome }[] = []
   const woken: string[] = []
   const timers: FakeTimer[] = []
@@ -40,7 +44,12 @@ function harness(over: Partial<DeliveryQueueDeps> = {}) {
       return nextOutcome
     },
     trace: async (input) => {
-      traced.push({ outcome: input.outcome, sourceNodeId: input.sourceNodeId, targetNodeId: input.targetNodeId })
+      traced.push({
+        outcome: input.outcome,
+        sourceNodeId: input.sourceNodeId,
+        targetNodeId: input.targetNodeId,
+        ...(input.reason ? { reason: input.reason } : {})
+      })
       return { traceId: `trace-${traced.length}`, traced: 'memory' }
     },
     wake: (id) => woken.push(id),
@@ -195,7 +204,7 @@ describe('DeliveryQueue', () => {
 
   // ── T205: a LIVE target never lets its entries expire ────────────────────────────────────────
   it('a TTL lapse on a LIVE target re-arms instead of expiring (a busy turn may outlive the TTL)', async () => {
-    const h = harness({ hasLiveSession: async () => true })
+    const h = harness({ sessionLiveness: async () => 'live' })
     const q = new DeliveryQueue(h.deps, { ttlMs: 1000 })
     await q.enqueue(req())
     h.setClock(1000 + 1000)
@@ -210,21 +219,37 @@ describe('DeliveryQueue', () => {
     expect(h.traced.map((t) => t.outcome)).not.toContain('expired')
   })
 
-  it('a TTL lapse on a DEAD target expires loudly (dead-letter unchanged)', async () => {
-    const h = harness({ hasLiveSession: async () => false })
+  it('a TTL lapse on a GONE target expires loudly and SAYS the session is gone', async () => {
+    const h = harness({ sessionLiveness: async () => 'gone' })
     const q = new DeliveryQueue(h.deps, { ttlMs: 1000 })
     await q.enqueue(req())
     h.setClock(1000 + 1000)
     h.fireLatestTimer()
-    await Promise.resolve()
-    await Promise.resolve()
+    // The probe adds a microtask turn to the expiry path; wait on the effect, not on a tick count.
+    await vi.waitFor(() => expect(h.expired).toHaveLength(1))
     expect(q.depth('dst')).toBe(0)
-    expect(h.expired).toHaveLength(1)
+    expect(h.expired[0].info.reason).toBe('session-gone')
   })
 
-  it('a probe that THROWS fails closed toward expiry (today’s behavior, never a pin)', async () => {
+  // ── T207b: "could not ask" is not "gone" ─────────────────────────────────────────────────────
+  it('an UNANSWERABLE probe expires as UNCERTAIN — never as a death', async () => {
+    // The field case: a hand-resumed pane, alive in tmux, absent from this process's registry.
+    // The old boolean folded that into "the session is gone" and the dead letter said so.
+    const h = harness({ sessionLiveness: async () => 'unknown' })
+    const q = new DeliveryQueue(h.deps, { ttlMs: 1000 })
+    await q.enqueue(req())
+    h.setClock(1000 + 1000)
+    h.fireLatestTimer()
+    await vi.waitFor(() => expect(h.expired).toHaveLength(1))
+    expect(h.expired[0].info.reason).toBe('session-unknown')
+    // The durable line carries it too, in words: the sender reads that one after a reload.
+    const expired = h.traced.find((t) => t.outcome === 'expired')
+    expect(expired?.reason).toContain('could not confirm')
+  })
+
+  it('a probe that THROWS is uncertainty, not a death — the sender is told which', async () => {
     const h = harness({
-      hasLiveSession: async () => {
+      sessionLiveness: async () => {
         throw new Error('pty gone')
       }
     })
@@ -232,10 +257,19 @@ describe('DeliveryQueue', () => {
     await q.enqueue(req())
     h.setClock(1000 + 1000)
     h.fireLatestTimer()
-    await Promise.resolve()
-    await Promise.resolve()
+    await vi.waitFor(() => expect(h.expired).toHaveLength(1))
     expect(q.depth('dst')).toBe(0)
-    expect(h.expired).toHaveLength(1)
+    expect(h.expired[0].info.reason).toBe('session-unknown')
+  })
+
+  it('NO probe wired at all is uncertainty too (the receipt promises no deadline it cannot keep)', async () => {
+    const h = harness({})
+    const q = new DeliveryQueue(h.deps, { ttlMs: 1000 })
+    await q.enqueue(req())
+    h.setClock(1000 + 1000)
+    h.fireLatestTimer()
+    await vi.waitFor(() => expect(h.expired).toHaveLength(1))
+    expect(h.expired[0].info.reason).toBe('session-unknown')
   })
 
   it('an expiry timer that fires AFTER the entry already flushed is a no-op (no double drop)', async () => {

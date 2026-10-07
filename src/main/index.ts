@@ -91,7 +91,7 @@ import {
   OUTCOME_FACT
 } from '../core/station-outcome-store'
 import { DurableFactFile, flushAllDurableFactsSync } from '../core/durable-state'
-import { QUEUE_FACT } from '../core/agents/delivery-queue'
+import { EXPIRY_REASON_TEXT, QUEUE_FACT } from '../core/agents/delivery-queue'
 import {
   HANDOVER_FACT,
   StationHandoverTracker,
@@ -1968,8 +1968,10 @@ app.whenReady().then(async () => {
     paneOwner: (id) => ptyManager.paneOwner(id),
     sendEnvelope: (id, envelope, expected) => ptyManager.sendEnvelope(id, envelope, expected),
     envelopePasteReady: (id) => ptyManager.envelopePasteReady(id),
-    // Attached OR released-but-running: see AgentMessagingDeps.hasLiveSession.
-    hasLiveSession: (id) => ptyManager.sessionExists(id),
+    // Attached OR released-but-running: see AgentMessagingDeps.hasLiveSession. T207b: the
+    // tri-state, so "could not ask" is not reported as "the session is gone" (a hand-resumed pane
+    // is alive in tmux and absent from this process's registry — `unknown`, not `gone`).
+    hasLiveSession: (id) => ptyManager.sessionLiveness(id),
     projects: () => workspaceStore.persistedCanvases(),
     isRemoteNode: (id) => !!ptyManager.sshRemoteForNode(id),
     // GLOBAL CONSTRAINT 11: every delivery path is gated behind the per-project switch. The switch
@@ -2022,6 +2024,12 @@ app.whenReady().then(async () => {
   // line) — and the sender also hears it IN BAND, as an app-authored notice from the unreachable
   // target, riding the same gates a station notice does (T185/T198). Best effort: a sender that
   // cannot be reached still has the durable legs.
+  //
+  // T207b: the sentence says what the host actually knows. It used to assert "because its session
+  // is gone" for EVERY expiry, including one caused by a probe that could not answer — the field
+  // saw it announce the death of a pane whose tmux session was alive. The words come from the
+  // queue's own table (`EXPIRY_REASON_TEXT`) so this notice, the durable board line and the receipt
+  // cannot drift apart.
   messagingDeps.onExpiredInBand = (req, info) => {
     const projectId = workspaceStore
       .persistedCanvases()
@@ -2033,7 +2041,8 @@ app.whenReady().then(async () => {
         targetNodeId: req.sourceNodeId,
         body:
           `nodeterm dead-letter: your queued message to ${req.targetNodeId} expired after ` +
-          `${Math.round(info.queuedForMs / 1000)}s because its session is gone. Re-send when it is back.`,
+          `${Math.round(info.queuedForMs / 1000)}s — ${EXPIRY_REASON_TEXT[info.reason]}. ` +
+          `Nothing was typed into its pane. Check the node, then re-send.`,
         ...(projectId ? { projectId } : {})
       },
       messagingDeps
@@ -2070,15 +2079,17 @@ app.whenReady().then(async () => {
       for (const node of canvas.nodes) {
         if (!node.agentId) continue // plain terminals are not messaging participants
         try {
-          const live = await messagingDeps.hasLiveSession(node.id)
+          // T207b: the tri-state, straight into the reason — `unknown` must reach the column as
+          // uncertainty (「无法确认会话是否还在」), never as the 会话已亡 a boolean fold produced.
+          const liveness = await messagingDeps.hasLiveSession(node.id)
           const proven = paneOwnerProject(node.id) === projectId
           rows.push({
             nodeId: node.id,
             title: node.title ?? node.id,
-            live,
+            liveness,
             proven,
             reason: trustReason({
-              live,
+              liveness,
               proven,
               wired,
               rowOwner: ownershipRowOwner(node.id),

@@ -3,6 +3,7 @@ import { RETRYABLE } from './agent-message-decide'
 import type { DeliveryTraceInput } from './agent-message-trace'
 import type { DurableFactSpec } from '../durable-state'
 import { isSafeNodeId } from '../../shared/safe-id'
+import type { SessionLiveness } from '../../shared/agents/agent-messaging'
 
 /**
  * DELIVER-ON-IDLE — a bounded, per-target queue with a TTL, and never a silent drop.
@@ -136,19 +137,26 @@ export interface DeliveryQueueDeps {
    */
   wake?(nodeId: string): void
   /**
-   * Tell the SENDER a queued message expired. The trace is the durable leg (always written); this
-   * is the live leg — the shell surfaces it (a board-log line for the sender, a push). Optional so
-   * the core can be tested without a notify channel, but a production wiring that omits it turns the
-   * "never a silent drop" guarantee into "durable-only", so the desktop always supplies it.
+   * Tell the SENDER a queued message expired, and WHY. The trace is the durable leg (always
+   * written); this is the live leg — the shell surfaces it (a board-log line for the sender, a
+   * push). Optional so the core can be tested without a notify channel, but a production wiring
+   * that omits it turns the "never a silent drop" guarantee into "durable-only", so the desktop
+   * always supplies it. `reason` is required: every sender-facing sentence is built from it.
    */
-  onExpired?(req: QueuedDeliveryRequest, info: { traceId: string; queuedForMs: number }): void
+  onExpired?(
+    req: QueuedDeliveryRequest,
+    info: { traceId: string; queuedForMs: number; reason: QueueExpiryReason }
+  ): void
   /**
-   * T205: is the target's tmux session alive right now? Drives the expiry rule — a LIVE target
-   * never lets its queued entries expire (its busy turn merely outlived the TTL; the next idle
-   * flush delivers), while a dead session expires them with the sender told. Optional so the core
-   * is testable without a pty probe; unwired ⇒ expiry behaves exactly as before.
+   * T205/T207b: what the host can say about the target's session right now. Drives the expiry rule
+   * — a LIVE target never lets its queued entries expire (its busy turn merely outlived the TTL;
+   * the next idle flush delivers), while a session that is not there expires them with the sender
+   * told. THREE states, not a boolean: the boolean version folded "the probe could not answer"
+   * into "the session is gone", and a dead letter built on that fold told a sender its mail died
+   * with a session that was in fact alive. Optional so the core is testable without a pty probe;
+   * unwired ⇒ 'unknown', which reports uncertainty instead of a death.
    */
-  hasLiveSession?(nodeId: string): Promise<boolean>
+  sessionLiveness?(nodeId: string): Promise<SessionLiveness>
   /** Tell the sender how a flush ended (delivered, or refused because the world changed under it).
    *  Same optionality reasoning as `onExpired`. */
   onFlushed?(req: QueuedDeliveryRequest, outcome: AgentMessageOutcome): void
@@ -170,6 +178,37 @@ export interface DeliveryQueueDeps {
 export interface QueueBinding {
   sessionId?: string
   agentId?: string
+}
+
+/**
+ * What the host can say about a target's session right now (T205/T207b) — `live`, `gone`, or
+ * `unknown` when it could not be asked. DECLARED in the shared messaging vocabulary, because
+ * `TrustRow` is an IPC shape that names it as well; the QUEUE's rules for reading it live here.
+ *
+ * The distinction is the whole point: `unknown` is NOT `gone`, and reporting it as one is how a
+ * dead letter told a sender its message died with a session that was alive at the time.
+ */
+export type { SessionLiveness } from '../../shared/agents/agent-messaging'
+
+/** Why a queued entry ended without reaching its pane (T207b). */
+export type QueueExpiryReason =
+  /** The host asked and found no session. */
+  | 'session-gone'
+  /** The host could not say whether the session is still there. NOT a death. */
+  | 'session-unknown'
+  /** The entry came back from a restart without enough to deliver it (its body was not stored, its
+   *  verb does not survive a restart, or the target's queue was full). */
+  | 'not-restorable'
+
+/**
+ * The sender-facing words for each reason, as ONE table: the durable trace line, the in-band dead
+ * letter and the receipt all read it, so three surfaces cannot drift into three different claims
+ * about the same expiry.
+ */
+export const EXPIRY_REASON_TEXT: Record<QueueExpiryReason, string> = {
+  'session-gone': 'the target’s session is gone (the host asked, and nothing is there)',
+  'session-unknown': 'nodeterm could not confirm whether the target’s session is still there',
+  'not-restorable': 'the entry did not survive the restart with enough to deliver it'
 }
 
 interface QueueEntry {
@@ -414,8 +453,10 @@ export class DeliveryQueue {
       ttlMs,
       ...(opts.queuedBecause ? { queuedBecause: opts.queuedBecause } : {}),
       // The receipt must not promise a deadline the queue will not keep: with a session probe
-      // wired, `expire` re-arms for a live target instead of dropping the entry.
-      ...(this.deps.hasLiveSession ? { liveWait: true } : {})
+      // wired, `expire` re-arms for a live target instead of dropping the entry. (Read off
+      // `sessionLiveness`, the field the probe actually arrives in — reading a stale name here is
+      // how the receipt kept promising a deadline the queue no longer had.)
+      ...(this.deps.sessionLiveness ? { liveWait: true } : {})
     }
   }
 
@@ -499,6 +540,21 @@ export class DeliveryQueue {
    * have. Idempotent against a flush that already removed the entry (the timer can fire in the seam
    * before its cancel runs).
    */
+  /**
+   * Ask the host about the target's session, as a tri-state. An unwired probe, a throwing probe or
+   * an answer that is none of the three words is `unknown` — never `gone`. Fail-closed here means
+   * "do not claim to know", which is the opposite of the old boolean's fail-closed, and it is the
+   * fix: a probe that could not answer was being reported as a death certificate.
+   */
+  private async liveness(nodeId: string): Promise<SessionLiveness> {
+    if (!this.deps.sessionLiveness) return 'unknown'
+    try {
+      return await this.deps.sessionLiveness(nodeId)
+    } catch {
+      return 'unknown'
+    }
+  }
+
   private async expire(nodeId: string, entry: QueueEntry): Promise<void> {
     const list = this.queues.get(nodeId)
     if (!list) return
@@ -508,41 +564,43 @@ export class DeliveryQueue {
     // TTL (agents routinely run 10-20 minutes), and expiring a reachable message is the silent loss
     // this queue exists to refuse. Re-arm instead: the entry stays queued and the target's next
     // `done` flushes it. An ERRORED last turn is still a live, waitable state — the CLI sits at its
-    // prompt, the turn's own end posted a done, and typing reaches it. Only a DEAD session expires,
-    // with the sender told (the dead-letter below).
-    if (this.deps.hasLiveSession) {
-      let live = false
-      try {
-        live = await this.deps.hasLiveSession(nodeId)
-      } catch {
-        live = false // probe failed ⇒ fail closed toward expiry (today's behavior)
-      }
-      if (live) {
-        entry.cancelTimer()
-        entry.cancelTimer = this.schedule(DELIVERY_QUEUE_TTL_MS, () =>
-          void this.expire(nodeId, entry)
-        )
-        return
-      }
+    // prompt, the turn's own end posted a done, and typing reaches it. Only a session the host says
+    // is GONE expires without another wait, with the sender told (the dead-letter below).
+    //
+    // T207b: the probe's `unknown` is not `gone` — an expiry it causes still happens (nothing else
+    // can end the wait, and the message cannot be typed into a pane the host cannot find), but the
+    // sender hears "I could not confirm", never "it died".
+    const liveness = await this.liveness(nodeId)
+    if (liveness === 'live') {
+      entry.cancelTimer()
+      entry.cancelTimer = this.schedule(DELIVERY_QUEUE_TTL_MS, () =>
+        void this.expire(nodeId, entry)
+      )
+      return
     }
     list.splice(i, 1)
     if (list.length === 0) this.queues.delete(nodeId)
     entry.cancelTimer()
     this.persist()
-    await this.reportExpired(entry)
+    await this.reportExpired(entry, liveness === 'gone' ? 'session-gone' : 'session-unknown')
   }
 
-  /** Trace `expired` and tell the sender — the two legs every expiry owes. */
-  private async reportExpired(entry: QueueEntry): Promise<void> {
+  /** Trace `expired` and tell the sender — the two legs every expiry owes, `reason` included so
+   *  neither says more than the host knows. */
+  private async reportExpired(entry: QueueEntry, reason: QueueExpiryReason): Promise<void> {
     const queuedForMs = this.deps.now() - entry.enqueuedAt
     const t = await this.deps.trace({
       sourceNodeId: entry.req.sourceNodeId,
       sourceTitle: entry.req.sourceTitle,
       targetNodeId: entry.req.targetNodeId,
       outcome: 'expired',
+      // The durable line carries WHY, as words rather than a token: a reader of the board history
+      // is a person (or an agent) deciding whether to re-send, and the old line left them with the
+      // same unproven death claim this change removed from the receipts.
+      reason: EXPIRY_REASON_TEXT[reason],
       bodyChars: entry.req.body.length
     }, entry.req)
-    this.deps.onExpired?.(entry.req, { traceId: t.traceId, queuedForMs })
+    this.deps.onExpired?.(entry.req, { traceId: t.traceId, queuedForMs, reason })
   }
 
   /** Every queued entry as it is written to disk, oldest first per target. */
@@ -585,7 +643,7 @@ export class DeliveryQueue {
    */
   async restore(entries: readonly PersistedQueueEntry[]): Promise<void> {
     const now = this.deps.now()
-    const lapsed: QueueEntry[] = []
+    const lapsed: { entry: QueueEntry; reason: QueueExpiryReason }[] = []
     for (const p of entries) {
       // A clock that went backwards must not stretch the wait past one full TTL.
       const age = Math.max(0, now - p.enqueuedAt)
@@ -601,46 +659,38 @@ export class DeliveryQueue {
       }
       this.deps.onQueued?.(entry.req)
       // Capacity counts only what is really re-queued: a lapsed entry never takes a slot.
-      const deliverable =
-        remaining > 0 &&
+      const restorable =
         !p.bodyOmitted &&
         RESTORABLE_VERBS.has(String(p.req.verb)) &&
         this.depth(p.req.targetNodeId) < this.capacity
-      if (!deliverable) {
+      if (!restorable) {
         // Never inserted into the live lists: a flush running during one of the expiries below
-        // must not be able to deliver a board comment or an empty (body-omitted) entry.
-        lapsed.push(entry)
+        // must not be able to deliver a board comment or an empty (body-omitted) entry. Its end is
+        // NOT a session fact — say only what is true of the entry itself.
+        lapsed.push({ entry, reason: 'not-restorable' })
         continue
       }
-      // T205: a lapsed entry whose target is STILL ALIVE does not expire at restore — the deadline
-      // passing while the app was down (or mid-SIGKILL) must not eat a message the target can still
-      // be handed. Re-queue it with a fresh TTL; the next idle flush delivers, and a session that
-      // dies later expires it with the sender told.
-      if (this.deps.hasLiveSession) {
-        let live = false
-        try {
-          live = await this.deps.hasLiveSession(p.req.targetNodeId)
-        } catch {
-          live = false
-        }
-        if (live) {
-          const list = this.queues.get(p.req.targetNodeId) ?? []
-          list.push(entry)
-          this.queues.set(p.req.targetNodeId, list)
-          entry.cancelTimer = this.schedule(DELIVERY_QUEUE_TTL_MS, () =>
-            void this.expire(p.req.targetNodeId, entry)
-          )
-          continue
-        }
+      // T205 + T207b. The probe comes FIRST, before the deadline decides anything: the TTL running
+      // out while the app was down says NOTHING about the target's session, and the old order
+      // expired a clock-lapsed entry without asking at all — which is how a hand-resumed pane whose
+      // tmux session was alive got a dead letter saying its session was gone. A lapsed deadline on
+      // a LIVE target re-queues with a fresh TTL (its delivery path is intact); a lapsed one the
+      // host says is gone expires; a lapsed one the host cannot speak for expires AS UNCERTAIN.
+      const liveness = await this.liveness(p.req.targetNodeId)
+      if (liveness === 'live' || remaining > 0) {
+        const live = liveness === 'live'
+        const ttl = live ? DELIVERY_QUEUE_TTL_MS : remaining
+        const list = this.queues.get(p.req.targetNodeId) ?? []
+        list.push(entry)
+        this.queues.set(p.req.targetNodeId, list)
+        entry.cancelTimer = this.schedule(ttl, () => void this.expire(p.req.targetNodeId, entry))
+        continue
       }
-      const list = this.queues.get(p.req.targetNodeId) ?? []
-      list.push(entry)
-      this.queues.set(p.req.targetNodeId, list)
-      entry.cancelTimer = this.schedule(remaining, () => void this.expire(p.req.targetNodeId, entry))
+      lapsed.push({ entry, reason: liveness === 'gone' ? 'session-gone' : 'session-unknown' })
     }
     // The lapsed entries' ends are reported BEFORE the file drops them: a crash in between reports
     // one twice at the next boot, never not at all.
-    for (const entry of lapsed) await this.reportExpired(entry)
+    for (const { entry, reason } of lapsed) await this.reportExpired(entry, reason)
     this.persist()
   }
 

@@ -16,6 +16,7 @@ import {
   onMessagingAgentEvent,
   type AgentMessagingDeps
 } from './agent-messaging'
+import type { SessionLiveness } from './delivery-queue'
 import { resetMessageFlow } from './agent-message-flow'
 import { resetAgentMessageTraceForTests } from './agent-message-trace'
 import { MANAGED_SCRIPT_REVISION } from './hooks/managed-script'
@@ -75,7 +76,7 @@ function fakeDeps(over: Partial<AgentMessagingDeps> = {}): AgentMessagingDeps & 
       rec.sent.push({ nodeId, payload })
       return true
     },
-    hasLiveSession: () => true,
+    hasLiveSession: () => 'live',
     mirrorEntry: () => idle,
     projects: projectsFn,
     isRemoteNode: () => false,
@@ -439,7 +440,15 @@ describe('deliver-on-idle for a board comment', () => {
   it('an expiry lands on the comment\'s OWN board even if the pane is now owned by another project', async () => {
     let fire: (() => void) | null = null
     let owner: string | undefined = 'p1'
-    const deps = fakeDeps({ mirrorEntry: () => busy, paneOwnerProject: () => owner })
+    // T207b: the factory FORWARDS the liveness probe now, so this answer matters. A live session
+    // lets the comment queue (and would re-arm on the TTL lapse); the session dying while the
+    // comment waits is what makes the lapse terminal, which is the shape being pinned.
+    let liveness: SessionLiveness = 'live'
+    const deps = fakeDeps({
+      mirrorEntry: () => busy,
+      paneOwnerProject: () => owner,
+      hasLiveSession: () => liveness
+    })
     deps.queue = createDeliveryQueue(deps, {
       schedule: (_ms, fn) => {
         fire = fn
@@ -451,6 +460,7 @@ describe('deliver-on-idle for a board comment', () => {
     const c = comment('b1')
     expect(((await deliverBoardCommentFromUi(c, deps)).result as { kind: string }).kind).toBe('queued')
     owner = 'p2' // the session was respawned from another project while the comment waited
+    liveness = 'gone' // …and the pane that held it is gone by the time the TTL lapses
     fire!()
     await vi.waitFor(() =>
       expect(
@@ -464,7 +474,12 @@ describe('deliver-on-idle for a board comment', () => {
   it('an expiry is recorded in the comment\'s board even when the pane owner is no longer proven', async () => {
     let fire: (() => void) | null = null
     let owner: string | undefined = 'p1'
-    const deps = fakeDeps({ mirrorEntry: () => busy, paneOwnerProject: () => owner })
+    let liveness: SessionLiveness = 'live' // see the test above: live queues, gone makes the lapse terminal
+    const deps = fakeDeps({
+      mirrorEntry: () => busy,
+      paneOwnerProject: () => owner,
+      hasLiveSession: () => liveness
+    })
     deps.queue = createDeliveryQueue(deps, {
       schedule: (_ms, fn) => {
         fire = fn
@@ -476,6 +491,7 @@ describe('deliver-on-idle for a board comment', () => {
     const c = comment('b1')
     expect(((await deliverBoardCommentFromUi(c, deps)).result as { kind: string }).kind).toBe('queued')
     owner = undefined
+    liveness = 'gone'
     fire!()
     await vi.waitFor(() =>
       expect(
