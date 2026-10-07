@@ -325,12 +325,18 @@ export async function trustLookupForProject(
   projectIds: readonly (string | undefined)[]
 ): Promise<TrustLookup> {
   const tried: string[] = []
+  let lastError: string | undefined
   for (const id of projectIds) {
     if (!id || tried.includes(id)) continue
     tried.push(id)
     try {
       const snap = await window.nodeTerminal.agentMessage.trust.snapshot(id)
-      if (snap.error) continue
+      if (snap.error) {
+        // The handler answered, and told us it could not read: keep ITS words — they name the id
+        // space it was asked about, which is the clue a mismatch needs.
+        lastError = snap.error
+        continue
+      }
       return {
         lookup: (nodeId) => {
           const row = snap.rows.find((r) => r.nodeId === nodeId)
@@ -338,12 +344,14 @@ export async function trustLookupForProject(
         }
       }
     } catch (err) {
-      // Keep the reason: if every candidate fails, the caller needs the last error, not "undefined".
-      tried.push(`!${String(err)}`)
+      lastError = String(err)
     }
   }
-  const reason = tried.find((t) => t.startsWith('!'))
-  return { failure: reason ? reason.slice(1) : `no project id matched (tried: ${tried.join(', ')})` }
+  // A refusal from the handler is a real answer about the read; report it rather than the bare
+  // "nothing matched", so the reason field always names what went wrong.
+  return {
+    failure: lastError ?? `no project id matched (tried: ${tried.join(', ')})`
+  }
 }
 
 export function controlListingText(

@@ -12,6 +12,7 @@ import {
   sourceIsControlCapable,
   storedNodeListing,
   controlListingText,
+  trustLookupForProject,
   answerBrowserResolve,
   type ControlProject,
   type BrowserResolveProject
@@ -379,6 +380,62 @@ describe('storedNodeListing', () => {
     const failed = controlListingText(rows, { failure: 'no canvas for project "p1"' })
     expect(failed.split('\n')[0]).toContain('信任：读取失败（no canvas for project')
     expect(failed.split('\n')[1]).not.toContain('信任')
+  })
+
+  it('T207: the trust read tries every candidate project id and reports the reason it could not', async () => {
+    // The field failure was an id-space mismatch (the renderer's project id vs the entry id the
+    // main store reports) AND a swallow, so BOTH are pinned here: the loop must survive the wrong
+    // id, and when nothing answers it must say why rather than print nothing.
+    const calls: string[] = []
+    const stub = (answer: (id: string) => unknown): void => {
+      ;(globalThis as { window?: unknown }).window = {
+        nodeTerminal: {
+          agentMessage: {
+            trust: {
+              snapshot: async (id: string) => {
+                calls.push(id)
+                const a = answer(id)
+                if (a instanceof Error) throw a
+                return a
+              }
+            }
+          }
+        }
+      }
+    }
+    try {
+      // The first id answers "no canvas", the second answers with rows: the second wins.
+      stub((id) =>
+        id === 'stale-id'
+          ? { projectId: id, wired: true, rows: [], error: 'no canvas for project "stale-id"' }
+          : { projectId: id, wired: true, rows: [{ nodeId: 'a', proven: true, reason: 'proven' }] }
+      )
+      const ok = await trustLookupForProject(['stale-id', 'right-id'])
+      expect(calls).toEqual(['stale-id', 'right-id'])
+      expect(ok.failure).toBeUndefined()
+      expect(ok.lookup?.('a')).toEqual({ proven: true, reason: 'proven' })
+
+      // Every candidate refuses: the handler's own words survive (they name the id space asked).
+      calls.length = 0
+      stub((id) => ({ projectId: id, wired: true, rows: [], error: `no canvas for project "${id}"` }))
+      const refused = await trustLookupForProject(['stale-id', 'other-id'])
+      expect(calls).toEqual(['stale-id', 'other-id'])
+      expect(refused.lookup).toBeUndefined()
+      expect(refused.failure).toContain('no canvas for project')
+
+      // A throwing IPC leg is a failure, never a silent empty column.
+      stub(() => new Error('no handler registered for trust:snapshot'))
+      const thrown = await trustLookupForProject(['p1'])
+      expect(thrown.failure).toContain('no handler registered for trust:snapshot')
+
+      // An undefined/duplicate id list is not a failed read — it is a caller with nothing to ask,
+      // and it must still say so rather than return a lookup that answers "unknown" for everyone.
+      const none = await trustLookupForProject([undefined, undefined])
+      expect(none.lookup).toBeUndefined()
+      expect(none.failure).toContain('no project id matched')
+    } finally {
+      delete (globalThis as { window?: unknown }).window
+    }
   })
 })
 
