@@ -870,6 +870,13 @@ export async function runDelivery(
         notPermitted,
         retryAfterMs,
         targetLive: await deps.hasLiveSession(req.targetNodeId),
+        // T190: the recorded opener may WAKE its own station — a live attach-restored pane never
+        // posts its first hook until something types into it, so the queue's flush trigger never
+        // fires and a 5-minute TTL would silently eat every opener dispatch after a restart. Same
+        // trust as the T187 ownership exception (`openedByOf`, the stationRecipient rule); a
+        // station notice is app-authored and needs no wake. Verified-busy targets still queue.
+        mayWakeTarget:
+          !stationNotice && ident.sourceNodeId === deps.openedByOf?.(req.targetNodeId),
         ...(board ? { origin: 'board-comment' as const } : {})
       },
       delivery

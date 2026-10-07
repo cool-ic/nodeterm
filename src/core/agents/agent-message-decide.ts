@@ -192,6 +192,17 @@ export interface DeliveryFacts {
   /** Is the target on an SSH project? Only affects which ACTION a stale-script note names. */
   targetIsRemote?: boolean
   /**
+   * T190: the caller is the target's RECORDED OPENER (`stationRecipient`'s rule — persisted
+   * `openedBy` + visible rope + single project; the same trust level T187's ownership exception
+   * uses). When set, the two "no observation this run" refusals (`targetStatusStale`, and the
+   * restored / never-posted `targetNotIdleUnknown`) are WAIVED for this delivery: a live pane the
+   * app itself re-attached will never post its first hook until something types into it, so the
+   * opener's envelope IS the wake. Deliberately NOT waived: `targetBusy` (a VERIFIED busy turn is
+   * queued, never interrupted), `idleInferred` (the target may be sitting on an approval — typing
+   * there answers it), `stateExpired` / between-sessions (the CLI crossed a boundary mid-run).
+   */
+  mayWakeTarget?: boolean
+  /**
    * Did the target's pane request bracketed paste? Deliberately OPTIONAL and deliberately last.
    *
    * `deliverAgentMessage` probes this only AFTER the gate passes, because the probe is a second
@@ -226,13 +237,20 @@ export interface Proceed {
  *  - any `done` whose evidence was `stateVerified: false` — handled EARLIER, by the three identity
  *    refusals, because an unprovable identity is the more permanent fact.
  */
-function idleRefusal(e: MirrorEntry | undefined): AgentMessageOutcome | null {
-  if (!e) return { kind: 'targetNotIdleUnknown', reason: 'no status has ever been posted for this node' }
+function idleRefusal(e: MirrorEntry | undefined, mayWakeTarget = false): AgentMessageOutcome | null {
+  if (!e) {
+    // T190: nothing has EVER been observed for a live pane — the same restart blindness the
+    // `targetStatusStale` branch above serves. The opener's envelope wakes the node.
+    if (mayWakeTarget) return null
+    return { kind: 'targetNotIdleUnknown', reason: 'no status has ever been posted for this node' }
+  }
   if (e.restored)
-    return {
-      kind: 'targetNotIdleUnknown',
-      reason: 'the last known status was restored from disk at startup, not observed this run'
-    }
+    return mayWakeTarget
+      ? null
+      : {
+          kind: 'targetNotIdleUnknown',
+          reason: 'the last known status was restored from disk at startup, not observed this run'
+        }
   // An identity-only entry: the mirror kept the session id past EXPIRE_MS but threw the state away.
   if (e.stateExpired)
     return {
@@ -294,7 +312,7 @@ export const NO_TOKEN_FILE_NOTE =
  * `ptyManager.create` — which a phone-spawned session never touches.
  */
 function identityRefusal(
-  f: Pick<DeliveryFacts, 'target' | 'tokenFilePresent' | 'targetIsRemote'>
+  f: Pick<DeliveryFacts, 'target' | 'tokenFilePresent' | 'targetIsRemote' | 'mayWakeTarget'>
 ): AgentMessageOutcome | null {
   const e = f.target
   if (e?.stateVerified === true) return null
@@ -318,6 +336,13 @@ function identityRefusal(
   // no turn has been reported since the boundary.
   if (observed && e.state === undefined && typeof e.verifiedAt === 'number')
     return { kind: 'targetNotIdleUnknown', reason: SESSION_BOUNDARY_REASON }
+  // T190: the recorded opener waking its own station. "No verified event this run" for a LIVE pane
+  // the app itself re-attached is exactly the restart state — the queue's flush trigger (a first
+  // verified `done`) never comes for a CLI sitting idle at its prompt, so the 5-minute TTL turns
+  // every opener dispatch into a silent loss. The opener's envelope IS the wake: typing it into
+  // the pane starts the turn that posts the hook. Every other identity refusal (no token file,
+  // stale script, session boundary) stays put — those need a human or a restart, not a message.
+  if (f.mayWakeTarget) return null
   return { kind: 'targetStatusStale' }
 }
 
@@ -351,6 +376,7 @@ export function decidePreProbe(
     | 'target'
     | 'tokenFilePresent'
     | 'targetIsRemote'
+    | 'mayWakeTarget'
   >
 ): AgentMessageOutcome | null {
   if (f.notPermitted) return { kind: 'notPermitted', reason: f.notPermitted }
@@ -370,7 +396,7 @@ export function decidePreProbe(
   // ahead of anything that touches a pane. See FIRST_PAID_DECISION.
   const identity = identityRefusal(f)
   if (identity) return identity
-  return idleRefusal(f.target)
+  return idleRefusal(f.target, f.mayWakeTarget === true)
 }
 
 /**

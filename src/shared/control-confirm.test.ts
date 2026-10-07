@@ -7,11 +7,68 @@ import {
   decideControlConfirm,
   expiredDialogNotice,
   isWaivableVerb,
+  openerAutoApproved,
   pruneControlConfirmWaivers,
   sanitizeControlConfirmWaivers,
   waivedNotice
 } from './control-confirm'
 import { DESTRUCTIVE_VERBS } from './control-verbs'
+
+describe('openerAutoApproved (T191) — the default approval rides the opener rule', () => {
+  // stationRecipient only resolves an opener that is a canvas-capable AGENT node, so the caller
+  // carries an agentId — exactly what a real dispatch guarantees (`sourceIsControlCapable`).
+  const agentNode = (id: string, openedBy?: string) => ({
+    id,
+    agentId: 'claude',
+    kind: 'terminal' as const,
+    openedBy
+  })
+  const canvas = (openedByOfB: string | undefined, withRope = true) => ({
+    id: 'p1',
+    nodes: [agentNode('a1'), agentNode('b1', openedByOfB)],
+    ropes: withRope ? [{ id: 'ctrl-a1-b1', source: 'a1', target: 'b1' }] : []
+  })
+
+  it('the opener writes to / closes its OWN station without a dialog', () => {
+    expect(openerAutoApproved('write', 'a1', ['b1'], [canvas('a1')])).toBe(true)
+    expect(openerAutoApproved('close', 'a1', ['b1'], [canvas('a1')])).toBe(true)
+  })
+
+  it('a comma LIST auto-approves only when EVERY target is the caller’s', () => {
+    const two = {
+      id: 'p1',
+      nodes: [agentNode('lead'), agentNode('a1', 'lead'), agentNode('b1', 'lead')],
+      ropes: [
+        { id: 'r1', source: 'lead', target: 'a1' },
+        { id: 'r2', source: 'lead', target: 'b1' }
+      ]
+    }
+    expect(openerAutoApproved('close', 'lead', ['a1', 'b1'], [two])).toBe(true)
+    expect(openerAutoApproved('close', 'lead', ['a1', 'b2'], [two])).toBe(false)
+  })
+
+  it('no lineage, a foreign opener, or a missing rope keeps the dialog', () => {
+    expect(openerAutoApproved('write', 'a1', ['b1'], [canvas(undefined)])).toBe(false)
+    expect(openerAutoApproved('write', 'a1', ['b1'], [canvas('someone-else')])).toBe(false)
+    expect(openerAutoApproved('write', 'a1', ['b1'], [canvas('a1', false)])).toBe(false)
+  })
+
+  it('acting on the caller’s OWN pane stays a human decision', () => {
+    const self = { id: 'p1', nodes: [{ id: 'a1' }], ropes: [] }
+    expect(openerAutoApproved('write', 'a1', ['a1'], [self])).toBe(false)
+  })
+
+  it('verbs outside the waivable set never auto-approve — open-project and settings stay dialog-gated', () => {
+    expect(openerAutoApproved('open-project', 'a1', ['b1'], [canvas('a1')])).toBe(false)
+    expect(openerAutoApproved('settings', 'a1', ['b1'], [canvas('a1')])).toBe(false)
+  })
+
+  it('a hostile or absent caller id fails closed', () => {
+    expect(openerAutoApproved('write', undefined, ['b1'], [canvas('a1')])).toBe(false)
+    expect(openerAutoApproved('write', '../etc', ['b1'], [canvas('a1')])).toBe(false)
+    expect(openerAutoApproved('write', 'a1', [], [canvas('a1')])).toBe(false)
+  })
+})
 
 describe('which verbs may be waived', () => {
   it('is a strict subset of the confirm-gated set', () => {

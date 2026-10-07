@@ -22,6 +22,8 @@
 // `tsconfig.web` gives the renderer no path into `src/main` or `src/core`.
 
 import type { AgentPermissionMode } from './agents/config'
+import { isSafeNodeId } from './safe-id'
+import { stationRecipient, type StationCanvas } from './station-notice'
 
 /**
  * How long main waits for the renderer's answer to one control request
@@ -296,4 +298,33 @@ export function waivedNotice(
           ? 'confirm waived permanently'
           : 'confirm waived while the global permission mode is Bypass'
   return `${action} — ${because} (Settings → Agents).`
+}
+
+/**
+ * T191: the DEFAULT approval for a destructive control verb. An agent writing to or closing its
+ * OWN stations no longer waits for a dialog — the 2026-10-07 field failure was a `write` expiring
+ * (`expired before the user answered`) with nobody at the keyboard, which deadlocked a dispatch.
+ *
+ * The gate is the ownership bottom line, not a loosening of it: EVERY target must resolve —
+ * through the SAME `stationRecipient` rule the T185 notice and T187 send exceptions use (persisted
+ * `openedBy` + a visible rope the user can delete + single project + safe ids) — to the CALLING
+ * node. A caller that does not verifiably own the target gets the dialog exactly as before, and
+ * the verbs outside `CONFIRM_WAIVABLE_VERBS` (`open-project`, `settings`) never auto-approve:
+ * they widen the app's blast radius rather than acting inside it. Fail-visible is the caller's
+ * contract: the action is announced and board-logged as auto-approved (`control-auto-approved`),
+ * never silent.
+ */
+export function openerAutoApproved(
+  verb: string,
+  callerNodeId: string | undefined,
+  targetIds: readonly string[],
+  canvases: readonly StationCanvas[]
+): boolean {
+  if (!CONFIRM_WAIVABLE_VERBS.has(verb)) return false
+  if (!callerNodeId || !isSafeNodeId(callerNodeId) || targetIds.length === 0) return false
+  return targetIds.every(
+    (id) =>
+      id !== callerNodeId && // writing to / closing one's own pane stays a human decision
+      stationRecipient(canvases, id)?.recipientNodeId === callerNodeId
+  )
 }

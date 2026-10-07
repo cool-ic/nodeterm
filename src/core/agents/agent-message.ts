@@ -79,6 +79,10 @@ export interface DeliveryRequest {
   targetBinaries?: readonly string[] | null
   /** Is the target on an SSH project? Only changes which ACTION a stale-script refusal names. */
   targetIsRemote?: boolean
+  /** T190: the caller is the target's recorded opener (`openedByOf`, the T187/T185 trust rule) —
+   *  waives the two "no observation this run" gates so the envelope wakes the node. Computed in
+   *  runDelivery; see DeliveryFacts.mayWakeTarget for what is and is not waived. */
+  mayWakeTarget?: boolean
   /** Set by PR 5 / PR 6. Present ⇒ the cheapest possible refusal, with no round-trip at all. */
   notPermitted?: NotPermittedReason
   /** Set by PR 4's per-pair limiter. */
@@ -365,7 +369,8 @@ export async function deliverAgentMessage(
       targetLive: req.targetLive ?? true,
       target: deps.mirrorEntry(req.targetNodeId),
       tokenFilePresent: deps.tokenFilePresent(req.targetNodeId),
-      targetIsRemote: req.targetIsRemote
+      targetIsRemote: req.targetIsRemote,
+      mayWakeTarget: req.mayWakeTarget === true
     })
     if (cheap) return refuse(cheap)
 
@@ -390,7 +395,8 @@ export async function deliverAgentMessage(
       paneObserved: before?.command,
       target: deps.mirrorEntry(req.targetNodeId),
       tokenFilePresent: deps.tokenFilePresent(req.targetNodeId),
-      targetIsRemote: req.targetIsRemote
+      targetIsRemote: req.targetIsRemote,
+      mayWakeTarget: req.mayWakeTarget === true
       // `pasteAware` deliberately absent: the flag costs a second tmux round-trip and there is no
       // point paying for it to tell a rate-limited caller something it cannot act on.
     }

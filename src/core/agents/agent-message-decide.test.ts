@@ -142,6 +142,54 @@ describe('decideDelivery — one case per refusal', () => {
   })
 })
 
+describe('opener wake (T190) — the two "no observation this run" gates yield to the recorded opener', () => {
+  const restored = readyEntry({ restored: true, stateVerified: true })
+  const unverifiedEntry = (over: Partial<MirrorEntry> = {}): MirrorEntry =>
+    readyEntry({ stateVerified: false, ...over })
+
+  it('targetStatusStale is waived: the opener’s envelope wakes the attach-restored station', () => {
+    // The restart shape: token file present, entry restored from disk, no verified event this run.
+    const o = decideDelivery(ready({ target: unverifiedEntry({ restored: true }), mayWakeTarget: true }))
+    expect(o.kind).toBe('proceed')
+  })
+
+  it('a restored entry is waived through the idle gate too', () => {
+    expect(decideDelivery(ready({ target: restored, mayWakeTarget: true })).kind).toBe('proceed')
+  })
+
+  it('a node that has NEVER posted is waived as well — same restart blindness', () => {
+    expect(decideDelivery(ready({ target: undefined, mayWakeTarget: true })).kind).toBe('proceed')
+  })
+
+  it('a VERIFIED busy turn still queues — the wake never interrupts a running turn', () => {
+    const o = decideDelivery(ready({ target: readyEntry({ state: 'working' }), mayWakeTarget: true }))
+    expect(o).toEqual({ kind: 'targetBusy', state: 'working' })
+  })
+
+  it('idleInferred stays refused — the target may be sitting on an approval', () => {
+    const o = decideDelivery(
+      ready({ target: readyEntry({ idleInferred: true }), mayWakeTarget: true })
+    )
+    expect(o.kind).toBe('targetNotIdleUnknown')
+  })
+
+  it('stateExpired and between-sessions stay refused — the CLI crossed a boundary mid-run', () => {
+    expect(
+      decideDelivery(ready({ target: readyEntry({ stateExpired: true }), mayWakeTarget: true })).kind
+    ).toBe('targetNotIdleUnknown')
+    expect(
+      decideDelivery(ready({ target: readyEntry({ state: undefined }), mayWakeTarget: true })).kind
+    ).toBe('targetNotIdleUnknown')
+  })
+
+  it('without the flag the refusals are exactly as before', () => {
+    expect(decideDelivery(ready({ target: unverifiedEntry({ restored: true }) })).kind).toBe(
+      'targetStatusStale'
+    )
+    expect(decideDelivery(ready({ target: restored })).kind).toBe('targetNotIdleUnknown')
+  })
+})
+
 describe('the THREE unverified refusals — Correction C1 + Finding F2', () => {
   const unverified = (over: Partial<MirrorEntry> = {}): MirrorEntry =>
     readyEntry({ stateVerified: false, ...over })

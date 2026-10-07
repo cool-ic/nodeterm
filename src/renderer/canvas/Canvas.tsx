@@ -801,7 +801,7 @@ import {
   CONTROL_REQUEST_TIMEOUT_MS
 } from '@shared/control-confirm'
 import { useControlConfirm } from '../state/controlConfirm'
-import { controlConfirmDecision, waiveControlConfirmForProject } from '../state/controlConfirmGate'
+import { autoApproveForTargets, controlConfirmDecision, waiveControlConfirmForProject } from '../state/controlConfirmGate'
 import {
   bulkCloseMessage,
   parseCloseTargets,
@@ -15477,6 +15477,32 @@ export function Canvas() {
             // GLOBAL permission mode is Bypass)? The whole decision is the pure
             // `decideControlConfirm` — see @shared/control-confirm for why the bypass branch needs
             // both a machine-local opt-in AND a mode the user set globally.
+            // T191: the DEFAULT approval — an opener writing to its OWN station runs without a
+            // dialog. The auto-approval is fail-visible: a notice here, a durable
+            // `control-auto-approved` board-log line under the caller's card. Anything that does
+            // not resolve to the opener (no lineage, a foreign node, the caller's own pane) falls
+            // through to the waiver + dialog path below, unchanged.
+            if (autoApproveForTargets(verb, sourceNodeId, [args.node], ctlProject?.id)) {
+              setNotice({
+                kind: 'info',
+                text: `Agent "${srcTitle}" wrote to ${args.node} — auto-approved (recorded opener)`
+              })
+              void window.nodeTerminal.boardLog.append(ctlProject?.id ?? '', {
+                id: `auto-approved-${sourceNodeId}-${verb}-${Date.now()}`,
+                ts: Date.now(),
+                author: { name: 'nodeterm', color: '#8b8b8b' },
+                nodeId: sourceNodeId,
+                kind: 'event',
+                event: {
+                  type: 'control-auto-approved',
+                  from: sourceNodeId,
+                  to: args.node,
+                  title: 'write'
+                }
+              })
+              await runWrite()
+              return
+            }
             // `ctlProject?.id`, not the active project: the per-project waiver — and the
             // permission mode the bypass lock reads — belong to the project this call ACTS ON,
             // which since @shared/control-off-screen need not be the one on screen.
@@ -15597,6 +15623,34 @@ export function Canvas() {
                     ? `closed ${closeIds[0]}`
                     : `closed ${closeIds.length} nodes: ${closeIds.join(', ')}`
               })
+            }
+            // T191: the DEFAULT approval — an opener closing its OWN stations runs without a
+            // dialog (a comma LIST must resolve to the opener for EVERY id, or the dialog stays).
+            // Fail-visible: notice + durable board-log line. Anything less falls through.
+            if (autoApproveForTargets(verb, sourceNodeId, closeIds, ctlProject?.id)) {
+              const closedText =
+                closeIds.length === 1
+                  ? `node ${closeIds[0]}`
+                  : `${closeIds.length} nodes: ${closeIds.join(', ')}`
+              setNotice({
+                kind: 'info',
+                text: `Agent "${srcTitle}" closed ${closedText} — auto-approved (recorded opener)`
+              })
+              void window.nodeTerminal.boardLog.append(ctlProject?.id ?? '', {
+                id: `auto-approved-${sourceNodeId}-${verb}-${Date.now()}`,
+                ts: Date.now(),
+                author: { name: 'nodeterm', color: '#8b8b8b' },
+                nodeId: sourceNodeId,
+                kind: 'event',
+                event: {
+                  type: 'control-auto-approved',
+                  from: sourceNodeId,
+                  to: closeIds.join(','),
+                  title: 'close'
+                }
+              })
+              runClose()
+              return
             }
             // Waived? Same decision table as `write` (@shared/control-confirm).
             const closeWaiver = controlConfirmDecision(verb, ctlProject?.id)

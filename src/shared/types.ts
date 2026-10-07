@@ -943,6 +943,12 @@ export interface BoardLogEvent {
      *  `failed`), `title` = its note (one line, capped). Written by the app, never a gate: the
      *  outcome a `--after-success` wait reads lives in core's transient store, not in this file. */
     | 'station-reported'
+    /** A destructive control verb (`write`/`close`) was AUTO-APPROVED without a dialog (T191):
+     *  the caller verifiably owns every target (the `stationRecipient` opener rule), so the
+     *  action ran on the caller's own authority. Fail-visible by design — an auto-approval that
+     *  left no record would be indistinguishable from a skipped gate. `from` = the caller node
+     *  id, `to` = the comma-joined target ids, `title` = the verb. */
+    | 'control-auto-approved'
   from?: string
   to?: string
   /** Column title for column-added/deleted; card title for card-created; outcome for agent-message;

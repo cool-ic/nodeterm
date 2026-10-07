@@ -629,22 +629,23 @@ describe('station notice to an attached opener (T185)', () => {
   })
 })
 
-describe('send from the recorded opener to its attached station (T187)', () => {
-  // Same restart shape the T185 block builds: no ledger owner, a live session, no held launch.
-  // `openedByOf` is wired the way main wires it — the `stationRecipient` rule's answer.
-  const attachedWithOpener = (opener: string | undefined, over: Partial<AgentMessagingDeps> = {}) =>
-    fakeDeps({
-      paneOwnerProject: () => undefined,
-      hasLiveSession: () => true,
-      heldLaunch: () => false,
-      openedByOf: (id) => (id === 'b1' ? opener : undefined),
-      subscribeReceipts: (cb) => {
-        const t = setTimeout(() => cb({ nodeId: 'b1', newTurn: true, verified: true }), 5)
-        return () => clearTimeout(t)
-      },
-      ...over
-    })
+// Same restart shape the T185 block builds: no ledger owner, a live session, no held launch.
+// `openedByOf` is wired the way main wires it — the `stationRecipient` rule's answer. Shared by
+// the T187 (ownership exception) and T190 (wake) describes.
+const attachedWithOpener = (opener: string | undefined, over: Partial<AgentMessagingDeps> = {}) =>
+  fakeDeps({
+    paneOwnerProject: () => undefined,
+    hasLiveSession: () => true,
+    heldLaunch: () => false,
+    openedByOf: (id) => (id === 'b1' ? opener : undefined),
+    subscribeReceipts: (cb) => {
+      const t = setTimeout(() => cb({ nodeId: 'b1', newTurn: true, verified: true }), 5)
+      return () => clearTimeout(t)
+    },
+    ...over
+  })
 
+describe('send from the recorded opener to its attached station (T187)', () => {
   it('the opener keeps send after a restart, without closing the node', async () => {
     const deps = attachedWithOpener('a1')
     const { outcome, reply } = await deliverFromControl(req(), deps)
@@ -708,6 +709,58 @@ describe('send from the recorded opener to its attached station (T187)', () => {
     const deps = attachedWithOpener('a1', { messagingEnabled: () => false })
     const { outcome } = await deliverFromControl(req(), deps)
     expect(outcome).toEqual({ kind: 'notPermitted', reason: 'switch-off' })
+    expect(deps.rec.sent).toEqual([])
+  })
+})
+
+describe('the opener’s send WAKES its unconfirmed station (T190)', () => {
+  // After an app restart the mirror restores entries as unobserved (`restored: true`) — the target
+  // never posts a first hook until something types into it, so the wake exception is what turns a
+  // 5-minute silent loss into a delivery.
+  const unconfirmed = (over: Partial<MirrorEntry> = {}): MirrorEntry => ({
+    state: 'done',
+    updatedAt: 1,
+    stateVerified: true,
+    restored: true,
+    clientRevision: MANAGED_SCRIPT_REVISION,
+    ...over
+  })
+  const wakeDeps = (over: Partial<AgentMessagingDeps> = {}) =>
+    attachedWithOpener('a1', { mirrorEntry: () => unconfirmed(), ...over })
+
+  it('the opener’s send delivers to a live UNCONFIRMED station instead of queueing', async () => {
+    const deps = wakeDeps()
+    const { outcome } = await deliverFromControl(req(), deps)
+    expect(outcome.kind).toBe('delivered')
+    expect(deps.rec.sent).toHaveLength(1)
+    expect(deps.rec.sent[0].nodeId).toBe('b1')
+  })
+
+  it('a NON-opener’s send still refuses (and would queue) — the wake rides the opener trust', async () => {
+    const deps = attachedWithOpener('a1', {
+      mirrorEntry: () => unconfirmed(),
+      projects: () => [
+        {
+          id: 'p1',
+          nodes: [
+            { id: 'a1', title: 'Alpha', agentId: 'claude' },
+            { id: 'a2', title: 'Alpha-2', agentId: 'claude' },
+            { id: 'b1', title: 'Beta', agentId: 'claude' }
+          ]
+        }
+      ]
+    })
+    const { outcome } = await deliverFromControl(req({ sourceNodeId: 'a2' }), deps)
+    // Refused EARLIER than the status gate: the ownership exception (T187) is opener-only, so a
+    // same-project non-opener never even reaches the wake question.
+    expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+    expect(deps.rec.sent).toEqual([])
+  })
+
+  it('a VERIFIED busy turn is still queued, never interrupted — even for the opener', async () => {
+    const deps = wakeDeps({ mirrorEntry: () => unconfirmed({ state: 'working', restored: undefined }) })
+    const { outcome } = await deliverFromControl(req(), deps)
+    expect(outcome).toEqual({ kind: 'targetBusy', state: 'working' })
     expect(deps.rec.sent).toEqual([])
   })
 })

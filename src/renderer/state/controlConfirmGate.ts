@@ -1,6 +1,7 @@
 import {
   decideControlConfirm,
   isWaivableVerb,
+  openerAutoApproved,
   pruneControlConfirmWaivers,
   sanitizeControlConfirmWaivers,
   type ControlConfirmDecision,
@@ -96,4 +97,23 @@ export function waiveControlConfirmForProject(verb: string, projectId: string | 
 /** The sanitized persisted waivers. `settings.json` is hand-editable, so this is the ONE read. */
 export function activeControlConfirmWaivers(): ControlConfirmWaivers {
   return sanitizeControlConfirmWaivers(useSettings.getState().settings.controlConfirmWaivers)
+}
+
+/**
+ * T191: may this destructive verb run WITHOUT a dialog? The pure `openerAutoApproved` bound to the
+ * live project store — the caller must verifiably own EVERY target (the `stationRecipient` opener
+ * rule over the project the call acts on, on-canvas or off). Anything less keeps the dialog.
+ */
+export function autoApproveForTargets(
+  verb: string,
+  callerNodeId: string | undefined,
+  targetIds: readonly string[],
+  projectId?: string
+): boolean {
+  const { getProject, activeProjectId } = useProjects.getState()
+  const project = getProject(projectId ?? activeProjectId ?? '')
+  if (!project) return false
+  return openerAutoApproved(verb, callerNodeId, targetIds, [
+    { id: project.id, nodes: project.nodes, ropes: project.ropes ?? [] }
+  ])
 }
