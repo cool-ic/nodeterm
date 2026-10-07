@@ -628,3 +628,86 @@ describe('station notice to an attached opener (T185)', () => {
     expect(deps.rec.sent).toEqual([])
   })
 })
+
+describe('send from the recorded opener to its attached station (T187)', () => {
+  // Same restart shape the T185 block builds: no ledger owner, a live session, no held launch.
+  // `openedByOf` is wired the way main wires it — the `stationRecipient` rule's answer.
+  const attachedWithOpener = (opener: string | undefined, over: Partial<AgentMessagingDeps> = {}) =>
+    fakeDeps({
+      paneOwnerProject: () => undefined,
+      hasLiveSession: () => true,
+      heldLaunch: () => false,
+      openedByOf: (id) => (id === 'b1' ? opener : undefined),
+      subscribeReceipts: (cb) => {
+        const t = setTimeout(() => cb({ nodeId: 'b1', newTurn: true, verified: true }), 5)
+        return () => clearTimeout(t)
+      },
+      ...over
+    })
+
+  it('the opener keeps send after a restart, without closing the node', async () => {
+    const deps = attachedWithOpener('a1')
+    const { outcome, reply } = await deliverFromControl(req(), deps)
+    expect(outcome.kind).toBe('delivered')
+    expect(reply.ok).toBe(true)
+    expect(deps.rec.sent).toHaveLength(1)
+    expect(deps.rec.sent[0].nodeId).toBe('b1')
+  })
+
+  it('reply rides the same exception', async () => {
+    const deps = attachedWithOpener('a1')
+    const { outcome } = await deliverFromControl(req({ verb: 'reply', body: 'follow-up' }), deps)
+    expect(outcome.kind).toBe('delivered')
+  })
+
+  it('a node that is not the recorded opener is still refused', async () => {
+    // Same project (scope passes), different sender — only the opener rides the exception.
+    const deps = attachedWithOpener('a1', {
+      projects: () => [
+        {
+          id: 'p1',
+          nodes: [
+            { id: 'a1', title: 'Alpha', agentId: 'claude' },
+            { id: 'a2', title: 'Alpha-2', agentId: 'claude' },
+            { id: 'b1', title: 'Beta', agentId: 'claude' }
+          ]
+        }
+      ]
+    })
+    const { outcome } = await deliverFromControl(req({ sourceNodeId: 'a2' }), deps)
+    expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+    expect(deps.rec.sent).toEqual([])
+  })
+
+  it('no recorded opener (absent dep or no lineage) fails closed', async () => {
+    const withoutDep = attachedWithOpener(undefined)
+    const { outcome } = await deliverFromControl(req(), withoutDep)
+    expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+    // The exception is OFF entirely when the host never wired the dep (Server Edition).
+    const withoutFn = attachedWithOpener('a1', { openedByOf: undefined })
+    const viaFn = await deliverFromControl(req(), withoutFn)
+    expect(viaFn.outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+  })
+
+  it('a disputed ledger owner still refuses, even for the opener', async () => {
+    const deps = attachedWithOpener('a1', { paneOwnerProject: () => 'p-hostile' })
+    const { outcome } = await deliverFromControl(req(), deps)
+    expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
+    expect(deps.rec.sent).toEqual([])
+  })
+
+  it('a proven ledger owner takes the ordinary path, not this exception', async () => {
+    const deps = attachedWithOpener('a1', { paneOwnerProject: () => 'p1' })
+    const { outcome } = await deliverFromControl(req(), deps)
+    expect(outcome.kind).toBe('delivered')
+    // Same delivery, but via `owner === projectId` — the exception branch never ran.
+    expect(deps.rec.paneOwnerCalls).toContain('b1')
+  })
+
+  it('the project messaging switch still gates the opener’s send', async () => {
+    const deps = attachedWithOpener('a1', { messagingEnabled: () => false })
+    const { outcome } = await deliverFromControl(req(), deps)
+    expect(outcome).toEqual({ kind: 'notPermitted', reason: 'switch-off' })
+    expect(deps.rec.sent).toEqual([])
+  })
+})

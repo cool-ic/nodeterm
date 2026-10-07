@@ -155,6 +155,15 @@ export interface AgentMessagingDeps {
    */
   paneOwnerProject(nodeId: string): string | undefined
   /**
+   * T187: the target station's recorded opener, resolved by the SAME rule the T185 station notice
+   * uses (`stationRecipient`: the persisted `openedBy` node id plus its visible rope, single
+   * project, safe ids) — or `undefined` when no such opener can be proven. Desktop wires this off
+   * the persisted canvases; the Server Edition omits it (its `callerOwnsTarget` creator ledger
+   * already answers this question from process-local truth), which simply turns the exception off.
+   * Optional; absent ⇒ an attach opener's `send`/`reply` stays refused as before.
+   */
+  openedByOf?(nodeId: string): string | undefined
+  /**
    * Does THIS machine hold an undelivered launch for `nodeId` in `projectId` (`pendingLaunch`, the
    * machine-local exec overlay — never the git-shared file)? A node opened into a project that is
    * not on screen without `--run-now` is written with its launch held until that project is shown,
@@ -745,6 +754,23 @@ export async function runDelivery(
         // stay `unproven-target-owner`. A station notice's recipient was already resolved as
         // `openedBy` (+ rope); a live session is enough to type the APP-authored notice. The
         // grant is the shared canvas project's switch — never a blank cheque for send.
+        if (!deps.messagingEnabled(projectId)) notPermitted = 'switch-off'
+      } else if (
+        !stationNotice &&
+        projectId &&
+        !owner &&
+        live &&
+        deps.openedByOf?.(req.targetNodeId) === ident.sourceNodeId
+      ) {
+        // Attach opener's own station (T187): the same restart leaves the OPENER unable to hand
+        // its own station new work — the ledger can only be re-proven by a fresh spawn, whose
+        // only route (close + `open-agent --resume`) discards the node's canvas identity. The
+        // narrow opening is the SAME trust level the T185 notice exception uses: the target's
+        // persisted `openedBy` (a validated node id) plus its visible rope, resolved by the same
+        // `stationRecipient` rule — so the opener, and only the opener, may keep messaging a
+        // station it verifiably opened. A forged `project.json` would have to plant both the
+        // lineage AND the caller's verified node identity. Everyone else, and a disputed ledger
+        // owner (`owner` set but ≠ project), still fails closed below.
         if (!deps.messagingEnabled(projectId)) notPermitted = 'switch-off'
       } else notPermitted = 'unproven-target-owner'
     } else if (!deps.messagingEnabled(owner)) notPermitted = 'switch-off'

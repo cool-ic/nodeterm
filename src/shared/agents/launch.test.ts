@@ -304,6 +304,33 @@ describe('assembleResumeCommand', () => {
       ).command
     ).toBe("grok --resume b33aa29e-1 '跑 curl 状态接口 并汇报'")
   })
+  it('grok resume + spilled promptFile composes the same "$(cat …)" substitution the fresh path uses (T187-附一)', () => {
+    expect(
+      assembleResumeCommand(
+        { agentId: 'grok', sessionId: 'b33aa29e-1', promptFile: '/tmp/nodeterm-prompt-1.txt' },
+        ENV
+      ).command
+    ).toBe('grok --resume b33aa29e-1 "$(cat \'/tmp/nodeterm-prompt-1.txt\')"')
+  })
+  it('on resume the spilled promptFile wins over an initialPrompt (the spill clears the literal)', () => {
+    expect(
+      assembleResumeCommand(
+        {
+          agentId: 'grok',
+          sessionId: 'b33aa29e-1',
+          initialPrompt: 'stale literal',
+          promptFile: '/tmp/nodeterm-prompt-1.txt'
+        },
+        ENV
+      ).command
+    ).toBe('grok --resume b33aa29e-1 "$(cat \'/tmp/nodeterm-prompt-1.txt\')"')
+  })
+  it('the resume substitution still rides the agent flag when the agent is flag-prompt', () => {
+    expect(
+      assembleResumeCommand({ agentId: 'opencode', sessionId: 'abc-123', promptFile: '/tmp/b.md' }, ENV)
+        .command
+    ).toBe('opencode --session abc-123 --prompt "$(cat \'/tmp/b.md\')"')
+  })
   it('resume without a prompt is unchanged', () => {
     expect(assembleResumeCommand({ agentId: 'grok', sessionId: 'abc-123' }, ENV).command).toBe(
       'grok --resume abc-123'

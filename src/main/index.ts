@@ -1979,6 +1979,11 @@ app.whenReady().then(async () => {
     // (core/agents/pane-ownership.ts). The gate trusts this over the attacker-writable store to
     // decide whose grant applies; unproven ⇒ refused (PR #237 fix round 2).
     paneOwnerProject: (id) => paneOwnerProject(id),
+    // T187: the same `stationRecipient` rule the T185 notice exception resolves its recipient
+    // with — persisted `openedBy` + visible rope + single project. A live attached opener that
+    // verifiably opened the target keeps `send`/`reply` after an app restart (the spawn ledger
+    // can only be re-proven by a fresh spawn, which would discard the node's canvas identity).
+    openedByOf: (id) => stationRecipient(workspaceStore.persistedCanvases(), id)?.recipientNodeId,
     // A node opened off screen without `--run-now` has no pane yet: queued, not refused.
     heldLaunch: (projectId, id) => workspaceStore.heldLaunch(projectId, id),
     customAgents: () => settingsStore.get().customAgents,

@@ -721,6 +721,10 @@ export function createAgentNode(
     // Adopt-with-task (T173): pass the first brief into the resume launch; undefined for
     // cold-restore and Open recent, which resume without a prompt.
     initialPrompt,
+    // T187-附一: an over-budget `--prompt` arrives here already spilled to a file by the control
+    // layer (`prompt` cleared, `promptFile` set) — the resume assembler must compose it, exactly
+    // like the fresh path, or the brief is silently dropped and the station sits unconfirmed.
+    promptFile,
     permissionMode,
     model,
     sharedIdentity: codexSharedIdentity(ssh),

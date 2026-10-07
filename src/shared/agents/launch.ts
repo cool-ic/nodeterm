@@ -84,6 +84,12 @@ export interface ResumeInputs {
    *  Cold-restore / Open recent pass nothing; an adopt-with-task open passes the first brief so the
    *  station reports idle after its first turn instead of sitting unconfirmed at a prompt. */
   initialPrompt?: string
+  /** Absolute path to a file holding that first task, composed as `"$(cat '<path>')"` — wins over
+   *  `initialPrompt`. Reached only through the control layer's over-budget `--prompt` spill
+   *  (T187-附一): an explicit `--resume --prompt-file` is refused upstream (`resumeFlagRefusal`),
+   *  so this field exists to keep a spilled brief from being silently dropped, never to widen the
+   *  agent-facing grammar. Validate with `promptFilePathError` before passing. */
+  promptFile?: string
   permissionMode?: AgentPermissionMode
   /** Per-node model override, applied through the effective base harness. */
   model?: string
@@ -279,11 +285,17 @@ export function assembleResumeCommand(
     ? withPermissionMode(base, capId, inputs.permissionMode, inputs.approvalCaps ?? {})
     : base
   // First-prompt append for adopt-with-task (T173): same per-agent injection rules as the fresh
-  // path (flag-prompt vs positional argv), same single-line quoting. promptFile stays a fresh-only
-  // feature — the control layer refuses --resume + --prompt-file.
-  const resumePromptArg = inputs.initialPrompt
-    ? shellSingleQuote(inputs.initialPrompt.replace(/\s+/g, ' ').trim())
-    : null
+  // path (flag-prompt vs positional argv), same single-line quoting. promptFile reaches this
+  // assembler through ONE route only — the control layer's over-budget `--prompt` spill
+  // (T187-附一): the renderer converts a too-long literal prompt into a file BEFORE the factory
+  // runs, so a resume that arrived as `--prompt` must not lose the brief for exceeding a budget.
+  // An EXPLICIT `--resume --prompt-file` is still refused upstream (`resumeFlagRefusal`), which
+  // keeps the file path out of the agent-facing grammar.
+  const resumePromptArg = inputs.promptFile
+    ? `"$(cat ${shellSingleQuote(inputs.promptFile.trim())})"`
+    : inputs.initialPrompt
+      ? shellSingleQuote(inputs.initialPrompt.replace(/\s+/g, ' ').trim())
+      : null
   const resumePromptFlag = eff.promptInjectionMode === 'flag-prompt'
     ? '--prompt'
     : eff.promptInjectionMode === 'flag-interactive'
