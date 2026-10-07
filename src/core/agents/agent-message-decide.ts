@@ -1,5 +1,6 @@
 import type { MirrorEntry } from '../agent-status-mirror'
 import type { AgentPaneVerdict } from '../../shared/agents/pane-owner-predicate'
+import type { QueueExpiryReason } from './delivery-queue'
 import { MIN_TOKEN_AWARE_REVISION } from './hooks/managed-script'
 
 /**
@@ -77,7 +78,10 @@ export type AgentMessageOutcome =
       wasPane: string
       nowPane: string
     }
-  | { kind: 'expired'; traceId: string; queuedForMs: number }
+  /** `reason` (T207b) is WHY it ended, from the queue's own table: `session-gone` is the host's
+   *  answer that nothing is there, `session-unknown` is a probe that could not say (never a death),
+   *  `not-restorable` is an entry that did not survive a restart with enough to deliver it. */
+  | { kind: 'expired'; traceId: string; queuedForMs: number; reason?: QueueExpiryReason }
   | { kind: 'rateLimited'; retryAfterMs: number }
   | { kind: 'queueFull'; capacity: number }
   | { kind: 'targetBusy'; state: string }

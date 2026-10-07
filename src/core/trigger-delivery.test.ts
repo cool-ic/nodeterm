@@ -200,7 +200,9 @@ describe('trigger delivery — the deliver-on-idle queue', () => {
     await w.delivery.fire(row())
     expect(w.timers).toHaveLength(1)
     w.timers[0].fn() // the TTL timer fires
-    await Promise.resolve()
+    // The queue asks the host about the session before it lets an entry expire (T207b), so the
+    // expiry is a few microtask turns deep: wait on the effect, not on a tick count.
+    await vi.waitFor(() => expect(w.runs).toHaveLength(1))
     expect(w.sent).toHaveLength(0)
     expect(w.runs.map((r) => r.run.outcome)).toEqual(['expired'])
     expect(w.runs[0].run.detail).toMatch(/never went idle/)

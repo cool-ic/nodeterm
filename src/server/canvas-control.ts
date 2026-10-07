@@ -218,7 +218,9 @@ export async function initServerCanvasControl(
     sendEnvelope: (nodeId, envelope) =>
       sendSettledEnvelope(deps.ptyManager, nodeId, envelope),
     // Attached OR released-but-running: see AgentMessagingDeps.hasLiveSession.
-    hasLiveSession: (nodeId) => deps.ptyManager.sessionExists(nodeId),
+    // T207b: the tri-state (see AgentMessagingDeps.hasLiveSession) — an unanswerable probe must not
+    // reach a receipt as "the session is gone", which is what the old boolean did to live panes.
+    hasLiveSession: (nodeId) => deps.ptyManager.sessionLiveness(nodeId),
     mirrorEntry,
     projects: () => deps.workspaceStore.persistedCanvases(),
     isRemoteNode: () => false,

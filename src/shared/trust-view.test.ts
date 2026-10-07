@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { targetsProven, trustReason } from './trust-view'
+import { targetsProven, trustReason, trustReasonText } from './trust-view'
 
 describe('trustReason (T201 read-only view)', () => {
-  const base = { live: true, proven: false, wired: true, rowOwner: undefined, entryId: 'E1' }
+  const base = { liveness: 'live', proven: false, wired: true, rowOwner: undefined, entryId: 'E1' } as const
 
   it('names each state, in the order the view reads them', () => {
     expect(trustReason({ ...base, proven: true })).toBe('proven')
-    expect(trustReason({ ...base, live: false, proven: true })).toBe('session-gone')
+    expect(trustReason({ ...base, liveness: 'gone', proven: true })).toBe('session-gone')
     expect(trustReason(base)).toBe('no-durable-row')
     expect(trustReason({ ...base, rowOwner: 'E2' })).toBe('entry-id-mismatch')
     expect(trustReason({ ...base, rowOwner: 'E1' })).toBe('reproof-pending')
@@ -14,8 +14,17 @@ describe('trustReason (T201 read-only view)', () => {
   })
 
   it('a dead session outranks every other reason — nothing can be delivered there', () => {
-    expect(trustReason({ ...base, live: false, wired: false })).toBe('session-gone')
-    expect(trustReason({ ...base, live: false, rowOwner: 'E2' })).toBe('session-gone')
+    expect(trustReason({ ...base, liveness: 'gone', wired: false })).toBe('session-gone')
+    expect(trustReason({ ...base, liveness: 'gone', rowOwner: 'E2' })).toBe('session-gone')
+  })
+
+  it('T207b: an UNCONFIRMED session is not a dead one — the column must not claim 会话已亡', () => {
+    // The field case: a hand-resumed pane, alive in tmux, unknown to this process. Reporting it as
+    // `session-gone` printed 未证明（会话已亡） for a pane that was running.
+    expect(trustReason({ ...base, liveness: 'unknown', proven: true })).toBe('session-unconfirmed')
+    expect(trustReason({ ...base, liveness: 'unknown' })).toBe('session-unconfirmed')
+    expect(trustReasonText('session-unconfirmed')).toContain('无法确认')
+    expect(trustReasonText('session-unconfirmed')).not.toContain('已亡')
   })
 })
 

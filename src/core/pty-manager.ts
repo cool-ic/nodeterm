@@ -20,6 +20,7 @@ import {
   type TmuxStatus
 } from '../shared/types'
 import { bundledTmuxPath, findCommand, findFixedTmux, tmuxInstall } from './tmux-hint'
+import type { SessionLiveness } from './agents/delivery-queue'
 import { hookServer, PERM_WAIT_SECS_DEFAULT } from './agents/hook-server'
 import { findAgy, pathWithAgyDir } from './agents/hooks/antigravity'
 import {
@@ -6291,6 +6292,25 @@ export class PtyManager {
    */
   hasLiveSession(persistKey: string): boolean {
     return !!this.liveSessionForPersistKey(persistKey)
+  }
+
+  /**
+   * T207b: the same question as `hasLiveSession`, answered with the three states a caller that must
+   * not confuse "gone" with "could not ask" needs. `sessionExists` folds both into `false` — right
+   * for its own callers, which fail CLOSED toward refusing to start something, and wrong for a
+   * receipt that would then announce a death it never established. A hand-resumed CLI (Ctrl+C then
+   * `grok --resume` in the pane) is the field case: alive in tmux, absent from this process's
+   * registry, and therefore `unknown` here rather than `gone`.
+   *
+   * Order: a positive answer from any backend this machine uses is `live`; absence has to come from
+   * tmux's OWN strict verdict by exact name (and only when there is a tmux to ask — a machine on the
+   * session host cannot prove absence through a tmux that is not installed); everything else is
+   * `unknown`.
+   */
+  async sessionLiveness(persistKey: string): Promise<SessionLiveness> {
+    if (await this.sessionExists(persistKey)) return 'live'
+    if (!this.tmuxPath) return 'unknown'
+    return (await this.strictTmuxVerdict(persistKey)) === 'absent' ? 'gone' : 'unknown'
   }
 
   async envelopePasteReady(persistKey: string): Promise<boolean> {

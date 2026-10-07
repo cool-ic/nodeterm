@@ -448,7 +448,7 @@ function messagingDeps(over: Partial<AgentMessagingDeps> = {}) {
       sent.push({ nodeId, payload })
       return true
     },
-    hasLiveSession: () => true,
+    hasLiveSession: () => 'live',
     mirrorEntry: () => idle,
     projects: () => [{ id: 'p1', nodes: [orch, st1] }],
     isRemoteNode: () => false,

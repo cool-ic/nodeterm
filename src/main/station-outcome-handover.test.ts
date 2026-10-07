@@ -75,7 +75,7 @@ function harness(): Harness {
       h.duringWrite?.()
       return true
     },
-    hasLiveSession: () => true,
+    hasLiveSession: () => 'live',
     mirrorEntry: () => entry(busy ? 'working' : 'done'),
     projects,
     isRemoteNode: () => false,
@@ -162,6 +162,10 @@ describe('a QUEUED send marks the station "work pending" — the reviewer\'s sce
     h.store.record({ nodeId: 'st', outcome: 'succeeded', at: h.tick(0) })
     expect(dFires(h.store)).toBe(false)
     expect(expire).toBeTruthy()
+    // T207b: the factory FORWARDS the liveness probe now, and a LIVE session re-arms on a TTL
+    // lapse instead of expiring. The session dying while the message sits queued is what makes the
+    // lapse terminal — which is the case this test is about.
+    h.deps.hasLiveSession = () => 'gone'
     expire!()
     await vi.waitFor(() => expect(h.store.get('st')).toBeUndefined())
     expect(dFires(h.store)).toBe(false)

@@ -62,7 +62,7 @@ function fakeDeps(over: Partial<AgentMessagingDeps> = {}): AgentMessagingDeps & 
       rec.sent.push({ nodeId, payload })
       return true
     },
-    hasLiveSession: () => true,
+    hasLiveSession: () => 'live',
     mirrorEntry: () => idle,
     projects: projectsFn,
     isRemoteNode: () => false,
@@ -434,7 +434,7 @@ describe('deliver-on-idle wiring (PR 7)', () => {
       now: () => 0,
       deliver: async () => ({ kind: 'delivered', traceId: 'd', traced: 'memory', receipt: 'observed', signal: 'newTurn' }),
       trace: async () => ({ traceId: 'q', traced: 'memory' }),
-      hasLiveSession: async () => true,
+      sessionLiveness: async () => 'live',
       schedule: () => () => {}
     })
     const busy: MirrorEntry = { state: 'working', updatedAt: 1, stateVerified: true, clientRevision: MANAGED_SCRIPT_REVISION }
@@ -541,7 +541,11 @@ describe('deliver-on-idle wiring (PR 7)', () => {
       // TARGET's owning project) cannot board-log — leaving the SENDER-facing `onExpired` leg
       // (routed to the sender's project) as the ONLY board-log writer. That isolation is the point:
       // it is `onExpired`, not the trace, that this test pins.
-      paneOwnerProject: () => undefined
+      paneOwnerProject: () => undefined,
+      // T207b: the factory now FORWARDS the liveness probe, so this deps' default ('live') would
+      // re-arm the entry instead of letting it expire. A session the host says is gone is what
+      // makes a TTL lapse terminal.
+      hasLiveSession: () => 'gone'
     })
     // `createDeliveryQueue` is the SAME builder main uses — a fake scheduler makes the TTL lapse
     // deterministic, and a short ttl is irrelevant since the scheduler never really waits.
@@ -563,18 +567,20 @@ describe('deliver-on-idle wiring (PR 7)', () => {
     })
     expect(fire).toBeTruthy()
     fire!() // the TTL lapses
-    await Promise.resolve()
-    await Promise.resolve()
-    // A board-log line naming the expiry landed in the SENDER's project (a1 ∈ p1), from a1 to b1.
-    const expiredLine = appended.find(
-      (a) =>
-        a.entry.kind === 'event' &&
-        a.entry.event?.type === 'agent-message' &&
-        a.entry.event.title === 'expired' &&
-        a.entry.event.from === 'a1'
-    )
-    expect(expiredLine, 'no expired board-log line reached the sender').toBeTruthy()
-    expect(expiredLine?.projectId).toBe('p1')
+    // The probe adds a microtask turn to the expiry path: wait on the effect, not on a tick count.
+    const expiredLine = await vi.waitFor(() => {
+      const found = appended.find(
+        (a) =>
+          a.entry.kind === 'event' &&
+          a.entry.event?.type === 'agent-message' &&
+          a.entry.event.title === 'expired' &&
+          a.entry.event.from === 'a1'
+      )
+      // A board-log line naming the expiry landed in the SENDER's project (a1 ∈ p1), from a1 to b1.
+      expect(found, 'no expired board-log line reached the sender').toBeTruthy()
+      return found!
+    })
+    expect(expiredLine.projectId).toBe('p1')
   })
 })
 
@@ -586,7 +592,7 @@ describe('a target that has not started yet (launch held off screen)', () => {
     let started = false
     const deps = fakeDeps({
       heldLaunch: (projectId, id) => !started && projectId === 'p1' && id === 'b1',
-      hasLiveSession: () => started,
+      hasLiveSession: () => (started ? 'live' : 'gone'),
       paneOwnerProject: (id) => (started && id === 'b1' ? 'p1' : undefined),
       ...over
     })
@@ -631,7 +637,7 @@ describe('a target that has not started yet (launch held off screen)', () => {
   })
 
   it('a LIVE pane with no proven owner stays refused, held launch or not', async () => {
-    const { deps } = unstarted({ hasLiveSession: () => true })
+    const { deps } = unstarted({ hasLiveSession: () => 'live' })
     const { outcome } = await deliverFromControl(req(), deps)
     expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
   })
@@ -649,7 +655,7 @@ describe('station notice to an attached opener (T185)', () => {
   const attached = (over: Partial<AgentMessagingDeps> = {}) =>
     fakeDeps({
       paneOwnerProject: () => undefined,
-      hasLiveSession: () => true,
+      hasLiveSession: () => 'live',
       heldLaunch: () => false,
       subscribeReceipts: (cb) => {
         const t = setTimeout(() => cb({ nodeId: 'b1', newTurn: true, verified: true }), 5)
@@ -674,7 +680,7 @@ describe('station notice to an attached opener (T185)', () => {
   })
 
   it('a station notice with no live session stays unproven', async () => {
-    const deps = attached({ hasLiveSession: () => false })
+    const deps = attached({ hasLiveSession: () => 'gone' })
     const { outcome } = await deliverFromControl(notice(), deps)
     expect(outcome).toEqual({ kind: 'notPermitted', reason: 'unproven-target-owner' })
     expect(deps.rec.sent).toEqual([])
@@ -701,7 +707,7 @@ describe('station notice to an attached opener (T185)', () => {
 const attachedWithOpener = (opener: string | undefined, over: Partial<AgentMessagingDeps> = {}) =>
   fakeDeps({
     paneOwnerProject: () => undefined,
-    hasLiveSession: () => true,
+    hasLiveSession: () => 'live',
     heldLaunch: () => false,
     openedByOf: (id) => (id === 'b1' ? opener : undefined),
     subscribeReceipts: (cb) => {
