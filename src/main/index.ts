@@ -241,7 +241,7 @@ import {
   pendingTicketsFor
 } from '../core/agent-status-mirror'
 import { mirrorCustomAgents } from '../core/mirror-custom-agents'
-import { paneOwnerProject } from '../core/agents/pane-ownership'
+import { initOwnershipPersistence, paneOwnerProject } from '../core/agents/pane-ownership'
 import { createPushNotify, createLiveUpdatePush } from '../core/push-notify'
 import { createGrantsAccessor, type PushGrant } from '../core/push-grants'
 import { createRemoteGrantsCache } from '../core/remote-push-grants'
@@ -2002,6 +2002,10 @@ app.whenReady().then(async () => {
   // below, once the status mirror is loaded and every listener is wired — see delivery-queue.ts for
   // what a restart does to a queued message (TTL keeps running, same session only, sender told).
   const deliveryQueueFile = new DurableFactFile(QUEUE_FACT, { userDataDir: corePlatform.userDataDir })
+  // T198: the pane-ownership ledger's durable half — spawn rows survive the restart so an
+  // attach-time re-proof (same machine-local entry id) can restore messaging reach for every
+  // surviving node, not just openers. Unwired hosts simply keep today's fail-closed behavior.
+  initOwnershipPersistence(corePlatform.userDataDir)
   messagingDeps.queue = createDeliveryQueue(messagingDeps, { durable: deliveryQueueFile })
   setDeliveryQueue(messagingDeps.queue)
   ipcMain.handle(IPC.agentMessageDeliver, async (_e, raw: unknown) => {

@@ -85,6 +85,7 @@ import {
 } from './watch-link/watcher-client'
 import {
   recordFreshSpawnOwner,
+  reproveOnAttach,
   forgetPaneOwner,
   shouldRecordOwnership
 } from './agents/pane-ownership'
@@ -2697,6 +2698,11 @@ export class PtyManager {
     // machine-local project id, never the git-shared file id. See `agents/pane-ownership.ts`.
     if (shouldRecordOwnership(fresh, options.persistKey, options.ownerProjectId))
       recordFreshSpawnOwner(options.persistKey as string, options.ownerProjectId)
+    else if (fresh === false)
+      // T198: an app-restart re-attach of a pane THIS project spawned before the restart re-proves
+      // ownership from the durable spawn record (machine-local entry id match). A clone's entry id
+      // cannot match — fail-closed unchanged; a missing durable file turns this into a no-op.
+      reproveOnAttach(options.persistKey as string, options.ownerProjectId)
     if (warmWindowsBackend === 'tmux') {
       // The first strict probe deliberately preceded profile resolution. Recheck after launching
       // attach-only: if the named session disappeared in that window, never return the transient
