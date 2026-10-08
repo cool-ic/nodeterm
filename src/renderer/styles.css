@@ -326,11 +326,9 @@ body,
   position: relative;
   display: flex;
   flex-direction: column;
-  /* T230: where the two top clusters end. The clusters sit at `tabbar-h + float-gap` and are 34px
-     tall (their buttons); the canvas rails live 8px BELOW that band. One token, derived from the
-     same primitives the clusters themselves use — the rails' top is `--top-cluster-band - tabbar-h`
-     because the rails mount inside .flow-wrap, which starts below the tab bar. */
-  --top-cluster-band: calc(var(--tabbar-h) + var(--float-gap) + 34px + 8px);
+  /* T235: the top band is the tab bar's alone — the two clusters that T230 anchored below are gone,
+     so the `--top-cluster-band` token went with them. The rails now sit on the old cluster row
+     (`top: var(--float-gap)` inside .flow-wrap, which starts below the tab bar). */
 }
 
 /* ---- Top project tab bar (Chrome-style strip) ----
@@ -5089,17 +5087,6 @@ body,
   display: none;
 }
 
-/* ---- Top-right controls cluster ---- */
-.controls-cluster {
-  position: absolute;
-  top: calc(var(--tabbar-h) + var(--float-gap));
-  right: var(--float-gap);
-  z-index: 26; /* above the kanban overlay (25) — the view toggle must stay reachable on the board */
-  display: flex;
-  align-items: center; /* center the presence facepile (26px) against the 34px toolbar buttons */
-  gap: 6px;
-}
-
 /* Empty-canvas guidance — non-interactive, sits under every panel/dialog. */
 .empty-canvas-hint {
   position: absolute;
@@ -5464,45 +5451,6 @@ body,
   background: color-mix(in srgb, var(--state-error) 18%, transparent);
 }
 
-/* Direct children only — the presence facepile's face buttons are nested inside .presence-facepile
-   and must keep their own round, peer-colored styling, not the toolbar button chrome. */
-.controls-cluster > button {
-  width: 34px;
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(var(--menu-rgb), 0.92);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  color: var(--text);
-  font-size: 15px;
-  cursor: pointer;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, calc(0.3 * var(--shadow-k)));
-}
-
-.controls-cluster > button:hover {
-  background: var(--panel-header);
-}
-
-/* Icons read as 15px glyphs before — too small/ambiguous (field report). 18px for every
-   SVG in the cluster (Explorer, Source Control, Phone, Gear) keeps the 34px buttons. */
-.controls-cluster > button svg {
-  width: 18px;
-  height: 18px;
-}
-.sessions-icon-cluster > button svg {
-  width: 18px;
-  height: 18px;
-}
-
-/* Search button shows the ⌘K shortcut so its purpose is obvious */
-.cluster-search {
-  width: auto !important;
-  gap: 10px;
-  padding: 0 10px;
-}
-
 .kbd {
   font-size: 11px;
   font-weight: 600;
@@ -5534,7 +5482,6 @@ body,
 .ctx-menu,
 .ctx-backdrop,
 .tab-menu,
-.controls-cluster,
 .dock,
 .dictation,
 .kanban-overlay {
@@ -8260,12 +8207,15 @@ button.group-node__setup:disabled {
      each track is its OWN obstacle rect for the solver. The minimap cannot join (it needs React
      Flow's store context) and keeps its bottom-right corner. */
   position: absolute;
-  /* T230: below the two top clusters (see --top-cluster-band on .canvas-root). */
-  top: calc(var(--top-cluster-band) - var(--tabbar-h));
+  /* T235: on the old top-cluster row — the tab bar's band is the topmost chrome now. */
+  top: var(--float-gap);
   /* T232: the container holds ONLY the card — a 56px single column, no extra chrome. */
   display: flex;
   flex-direction: column;
   width: 56px;
+  /* T235: cap the rail here (this % resolves against .flow-wrap's definite height) and let the
+     body scroll inside it, so a tall column never overflows a short pane. */
+  max-height: calc(100% - 2 * var(--float-gap));
   z-index: 20; /* the dock's old z — above the sidebar (12), below the banners (27) */
 }
 
@@ -8273,13 +8223,10 @@ button.group-node__setup:disabled {
   left: var(--float-gap);
 }
 
-/* The sessions sidebar owns the left edge while it is open; the track steps right of it. */
-.canvas-root:has(.sessions-sidebar) .canvas-rail--left {
-  left: calc(var(--float-gap) + 300px + var(--float-gap));
-}
-
 .canvas-rail--right {
   right: var(--float-gap);
+  /* The right track stops above the minimap. */
+  max-height: calc(100% - var(--float-gap) - 170px);
 }
 
 /* T229: the left rail's menus open RIGHTWARD from the track's right edge (right: 22 + 56 + 10),
@@ -8303,15 +8250,24 @@ button.group-node__setup:disabled {
   border: 1px solid var(--border);
   border-radius: 16px;
   box-shadow: 0 10px 32px rgba(0, 0, 0, calc(0.5 * var(--shadow-k)));
-  overflow: visible;
-}
-
-/* The right track stops above the minimap; the left one clears it by itself. Scroll on short
-   panes rather than overlap. */
-.canvas-rail--right .canvas-rail__body {
-  max-height: calc(100% - var(--float-gap) - 170px);
+  /* T235: scroll the column inside the rail's max-height (menus escape — their containing block is
+     .canvas-rail, a positioned ancestor of this scroller — so nothing important is clipped). */
+  min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
+}
+
+/* T235: the buttons moved in from the two top clusters — same 42×42 `.dock-btn` family, with the
+   18px glyphs (and the "?"'s 15px) those clusters gave them. Targeted through the tooltip wrapper
+   that makes them the body's own children (`Tooltip` renders the trigger): the Dock's buttons sit
+   one level deeper inside `.dock` and keep their inline sizes (its "+" is deliberately 20px). */
+.canvas-rail__body > .tooltip-trigger > .dock-btn {
+  font-size: 15px;
+}
+
+.canvas-rail__body > .tooltip-trigger > .dock-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 /* T226: the status badges are 42px circles that grow LEFTWARD on hover/focus into the full pill
@@ -8394,8 +8350,9 @@ button.group-node__setup:disabled {
 }
 
 .canvas-rail__toggle {
-  /* T232: the collapse control is the card's first ROW — 42×42, radius 10, hover like .dock-btn,
-     the same family as the track's buttons and the top clusters' 18px glyphs. */
+  /* T232: the collapse control is the card's first ROW — 42×42, radius 10, hover like .dock-btn.
+     T235: flattened to exactly that family — no fill, no border (the employer saw two sizes of
+     white box stacked in one column); only the glyph stays muted, going to --text on hover. */
   width: 42px;
   height: 42px;
   display: inline-flex;
@@ -8403,8 +8360,8 @@ button.group-node__setup:disabled {
   justify-content: center;
   padding: 0;
   color: var(--muted);
-  background: rgba(var(--menu-rgb), 0.92);
-  border: 1px solid var(--border);
+  background: transparent;
+  border: none;
   border-radius: 10px;
   cursor: pointer;
 }
@@ -8453,7 +8410,6 @@ button.group-node__setup:disabled {
   width: 14px;
   height: 56px;
   border-radius: inherit;
-  border: 0;
 }
 
 /* The 18px chevron belongs to the expanded control; inside the 14px tab it would clip on the
@@ -8466,21 +8422,21 @@ button.group-node__setup:disabled {
 .canvas-root[data-rail-collapsed] .canvas-rail__body > :not(.canvas-rail__toggle),
 .canvas-root[data-rail-collapsed] .minimap-dock,
 .canvas-root[data-rail-collapsed] .minimap-restore,
-.canvas-root[data-rail-collapsed] .controls-cluster,
 .canvas-root[data-rail-collapsed] .react-flow__controls {
   display: none;
 }
 
 /* ---- Resume-where-you-left-off card (breadcrumb trail, once per project activation) ---- */
-/* Anchored in .flow-wrap under the controls cluster (one --float-gap below the tab bar, 34px tall)
-   rather than beside it, so the two never overlap; the left side is the sessions sidebar's.
+/* T235: the top-right cluster is gone, so the card takes the tab bar's own row (one --float-gap
+   below it) and clears the right rail's card — --float-gap + 56 + 8 — instead of sitting on top of
+   it. The left side is the sessions sidebar's.
    z-index 11 sits above the canvas and BELOW the sidebar (12) — a card the user has not dismissed
    must never cover a panel they deliberately opened — and below the kanban overlay (25), where the
    canvas and everything on it is correctly hidden. */
 .resume-card {
   position: absolute;
-  top: calc(var(--tabbar-h) + var(--float-gap) + 34px + 12px);
-  right: var(--float-gap);
+  top: calc(var(--tabbar-h) + var(--float-gap));
+  right: calc(var(--float-gap) + 56px + 8px);
   z-index: 11;
   width: 260px;
   max-width: calc(100vw - 28px);
@@ -9604,7 +9560,10 @@ button.group-node__setup:disabled {
 .sessions-sidebar {
   position: absolute;
   top: calc(var(--tabbar-h) + var(--float-gap));
-  left: var(--float-gap);
+  /* T235: the sidebar yields to the rail rather than pushing it — the Sessions button now lives IN
+     that rail, so moving the rail out from under its own trigger would be absurd. left = the rail's
+     right edge (--float-gap + 56) + one more --float-gap. */
+  left: calc(var(--float-gap) + 56px + var(--float-gap));
   z-index: 12;
   width: 300px;
   max-height: calc(100vh - var(--tabbar-h) - 26px - 2 * var(--float-gap));
@@ -9979,9 +9938,6 @@ button.group-node__setup:disabled {
 .ss-meta__project { color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ss-meta__project + .ss-meta__cwd::before { content: '· '; }
 
-.sessions-icon-cluster { position: absolute; top: calc(var(--tabbar-h) + var(--float-gap)); left: var(--float-gap); z-index: 11; }
-.sessions-icon-cluster button { width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; background: rgba(var(--menu-rgb), 0.92); border: 1px solid var(--border); border-radius: 9px; color: var(--text); cursor: pointer; box-shadow: 0 6px 20px rgba(0, 0, 0, calc(0.3 * var(--shadow-k))); }
-.sessions-icon-cluster button:hover { background: var(--panel-header); }
 
 /* --- Dino node (T-Rex Runner game) --------------------------------------- */
 .dino-node {
@@ -10805,13 +10761,19 @@ button.group-node__setup:disabled {
 }
 
 /* ---- facepile: who is connected (the one surface that shows off-project peers) ---- */
-/* Lives INSIDE .controls-cluster (see Canvas.tsx) as its first flex item, so the faces sit to the
-   LEFT of the top-right toolbar on the same row — not absolutely positioned into the tab-bar band
-   where they hid behind the chrome. Empty (no element) when alone, so it adds no gap. */
+/* T235: lives inside the right rail's card (see Canvas.tsx) as one row of the 42px column. Empty
+   (no element) when alone, so it adds no row. It is a row of 26px faces, so inside the narrow
+   column it wraps and centres rather than widening the card. */
 .presence-facepile {
   display: flex;
   gap: 4px;
   align-items: center;
+}
+
+.canvas-rail__body .presence-facepile {
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 42px;
 }
 
 .presence-face {
@@ -16820,15 +16782,13 @@ body.focus-mode .dock:hover {
 :root[data-nt-glass='on']
   :is(
     .tabbar,
-    .controls-cluster > button,
     .react-flow__controls,
     .react-flow__minimap.minimap,
     .minimap-restore button,
     .sysres-pill,
     .usage-pill,
     .usage-refresh,
-    .focus-exit,
-    .sessions-icon-cluster button
+    .focus-exit
   ) {
   background: var(--glass-control-bg) !important;
   border-color: var(--glass-edge);
@@ -17223,12 +17183,6 @@ body.focus-mode .dock:hover {
 :root[data-nt-glass='on'] .ctx-menu:not(:has(.ctx-icon:not(:empty))) .ctx-icon {
   display: none;
 }
-/* The sessions sidebar opens over its own toggle (same corner); through translucent glass the
-   toggle's glyph ghosted above "Sessions" (visual QA M5). The sidebar's × closes it. */
-:root[data-nt-glass='on'] .canvas-root:has(.sessions-sidebar) .sessions-icon-cluster {
-  visibility: hidden;
-}
-
 /* The active tab normally takes the canvas colour and flares into it; over a wallpaper that is a
    black tab. It is a neutral lift on the bar instead (a second layer of the fill read as a darker
    slab, visual QA L7), and the flares go. */
@@ -17454,11 +17408,6 @@ body.focus-mode .dock:hover {
     var(--glass-chrome-bg) !important;
   border-color: var(--glass-edge);
   color: var(--text-strong);
-}
-/* On the board the toolbar cluster straddled the header strip's bottom edge and sat 6px above the
-   columns (N4): it drops into the strip's row instead, centred in its 46px. */
-:root[data-nt-glass='on'] .canvas-root:has(> .kanban-overlay) > .controls-cluster {
-  top: calc(var(--tabbar-h) + 6px);
 }
 :root[data-nt-glass='on'] :is(.kanban-col__dot, .kanban-header__dot) {
   background: transparent !important;

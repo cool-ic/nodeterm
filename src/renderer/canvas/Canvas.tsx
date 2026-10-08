@@ -19077,86 +19077,9 @@ export function Canvas() {
       )}
       <UpdateCard />
 
-      <div
-        className="sessions-icon-cluster"
-        onMouseEnter={openSessionsPeek}
-        onMouseLeave={closeSessionsPeekSoon}
-      >
-        <button title={commandTooltip('Sessions', 'panel.sessions')} onClick={onSessionsIconClick}>
-          <IconSessions />
-        </button>
-      </div>
-
-      <div className="controls-cluster">
-        {/* First in the cluster so the "who's connected" faces sit to the LEFT of the toolbar on the
-            SAME row (flex, no hardcoded width) instead of colliding with it / hiding under the tab
-            bar. Mounted here unconditionally (the cluster always renders): the facepile is null with
-            no peers — taking no space — but must stay mounted to prune the presence face cache
-            (state/presence.ts → selectFaces). */}
-        <Facepile onJump={travelToNode} onSwitchProject={travelToProject} />
-        <button
-          className="cluster-search"
-          title="Command palette"
-          onClick={() => setPaletteOpen(true)}
-        >
-          <IconSearch />
-          {paletteChip && <span className="kbd">{paletteChip}</span>}
-        </button>
-        <button title={commandTooltip('Explorer', 'panel.explorer')} onClick={() => showExplorer('toggle')}>
-          <IconExplorer />
-        </button>
-        <button title={commandTooltip('Source Control', 'panel.sourceControl')} onClick={() => setScOpen(true)}>
-          <IconBranch />
-        </button>
-        <button
-          title="Pair phone"
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect()
-            setPhonePairAnchor((cur) => (cur ? null : { right: r.right, bottom: r.bottom }))
-          }}
-        >
-          <IconPhone />
-        </button>
-        <button
-          title={commandTooltip('Settings', 'app.settings')}
-          onClick={() => {
-            setSettingsSection(undefined)
-            setSettingsOpen(true)
-          }}
-        >
-          <IconGear />
-        </button>
-        <button
-          title="Help"
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect()
-            setMenu({
-              // Right-align the ~220px menu under the button; never off-screen left.
-              x: Math.max(8, r.right - 220),
-              y: r.bottom + 6,
-              items: [
-                { label: 'Keyboard shortcuts', hint: chipFor('app.shortcutsPanel') || undefined, onClick: () => setShortcutsOpen(true) },
-                { label: 'Report a bug…', onClick: () => setBugReportOpen(true) },
-                {
-                  label: 'Documentation',
-                  onClick: () => window.nodeTerminal.shell.openExternal(`${REPO_URL}#readme`)
-                },
-                {
-                  label: 'GitHub repository',
-                  onClick: () => window.nodeTerminal.shell.openExternal(REPO_URL)
-                },
-                { type: 'separator' },
-                {
-                  type: 'label',
-                  label: `nodeterm${appVersion ? ` v${appVersion}` : ''} · ${describeOs(navigator.userAgent)}`
-                }
-              ]
-            })
-          }}
-        >
-          ?
-        </button>
-      </div>
+      {/* T235: EVERY canvas-level control lives in one of the two rails now; the top band belongs
+          to the tab bar alone. The two former top clusters (`.sessions-icon-cluster`,
+          `.controls-cluster`) are gone — their buttons are rows inside the rail cards below. */}
 
       <div className="flow-wrap" ref={flowWrapRef}>
         {/* First-contact guidance: an empty canvas used to be a black void (field report:
@@ -19343,6 +19266,39 @@ export function Canvas() {
             >
               {railCollapsed ? <IconChevronRight /> : <IconChevronLeft />}
             </button>
+            {/* T235: the session/app controls that used to be the top-left cluster, as rows of the
+                same 42×42 column. Hover handlers keep the sidebar's hover-peek. */}
+            <Tooltip label={commandTooltip('Sessions', 'panel.sessions')} placement="right">
+              <button
+                className="dock-btn"
+                aria-label="Sessions"
+                onMouseEnter={openSessionsPeek}
+                onMouseLeave={closeSessionsPeekSoon}
+                onClick={onSessionsIconClick}
+              >
+                <IconSessions />
+              </button>
+            </Tooltip>
+            <Tooltip label={commandTooltip('Command palette', 'app.commandPalette')} placement="right">
+              <button
+                className="dock-btn"
+                aria-label="Command palette"
+                onClick={() => setPaletteOpen(true)}
+              >
+                <IconSearch />
+              </button>
+            </Tooltip>
+            <Tooltip label={commandTooltip('Explorer', 'panel.explorer')} placement="right">
+              <button className="dock-btn" aria-label="Explorer" onClick={() => showExplorer('toggle')}>
+                <IconExplorer />
+              </button>
+            </Tooltip>
+            <Tooltip label={commandTooltip('Source Control', 'panel.sourceControl')} placement="right">
+              <button className="dock-btn" aria-label="Source Control" onClick={() => setScOpen(true)}>
+                <IconBranch />
+              </button>
+            </Tooltip>
+            <span className="dock-sep" />
             <Dock
               group="create"
               dirty={dirty}
@@ -19413,6 +19369,10 @@ export function Canvas() {
             >
               {railCollapsed ? <IconChevronLeft /> : <IconChevronRight />}
             </button>
+            {/* T235: the "who's connected" facepile, moved off the top row into the rail. It renders
+                nothing without peers (so it costs no row) but must stay mounted to prune the
+                presence face cache (state/presence.ts → selectFaces). */}
+            <Facepile onJump={travelToNode} onSwitchProject={travelToProject} />
             <Dock
               group="view"
               dirty={dirty}
@@ -19461,6 +19421,68 @@ export function Canvas() {
               onDictate={toggleDictation}
               dictateActive={dictationOpen}
             />
+
+            {/* T235: the app-level controls that used to be the top-right cluster, as rows of the
+                rail's own column (the Dock's trailing hairline already separates the view group
+                above them). */}
+            <Tooltip label="Pair phone" placement="left">
+              <button
+                className="dock-btn"
+                aria-label="Pair phone"
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect()
+                  setPhonePairAnchor((cur) => (cur ? null : { right: r.right, bottom: r.bottom }))
+                }}
+              >
+                <IconPhone />
+              </button>
+            </Tooltip>
+            <Tooltip label={commandTooltip('Settings', 'app.settings')} placement="left">
+              <button
+                className="dock-btn"
+                aria-label="Settings"
+                onClick={() => {
+                  setSettingsSection(undefined)
+                  setSettingsOpen(true)
+                }}
+              >
+                <IconGear />
+              </button>
+            </Tooltip>
+            <Tooltip label="Help" placement="left">
+              <button
+                className="dock-btn"
+                aria-label="Help"
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect()
+                  setMenu({
+                    // Right-align the ~220px menu under the button; never off-screen left.
+                    x: Math.max(8, r.right - 220),
+                    y: r.bottom + 6,
+                    items: [
+                      { label: 'Keyboard shortcuts', hint: chipFor('app.shortcutsPanel') || undefined, onClick: () => setShortcutsOpen(true) },
+                      { label: 'Report a bug…', onClick: () => setBugReportOpen(true) },
+                      {
+                        label: 'Documentation',
+                        onClick: () => window.nodeTerminal.shell.openExternal(`${REPO_URL}#readme`)
+                      },
+                      {
+                        label: 'GitHub repository',
+                        onClick: () => window.nodeTerminal.shell.openExternal(REPO_URL)
+                      },
+                      { type: 'separator' },
+                      {
+                        type: 'label',
+                        label: `nodeterm${appVersion ? ` v${appVersion}` : ''} · ${describeOs(navigator.userAgent)}`
+                      }
+                    ]
+                  })
+                }}
+              >
+                ?
+              </button>
+            </Tooltip>
+            <span className="dock-sep" />
 
             {/* T226: the ambient badges, squeezed to 42px circles that expand LEFTWARD on hover or
                 focus into the full pill (usage brings its refresh control with it), so the track
