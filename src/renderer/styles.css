@@ -8262,9 +8262,10 @@ button.group-node__setup:disabled {
   position: absolute;
   /* T230: below the two top clusters (see --top-cluster-band on .canvas-root). */
   top: calc(var(--top-cluster-band) - var(--tabbar-h));
+  /* T232: the container holds ONLY the card — a 56px single column, no extra chrome. */
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-direction: column;
+  width: 56px;
   z-index: 20; /* the dock's old z — above the sidebar (12), below the banners (27) */
 }
 
@@ -8393,8 +8394,10 @@ button.group-node__setup:disabled {
 }
 
 .canvas-rail__toggle {
-  width: 22px;
-  height: 22px;
+  /* T232: the collapse control is the card's first ROW — 42×42, radius 10, hover like .dock-btn,
+     the same family as the track's buttons and the top clusters' 18px glyphs. */
+  width: 42px;
+  height: 42px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -8402,22 +8405,30 @@ button.group-node__setup:disabled {
   color: var(--muted);
   background: rgba(var(--menu-rgb), 0.92);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 10px;
   cursor: pointer;
+}
+
+.canvas-rail__toggle:hover:not(:disabled) {
+  background: var(--panel-header);
 }
 
 .canvas-rail__toggle:hover {
   color: var(--text);
 }
 
+.canvas-rail__toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
 /* Collapsed: both tracks' contents, the minimap, the top-right cluster and the flow controls all
    hide, and each edge keeps a slim tab flush with the window edge — 14px wide, inside fit-view's
    12px edge inset and carrying no chrome opt-in, so a collapsed canvas measures ZERO obstacles. */
-.canvas-root[data-rail-collapsed] .canvas-rail {
-  top: 50%;
-  transform: translateY(-50%);
-}
-
+/* T232: the collapsed card IS the tab — it stays at ITS row's height (the container keeps its
+   top), shrinks to 14×56 at the screen edge, and hides every child but the toggle. The toggle
+   keeps no `data-canvas-chrome` (it is dropped in Canvas.tsx when collapsed), so fit still
+   measures ZERO obstacles. */
 .canvas-root[data-rail-collapsed] .canvas-rail--left {
   left: 0;
 }
@@ -8426,20 +8437,33 @@ button.group-node__setup:disabled {
   right: 0;
 }
 
-.canvas-root[data-rail-collapsed] .canvas-rail__toggle {
+.canvas-root[data-rail-collapsed] .canvas-rail__body {
   width: 14px;
   height: 56px;
-}
-
-.canvas-root[data-rail-collapsed] .canvas-rail--left .canvas-rail__toggle {
+  padding: 0;
+  overflow: hidden;
   border-radius: 0 8px 8px 0;
 }
 
-.canvas-root[data-rail-collapsed] .canvas-rail--right .canvas-rail__toggle {
+.canvas-root[data-rail-collapsed] .canvas-rail--right .canvas-rail__body {
   border-radius: 8px 0 0 8px;
 }
 
-.canvas-root[data-rail-collapsed] .canvas-rail__body,
+.canvas-root[data-rail-collapsed] .canvas-rail__toggle {
+  width: 14px;
+  height: 56px;
+  border-radius: inherit;
+  border: 0;
+}
+
+/* The 18px chevron belongs to the expanded control; inside the 14px tab it would clip on the
+   body's `overflow: hidden`. A 12px glyph fits the tab without spilling. */
+.canvas-root[data-rail-collapsed] .canvas-rail__toggle svg {
+  width: 12px;
+  height: 12px;
+}
+
+.canvas-root[data-rail-collapsed] .canvas-rail__body > :not(.canvas-rail__toggle),
 .canvas-root[data-rail-collapsed] .minimap-dock,
 .canvas-root[data-rail-collapsed] .minimap-restore,
 .canvas-root[data-rail-collapsed] .controls-cluster,

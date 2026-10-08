@@ -19322,18 +19322,15 @@ export function Canvas() {
         </ReactFlow>
         </SessionProvider>
 
-        {/* T226: TWO single-column tracks, one per edge. Left = create + history, right = view +
-            status; each track's card is 56px wide (42px buttons + 2×7px padding), and the status
-            badges are 42px circles so nothing is ever wider than a button. MUST stay OUTSIDE
-            <ReactFlow> (the library's wrapper is one z-0 stacking context; the pills' popovers must
-            rise above the sessions sidebar). Each body carries `data-canvas-chrome`, so each track
-            is its OWN obstacle rect for the solver. The minimap cannot join (it needs React Flow's
-            store context) and keeps its bottom-right corner.
-            Collapse (per-machine, `lib/railCollapse`, default expanded) hides both tracks with one
-            switch: each edge keeps a ≤14px tab, flush and carrying no chrome opt-in, so a collapsed
-            canvas measures ZERO obstacles. The left track steps right when the sessions sidebar is
-            open (CSS `:has(.sessions-sidebar)`). */}
+        {/* T232: ONE single-column track per edge; the container holds ONLY the card (56px) — the
+            collapse control is the card's FIRST ROW (42×42, same family as .dock-btn), so the card
+            top is a real control and the strip under the top clusters is not a leftover shard.
+            MUST stay OUTSIDE <ReactFlow> (stacking context; the pills' popovers must rise above
+            the sessions sidebar). Each body carries `data-canvas-chrome` — conditionally: a
+            collapsed card shrinks to a 14×56 edge tab WITHOUT the attribute, so fit measures ZERO
+            obstacles. The left track steps right when the sessions sidebar is open. */}
         <div className="canvas-rail canvas-rail--left">
+          <div className="canvas-rail__body" data-canvas-chrome={railCollapsed ? undefined : ''}>
           <button
             type="button"
             className="canvas-rail__toggle nodrag nopan"
@@ -19344,9 +19341,8 @@ export function Canvas() {
               writeRailCollapsed(!railCollapsed)
             }}
           >
-            {railCollapsed ? <IconChevronRight /> : <IconChevronLeft />}
-          </button>
-          <div className="canvas-rail__body" data-canvas-chrome>
+              {railCollapsed ? <IconChevronRight /> : <IconChevronLeft />}
+            </button>
             <Dock
               group="create"
               dirty={dirty}
@@ -19404,6 +19400,7 @@ export function Canvas() {
         </div>
 
         <div className="canvas-rail canvas-rail--right">
+          <div className="canvas-rail__body" data-canvas-chrome={railCollapsed ? undefined : ''}>
           <button
             type="button"
             className="canvas-rail__toggle nodrag nopan"
@@ -19414,9 +19411,8 @@ export function Canvas() {
               writeRailCollapsed(!railCollapsed)
             }}
           >
-            {railCollapsed ? <IconChevronLeft /> : <IconChevronRight />}
-          </button>
-          <div className="canvas-rail__body" data-canvas-chrome>
+              {railCollapsed ? <IconChevronLeft /> : <IconChevronRight />}
+            </button>
             <Dock
               group="view"
               dirty={dirty}
