@@ -112,6 +112,10 @@ export function Dock({
   onDictate,
   dictateActive
 }: DockProps) {
+  // T229: tooltips open AWAY from the window edge — the left track opens right, the right track
+  // opens left. One mapping for the whole instance; the menus' anchors are CSS per rail
+  // (`.canvas-rail--left .dock-menu` / `--right`), so the two halves cannot disagree.
+  const tip = group === 'create' ? 'right' : 'left'
   const [menuOpen, setMenuOpen] = useState(false)
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false)
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false)
@@ -352,7 +356,7 @@ export function Dock({
 
         {group === 'create' && (
           <>
-        <Tooltip label="Add node" placement="left">
+        <Tooltip label="Add node" placement={tip}>
           <button
             className={`dock-btn dock-add${menuOpen ? ' active' : ''}`}
             aria-label="Add node"
@@ -368,12 +372,12 @@ export function Dock({
 
         <span className="dock-sep" />
 
-        <Tooltip label={commandTooltip('Undo', 'canvas.undo')} placement="left">
+        <Tooltip label={commandTooltip('Undo', 'canvas.undo')} placement={tip}>
           <button className="dock-btn" aria-label="Undo" disabled={!canUndo} onClick={onUndo}>
             <UndoIcon />
           </button>
         </Tooltip>
-        <Tooltip label={commandTooltip('Redo', 'canvas.redo')} placement="left">
+        <Tooltip label={commandTooltip('Redo', 'canvas.redo')} placement={tip}>
           <button className="dock-btn" aria-label="Redo" disabled={!canRedo} onClick={onRedo}>
             <RedoIcon />
           </button>
@@ -381,12 +385,12 @@ export function Dock({
 
         <span className="dock-sep" />
 
-        <Tooltip label={commandTooltip('Go back', 'canvas.goBack')} placement="left">
+        <Tooltip label={commandTooltip('Go back', 'canvas.goBack')} placement={tip}>
           <button className="dock-btn" aria-label="Go back" disabled={!canGoBack} onClick={onGoBack}>
             <ArrowLeftIcon />
           </button>
         </Tooltip>
-        <Tooltip label={commandTooltip('Go forward', 'canvas.goForward')} placement="left">
+        <Tooltip label={commandTooltip('Go forward', 'canvas.goForward')} placement={tip}>
           <button
             className="dock-btn"
             aria-label="Go forward"
@@ -399,7 +403,7 @@ export function Dock({
 
         <span className="dock-sep" />
 
-        <Tooltip label={dirty ? 'Save (unsaved changes)' : 'Save'} placement="left">
+        <Tooltip label={dirty ? 'Save (unsaved changes)' : 'Save'} placement={tip}>
           <button className="dock-btn" aria-label="Save" onClick={onSave}>
             <SaveIcon />
             <span className={`dock-dirty${dirty ? ' dirty' : ''}`} />
@@ -413,12 +417,12 @@ export function Dock({
             follow it in Canvas's rail body. */}
         {group === 'view' && (
           <>
-        <Tooltip label="Fit view" placement="left">
+        <Tooltip label="Fit view" placement={tip}>
           <button className="dock-btn" aria-label="Fit view" onClick={onFitView}>
             <FrameIcon />
           </button>
         </Tooltip>
-        <Tooltip label="Zoom out" placement="left">
+        <Tooltip label="Zoom out" placement={tip}>
           <button className="dock-btn" aria-label="Zoom out" onClick={onZoomOut}>
             <MinusIcon />
           </button>
@@ -445,7 +449,7 @@ export function Dock({
               </button>
             </div>
           )}
-          <Tooltip label="Zoom presets" placement="left">
+          <Tooltip label="Zoom presets" placement={tip}>
             <button
               className={`dock-zoom${zoomMenuOpen ? ' active' : ''}`}
               aria-label="Zoom presets"
@@ -461,7 +465,7 @@ export function Dock({
             </button>
           </Tooltip>
         </div>
-        <Tooltip label="Zoom in" placement="left">
+        <Tooltip label="Zoom in" placement={tip}>
           <button className="dock-btn" aria-label="Zoom in" onClick={onZoomIn}>
             <PlusSmallIcon />
           </button>
@@ -547,7 +551,7 @@ export function Dock({
           )}
           <Tooltip
             label={layoutsDisabled ? 'Layouts are managed on the host' : 'Layouts'}
-            placement="left"
+            placement={tip}
           >
             <button
               className={`dock-btn${layoutMenuOpen ? ' active' : ''}`}
@@ -577,7 +581,7 @@ export function Dock({
                   ? `Dictate (hold ${formatShortcut(dictationShortcut, isMac)})`
                   : `Dictate (${formatShortcut(dictationShortcut, isMac)})`
           }
-          placement="left"
+          placement={tip}
         >
           <button
             className={`dock-btn${dictateActive ? ' active' : ''}`}

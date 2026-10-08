@@ -1003,7 +1003,9 @@ body,
 /* Add-node menu above the dock */
 .dock-menu {
   position: absolute;
-  /* T223: the rail hugs the right edge, so menus open LEFTWARD from their trigger. */
+  /* T226/T229: menus open AWAY from the window edge. The base rule (and `.canvas-rail--right`)
+     opens LEFTWARD from the right rail; the left rail overrides to the RIGHT. One anchor per rail,
+     so a menu can never be steered by a per-button flag. */
   top: 0;
   right: calc(100% + 10px);
   min-width: 190px;
@@ -8272,6 +8274,13 @@ button.group-node__setup:disabled {
 
 .canvas-rail--right {
   right: var(--float-gap);
+}
+
+/* T229: the left rail's menus open RIGHTWARD from the track's right edge (right: 22 + 56 + 10),
+   so a 190px menu lands inside the window instead of leaving the screen edge. */
+.canvas-rail--left .dock-menu {
+  left: calc(100% + 10px);
+  right: auto;
 }
 
 .canvas-rail__body {
