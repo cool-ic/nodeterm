@@ -65,7 +65,10 @@ describe('Canvas focus policy (#743, #711)', () => {
 
     const rect = nodeFitRect(maximized[0], maximized)!
     const focus = viewportForNodeFocus(maximized[0], rect, box, zoom)!
-    // Measured reservations: left=322, top=32, bottom=50. Test actual screen placement.
+    // Measured reservations (T233, shared chrome model): left=322, top=60, bottom=78. The top and
+    // bottom both grew 28px against the old hand-written model (32/50) — its free rect ends above
+    // the cluster and below the dock — but the two shifted together, so the node's CENTRE (the
+    // assertions below) is unchanged, and the bounds simply hold with 28px more room to the bands.
     expect((rect.x + rect.width / 2) * focus.zoom + focus.x).toBeCloseTo(761)
     expect((rect.y + rect.height / 2) * focus.zoom + focus.y).toBeCloseTo(391)
     expect(rect.y * focus.zoom + focus.y + box.top).toBeGreaterThanOrEqual(92 - 1e-8)
