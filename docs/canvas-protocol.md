@@ -74,7 +74,8 @@
 
 **约定**
 
-- `report-outcome --note` 有长度上限，超了会被截断（截断处留省略号）。**长内容写进文件，note 只放路径**——和给工单定的规矩是同一条：正文走文件，口头只报地址。
+- `report-outcome --note` 有长度上限（实测约 200 字符），超了会被截断（截断处留省略号）。**长内容写进文件，note 只放路径**——和给工单定的规矩是同一条：正文走文件，口头只报地址。
+- **通知是信号，不是账。** 完成通知与死信只用来叫醒 opener；App 侧那些记录文件（例如 `orchestration-state/station-outcomes.json`）**每次重挂会被整体重写**，不能当历史查。要留痕就写进文件或台账。
 - **完成信号 = `report-outcome`**。不要轮询 `list`（烧回合、烧 token），不要拿 `send`/`reply` 当完成汇报。
 - opener 收到 notice 才算收口。
 - 接单：reply 或任务板认领。退回：`failed` + note 说清原因。求助：CLI 有提问机制（节点状态 NEEDS YOU），把问题留给能回答的人。
