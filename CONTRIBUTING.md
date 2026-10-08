@@ -138,6 +138,16 @@ stacked swimlanes; it is off by default (`settings.omniKanbanEnabled`), has a de
 shortcut (`view.globalKanbanToggle`), and can be made the default for Cmd+Shift+B via
 `settings.omniKanbanAsDefault` — see CLAUDE.md for the full invariants.
 
+**Node actions live in one builder.** A row that acts on a canvas node — a menu item, a switch, a
+picker — goes in `renderer/lib/nodeActionItems.tsx`, never inline in `Canvas.tsx`. The canvas node
+menu, the sessions-sidebar row menu and both kanban card menus (through
+`components/kanban/cardMenu.tsx`) build from it. Decide in the same change whether a card offers
+the new row: a card takes only `BOARD_NODE_ACTION_IDS`, and a row that acts on canvas position goes
+in `BOARD_SPATIAL_ROW_IDS` instead. Remember the board acts on nodes of projects that are NOT on the
+canvas (the Omni board): write through Canvas's `nodeWritesFor(projectId)` (built on
+`createNodeWriteRouter`, `lib/nodeWriteRouter.ts`), never a live-canvas callback, and report a failure with a `nodeterm:toast`.
+`lib/nodeActionItems.guard.test.ts` fails on a second copy of the rows.
+
 A board card's **source** is a registry entry, not a branch you add at a call site
 (`renderer/lib/kanbanSources.ts`). Declare the source once — filter label, `placement`
 (`assignment` = the board's own persisted assignments, `provider` = the provider owns the column),
