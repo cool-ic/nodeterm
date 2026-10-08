@@ -16867,7 +16867,15 @@ export function Canvas() {
       if (!owner) return undefined
       return { node: owner.nodes.find((n) => n.id === nodeId), projectIsSsh: !!owner.ssh }
     }
-    return api.onAgentStatus((e: NormalizedAgentEvent) => {
+    // T228: the rate-limit reading rides its OWN channel, because it is a fact about the TARGET's
+    // pane that main reads AFTER the turn ended (`capture-pane` + the signature table) — it is not a
+    // field any hook event carries, and folding it into `onAgentStatus` would mean either a second
+    // event or a lie about where the fact came from. Idempotent + transient: the store bails on an
+    // unchanged reading, so re-pushes cost nothing, and a genuine new turn clears it there.
+    const offRateLimited = api.onAgentRateLimited?.((p) => {
+      useAgentStatus.getState().setRateLimited(p.nodeId, p.verdict)
+    })
+    const offStatus = api.onAgentStatus((e: NormalizedAgentEvent) => {
       const cs = useAgentStatus.getState()
       if (e.sessionId) cs.setSessionId(e.nodeId, e.sessionId)
       // Which Claude account the posting session is ACTUALLY on — a hook-derived LABEL, captured
@@ -17081,6 +17089,10 @@ export function Canvas() {
           break
       }
     })
+    return () => {
+      offStatus()
+      offRateLimited?.()
+    }
   }, [])
 
   // The crisp gate's zoom threshold depends on the display (issue #986): report the device-pixel

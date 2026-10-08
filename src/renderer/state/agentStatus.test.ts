@@ -433,3 +433,56 @@ describe('onHookEvent — a per-node pulse for EVERY hook event, same-state ones
     unsub()
   })
 })
+
+describe('T228 — the standing rate-limit reading', () => {
+  const reading = (over: Record<string, unknown> = {}) => ({
+    kind: 'rateLimited' as const,
+    signature: 'too-many-requests',
+    detail: 'the provider is rate limiting (TooManyRequests)',
+    retryAfterMs: 120_000,
+    defaulted: false,
+    at: 1000,
+    ...over
+  })
+
+  it('is recorded, bails on an identical re-push, and is cleared by a genuine new turn', () => {
+    const id = nid()
+    useAgentStatus.getState().setState(id, 'done', 'claude', false, undefined, true, true)
+    useAgentStatus.getState().setRateLimited(id, reading())
+    expect(useAgentStatus.getState().byId[id]?.rateLimited?.retryAfterMs).toBe(120_000)
+    // The classification follows EVERY errored turn, so an unchanged reading must not mint a new
+    // entry object — whole-map subscribers would otherwise re-render on every retried turn.
+    const byId = useAgentStatus.getState().byId
+    useAgentStatus.getState().setRateLimited(id, reading())
+    expect(useAgentStatus.getState().byId).toBe(byId)
+    // A real change DOES land.
+    useAgentStatus.getState().setRateLimited(id, reading({ at: 2000 }))
+    expect(useAgentStatus.getState().byId[id]?.rateLimited?.at).toBe(2000)
+    // A genuine new turn: the reading described the turn that ENDED.
+    useAgentStatus.getState().setState(id, 'working', 'claude', true)
+    expect(useAgentStatus.getState().byId[id]?.rateLimited).toBeUndefined()
+  })
+
+  it('a new turn clears it even when the state does not move (the fast path is bypassed)', () => {
+    // The same-state fast path mutates in place and returns the SAME store object, so a clearing
+    // that was not accounted for there would be silently skipped.
+    const id = nid()
+    useAgentStatus.getState().setState(id, 'done', 'claude', false, undefined, true, true)
+    useAgentStatus.getState().setRateLimited(id, reading())
+    const byId = useAgentStatus.getState().byId
+    useAgentStatus.getState().setState(id, 'done', 'claude', true)
+    expect(useAgentStatus.getState().byId).not.toBe(byId)
+    expect(useAgentStatus.getState().byId[id]?.rateLimited).toBeUndefined()
+  })
+
+  it('`null` retires it, and an unknown node is a no-op', () => {
+    const id = nid()
+    useAgentStatus.getState().setState(id, 'done', 'claude', false, undefined, true, true)
+    useAgentStatus.getState().setRateLimited(id, reading())
+    useAgentStatus.getState().setRateLimited(id, null)
+    expect(useAgentStatus.getState().byId[id]?.rateLimited).toBeUndefined()
+    // A reading annotates a station; it must not put a bare row on `list` for a node no project has.
+    useAgentStatus.getState().setRateLimited('never-seen', reading())
+    expect(useAgentStatus.getState().byId['never-seen']).toBeUndefined()
+  })
+})

@@ -169,6 +169,48 @@ describe('deliverAgentMessage — sequencing', () => {
     expect(r.sends).toEqual([])
   })
 
+  it('T228② — a target inside a provider cooldown is refused with NO byte written and NO probe', async () => {
+    // The nail the ticket names: "目标冷却中 send → 命中闸门，且不会真的往 pane 里写字节". The whole
+    // point is that sending now would open a turn that dies on the very same text, so the gate must
+    // be decided from the STANDING READING — a mirror lookup — before anything touches the pane.
+    const reading = {
+      kind: 'rateLimited' as const,
+      signature: 'too-many-requests',
+      detail: 'the provider is rate limiting (TooManyRequests)',
+      retryAfterMs: 120_000,
+      defaulted: false,
+      at: 1000 // `now` in this harness is 1000, so the full 120s is still to run
+    }
+    const r = recorder({ mirrorEntry: () => ({ ...idle, rateLimited: reading }) })
+    const out = await deliverAgentMessage(req(), r.deps)
+    expect(out).toEqual({ kind: 'rateLimited', retryAfterMs: 120_000, rateLimitedUntil: 121_000 })
+    expect(r.sends).toEqual([])
+    expect(r.order.filter((o) => o.startsWith('paneOwner'))).toEqual([])
+    expect(r.order.filter((o) => o === 'sendEnvelope')).toEqual([])
+  })
+
+  it('T228② — a LAPSED reading is not a cooldown: the delivery proceeds normally', async () => {
+    // The reading is never deleted when its deadline passes (it still describes the turn that
+    // ended, which is what `list` reports), so the gate must judge the clock, not the field.
+    const r = recorder({
+      mirrorEntry: () => ({
+        ...idle,
+        rateLimited: {
+          kind: 'rateLimited' as const,
+          signature: 'too-many-requests',
+          detail: 'the provider is rate limiting (TooManyRequests)',
+          retryAfterMs: 500,
+          defaulted: false,
+          at: 1000
+        }
+      }),
+      now: () => 5000
+    })
+    const out = await deliverWithReceipt(r)
+    expect(out.kind).toBe('delivered')
+    expect(r.sends).toHaveLength(1)
+  })
+
   it('a BUSY target costs no pane probe — the free gates are all decided first', async () => {
     // targetBusy is the most common refusal in an orchestration session and one of only four
     // retryable outcomes. Paying a tmux (or, on SSH, an ssh-over-a-possibly-dead-ControlMaster)

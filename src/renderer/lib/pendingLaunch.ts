@@ -27,7 +27,16 @@ export interface ArmedNode {
 /** The subset of the agentStatus store this module reads. */
 export type StatusById = Record<
   string,
-  { state?: AgentState; lastTurnError?: { at: number }; lastTurnInterrupted?: { at: number } } | undefined
+  | {
+      state?: AgentState
+      lastTurnError?: { at: number }
+      lastTurnInterrupted?: { at: number }
+      /** T228: the standing rate-limit reading; `at + retryAfterMs` is the cooldown. Declared
+       *  STRUCTURALLY (the two fields every consumer needs), so the store's fuller
+       *  `RateLimitReading` satisfies it without this module learning the app's whole vocabulary. */
+      rateLimited?: { retryAfterMs: number; at: number }
+    }
+  | undefined
 >
 
 export interface LaunchToFire {

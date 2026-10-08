@@ -646,9 +646,15 @@ export function renderMessageOutcome(o: AgentMessageOutcome): AgentMessageReply 
       }
     }
     case 'rateLimited':
+      // T228: with no queue wired (a shell that runs no delivery queue) the target's cooldown can
+      // only be refused — say WHICH limit it is, so the sender does not read its own pacing into a
+      // cooldown on the far side.
       return {
         ok: false,
-        error: `rateLimited: over the messaging budget — retry after ${o.retryAfterMs}ms.`,
+        error:
+          o.rateLimitedUntil !== undefined
+            ? `rateLimited: the target’s provider is rate limiting it — retry after ${o.retryAfterMs}ms.`
+            : `rateLimited: over the messaging budget — retry after ${o.retryAfterMs}ms.`,
         result: o
       }
     case 'queueFull':
@@ -1002,6 +1008,10 @@ const BOARD_QUEUE_ON: ReadonlySet<AgentMessageOutcome['kind']> = new Set(['rateL
  *  inside the window would only meet the same refusal. */
 const BOARD_RETRY_SLACK_MS = 500
 
+/** T228: the same idea for a target's provider cooldown — a clock lands a beat after the deadline
+ *  rather than exactly on it, so the re-offer is not the very first request the provider sees. */
+const RATE_LIMIT_RETRY_SLACK_MS = 500
+
 /** The `AgentMessageOutcome` kinds a permitted-but-not-ready target produces — a busy agent, or a
  *  node between sessions. Only these are enqueued (and only with a queue wired): the target passed
  *  scope/ownership/grant, and its non-readiness is a turn it happens to be in, not a boundary. */
@@ -1091,6 +1101,27 @@ async function deliverWithQueue(
       return answer(
         await queued(false, outcome, outcome.kind === 'targetNotStarted' ? NOT_STARTED_TTL_MS : undefined)
       )
+    // ── T228②: THE TARGET'S OWN COOLDOWN — hold, do not refuse ───────────────────────────────────
+    //
+    // Chosen over a bare `rateLimited` refusal, and the reason is the one the whole queue exists
+    // for: the sender here is a language model, and "retry after 120000ms" tells it a number it
+    // cannot honour (it will either hammer the pair limiter or guess, which is exactly the field
+    // behaviour that burned two turns — the ticket's own report). Holding it in the durable queue
+    // buys the three things a refusal cannot: the wait survives a restart, the retry is a CLOCK
+    // (`retryAfter`) rather than the target's next idle — a rate-limited target goes idle
+    // immediately and would only report "idle" for a turn that dies again — and the entry's end
+    // rides the T234 terminal/in-band legs, so a cooldown that never lifts still reaches the
+    // sender rather than vanishing.
+    //
+    // Applies to every verb, the station notice included: its monitor's own `rateLimited` retry
+    // stays for the PAIR window (which is not held here), and a notice held on a target cooldown
+    // is better served by the queue's durable wait than by a 250ms-slack re-attempt.
+    if (outcome.kind === 'rateLimited' && outcome.rateLimitedUntil !== undefined) {
+      const held = await queued(false, outcome)
+      // The cooldown ends on the provider's clock: nothing will report "idle" for it.
+      if (held.kind === 'queued') queue.retryAfter(req.targetNodeId, outcome.retryAfterMs + RATE_LIMIT_RETRY_SLACK_MS)
+      return answer(held)
+    }
     if (req.verb === 'board-comment' && BOARD_QUEUE_ON.has(outcome.kind)) {
       const held = await queued(false, outcome)
       // Held by the pair window, not by the target's turn: nothing will report "idle" when the
@@ -1125,7 +1156,12 @@ function queuedBecauseText(o: AgentMessageOutcome): string {
     case 'targetStatusStale':
       return 'the node holds a session identity but has posted no verified status yet'
     case 'rateLimited':
-      return `the pair window is still open (${o.retryAfterMs}ms left)`
+      // T228: two different limits share this kind. Which one it is decides the sentence, because
+      // the pair window is the SENDER's pacing and the cooldown is the TARGET's provider refusing
+      // to run its turn at all — the sender acts on those differently.
+      return o.rateLimitedUntil !== undefined
+        ? `the target’s provider is rate limiting it and it cannot run a turn for ≈${Math.ceil(o.retryAfterMs / 1000)}s`
+        : `the pair window is still open (${o.retryAfterMs}ms left)`
     case 'targetNotAgentPane':
       return 'the node is hibernated — its pane is on a shell, and it was woken for this message'
     case 'targetWriteHeld':

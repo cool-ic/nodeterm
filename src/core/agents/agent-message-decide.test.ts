@@ -9,6 +9,7 @@ import {
   RETRYABLE,
   NO_TOKEN_FILE_NOTE,
   SESSION_BOUNDARY_REASON,
+  rateLimitCooldown,
   type AgentMessageOutcomeKind,
   type DeliveryFacts
 } from './agent-message-decide'
@@ -59,6 +60,64 @@ describe('decideDelivery — one case per refusal', () => {
     const o = decideDelivery(ready({ retryAfterMs: 1500 }))
     expect(o).toEqual({ kind: 'rateLimited', retryAfterMs: 1500 })
     expect(retryable(o)).toBe(true)
+  })
+
+  describe('T228② — the target’s own cooldown rides the SAME decision', () => {
+    it('marks the outcome with `rateLimitedUntil` so the shell knows to HOLD, not refuse', () => {
+      const o = decideDelivery(
+        ready({ cooldown: { until: 61_000, retryAfterMs: 60_000 } })
+      )
+      expect(o).toEqual({ kind: 'rateLimited', retryAfterMs: 60_000, rateLimitedUntil: 61_000 })
+      // Still one `rateLimited` for RETRYABLE and DECISION_ORDER: a caller that already understands
+      // "rate limited" needs no second concept, and the exhaustive tables do not grow.
+      expect(retryable(o)).toBe(true)
+      expect(DECISION_ORDER.filter((k) => k === 'rateLimited')).toHaveLength(1)
+    })
+
+    it('decides from the mirror alone — no pane fact is needed', () => {
+      // The free/paid boundary is the guarantee that no bytes can reach a doomed turn: this must
+      // answer from `decidePreProbe`, which never touches a pane.
+      const facts = {
+        targetLive: true,
+        tokenFilePresent: true,
+        target: readyEntry(),
+        cooldown: { until: 61_000, retryAfterMs: 60_000 }
+      }
+      expect(decidePreProbe(facts)).toEqual({
+        kind: 'rateLimited',
+        retryAfterMs: 60_000,
+        rateLimitedUntil: 61_000
+      })
+    })
+
+    it('the LATER of the two limits wins, and the pair window alone stays a plain refusal', () => {
+      const both = decideDelivery(
+        ready({ retryAfterMs: 1500, cooldown: { until: 61_000, retryAfterMs: 60_000 } })
+      )
+      // Reporting 1500ms would invite a retry straight into the target's cooldown.
+      expect(both).toEqual({ kind: 'rateLimited', retryAfterMs: 60_000, rateLimitedUntil: 61_000 })
+      const pairLonger = decideDelivery(
+        ready({ retryAfterMs: 90_000, cooldown: { until: 61_000, retryAfterMs: 60_000 } })
+      )
+      expect(pairLonger).toEqual({
+        kind: 'rateLimited',
+        retryAfterMs: 90_000,
+        rateLimitedUntil: 61_000
+      })
+    })
+
+    it('an exhausted cooldown is not a limit at all', () => {
+      // `rateLimitCooldown` is what the shells call; a reading whose deadline has passed must not
+      // answer with a cooldown, which is exactly how `list` and the gate agree about a lapsed one.
+      expect(rateLimitCooldown({ retryAfterMs: 60_000, at: 0 }, 60_000)).toBeNull()
+      expect(rateLimitCooldown({ retryAfterMs: 60_000, at: 0 }, 0)).toEqual({
+        until: 60_000,
+        retryAfterMs: 60_000
+      })
+      expect(rateLimitCooldown(undefined, 0)).toBeNull()
+      // …and with no cooldown fact the decision is the plain pair-window refusal, unchanged.
+      expect(decideDelivery(ready()).kind).toBe('proceed')
+    })
   })
 
   it('a zero/absent retryAfterMs is not a rate limit', () => {

@@ -3,6 +3,10 @@ import {
   DeliveryQueue,
   DELIVERY_QUEUE_CAPACITY,
   DELIVERY_QUEUE_TTL_MS,
+  EXPIRY_REASON_TEXT,
+  RATE_LIMIT_MAX_ATTEMPTS,
+  RATE_LIMIT_MAX_BACKOFF_MS,
+  RATE_LIMIT_MAX_WAIT_MS,
   type DeliveryQueueDeps,
   type QueueExpiryReason,
   type QueuedDeliveryRequest,
@@ -203,7 +207,141 @@ describe('DeliveryQueue', () => {
     expect(h.expired[0].info.traceId).toBeTruthy()
   })
 
-  // ── T205: a LIVE target never lets its entries expire ────────────────────────────────────────
+  // ── T228③: the TARGET's provider cooldown — a clock, never a drop ──────────────────────────────
+  describe('T228③ — a rate-limited entry backs off and is never dropped on the limit itself', () => {
+    const limited = (ms: number): AgentMessageOutcome => ({
+      kind: 'rateLimited',
+      retryAfterMs: ms,
+      rateLimitedUntil: 1000 + ms
+    })
+
+    it('puts the entry back on a TIMER (not the next idle) and re-offers it after the backoff', async () => {
+      const h = harness()
+      const q = new DeliveryQueue(h.deps, { ttlMs: 60 * 60_000 })
+      await q.enqueue(req())
+      h.setOutcome(limited(60_000))
+      await q.onTargetIdle('dst')
+      // Attempted, met the cooldown, still ours — not delivered, not dead-lettered.
+      expect(h.delivered).toHaveLength(1)
+      expect(q.depth('dst')).toBe(1)
+      expect(h.expired).toEqual([])
+      // The re-offer is a CLOCK: a rate-limited target goes idle immediately, so waiting for an
+      // idle event would wait forever. The first ladder rung IS the provider's own retryAfter.
+      const nudge = h.timers.filter((t) => !t.cancelled).at(-1)!
+      expect(nudge.ms).toBe(60_000)
+
+      // Fire it, still limited: the rung DOUBLES (exponential), and the entry survives.
+      h.setClock(1000 + 60_000)
+      nudge.fn()
+      await vi.waitFor(() => expect(h.delivered).toHaveLength(2))
+      const second = h.timers.filter((t) => !t.cancelled).at(-1)!
+      expect(second.ms).toBe(120_000)
+
+      // Fire it again with the limit lifted: it delivers, and the sender hears `delivered`.
+      h.setClock(1000 + 60_000 + 120_000)
+      h.setOutcome({ kind: 'delivered', traceId: 'd', traced: 'memory', receipt: 'observed', signal: 'newTurn' })
+      second.fn()
+      await vi.waitFor(() => expect(q.depth('dst')).toBe(0))
+      expect(h.flushed.map((f) => f.outcome.kind)).toEqual(['delivered'])
+      expect(h.expired).toEqual([])
+    })
+
+    it('a `done` from the very turn that hit the limit does NOT burn a rung', async () => {
+      // The field shape: the cooldown starts, and the errored turn's own `done` arrives a moment
+      // later. Without the hold guard that event would spend an attempt and re-arm a shorter clock
+      // every time the target errored — a ladder that never gets anywhere and tells the sender
+      // nothing.
+      const h = harness()
+      const q = new DeliveryQueue(h.deps, { ttlMs: 60 * 60_000 })
+      await q.enqueue(req())
+      h.setOutcome(limited(60_000))
+      await q.onTargetIdle('dst')
+      expect(h.delivered).toHaveLength(1)
+      h.setClock(1000 + 5_000) // five seconds in: the hold is still running
+      await q.onTargetIdle('dst')
+      // No second delivery attempt was spent…
+      expect(h.delivered).toHaveLength(1)
+      expect(q.depth('dst')).toBe(1)
+      // …and the pending re-offer is the one the backoff already armed (the queue keeps at most one
+      // nudge per target, so the hold's remainder does not arm a second clock). It still fires at
+      // the hold's own deadline, which is what the entry is waiting for.
+      const nudge = h.timers.filter((t) => !t.cancelled).at(-1)!
+      expect(nudge.ms).toBe(60_000)
+    })
+
+    it('past the attempt cap it becomes a DEAD LETTER on the T234 in-band path, saying which limit', async () => {
+      const h = harness()
+      const q = new DeliveryQueue(h.deps, { ttlMs: 24 * 60 * 60_000 })
+      await q.enqueue(req())
+      h.setOutcome(limited(60_000))
+      let clock = 1000
+      await q.onTargetIdle('dst') // attempt 1 meets the cooldown → the first rung is 60s
+      const rungs: number[] = []
+      for (let i = 0; q.depth('dst') > 0 && i < 12; i++) {
+        const nudge = h.timers.filter((t) => !t.cancelled).at(-1)!
+        rungs.push(nudge.ms)
+        clock += nudge.ms
+        h.setClock(clock)
+        nudge.fn() // firing also clears the queue's one-nudge-per-target dedup
+        await vi.waitFor(() => expect(h.delivered.length).toBe(i + 2))
+      }
+      // The ladder is the ticket's: the provider's own retryAfter first, then ×2, capped.
+      expect(rungs).toEqual([60_000, 120_000, 240_000, 480_000])
+      await vi.waitFor(() => expect(h.expired).toHaveLength(1))
+      expect(q.depth('dst')).toBe(0)
+      expect(h.expired[0].info.reason).toBe('rate-limit-exhausted')
+      // Never reported as delivered, and never dropped in silence: the durable trace line carries
+      // the reason IN WORDS and the in-band notice reads the same table (`EXPIRY_REASON_TEXT`).
+      expect(h.flushed).toEqual([])
+      const line = h.traced.find((t) => t.outcome === 'expired')
+      expect(line?.reason).toBe(EXPIRY_REASON_TEXT['rate-limit-exhausted'])
+      expect(line?.reason).toContain('rate limiting')
+      expect(line?.reason).not.toContain('session')
+    })
+
+    it('the backoff is CAPPED at ten minutes, however long the provider asks', async () => {
+      const h = harness()
+      const q = new DeliveryQueue(h.deps, { ttlMs: 24 * 60 * 60_000 })
+      await q.enqueue(req())
+      h.setOutcome(limited(30 * 60_000)) // the provider says half an hour
+      await q.onTargetIdle('dst')
+      const nudge = h.timers.filter((t) => !t.cancelled).at(-1)!
+      expect(nudge.ms).toBe(RATE_LIMIT_MAX_BACKOFF_MS)
+    })
+
+    it('the total-wait cap ends it early even when attempts remain', async () => {
+      // A short cooldown can ladder many times inside a long wait; the ticket bounds the WAIT as
+      // well as the count, so a station whose provider re-limits for an hour does not hold its
+      // sender's mail for an hour.
+      const h = harness()
+      const q = new DeliveryQueue(h.deps, { ttlMs: 24 * 60 * 60_000 })
+      await q.enqueue(req())
+      h.setOutcome(limited(60_000))
+      await q.onTargetIdle('dst')
+      h.setClock(1000 + RATE_LIMIT_MAX_WAIT_MS)
+      await q.onTargetIdle('dst')
+      await vi.waitFor(() => expect(h.expired).toHaveLength(1))
+      expect(h.expired[0].info.reason).toBe('rate-limit-exhausted')
+      expect(q.depth('dst')).toBe(0)
+    })
+
+    it('REGRESSION — a pair-window `rateLimited` (no `rateLimitedUntil`) keeps its old meaning', async () => {
+      // The sender's own pacing is NOT the target's cooldown: it waits for the next idle exactly as
+      // it always did, is never given a backoff ladder, and never becomes a dead letter on a timer.
+      const h = harness()
+      const q = new DeliveryQueue(h.deps)
+      await q.enqueue(req())
+      h.setOutcome({ kind: 'rateLimited', retryAfterMs: 5000 })
+      await q.onTargetIdle('dst')
+      expect(h.delivered).toHaveLength(1)
+      expect(q.depth('dst')).toBe(1)
+      expect(h.expired).toEqual([])
+      // One timer, its TTL — no second, shorter nudge was armed for a backoff.
+      expect(h.timers.filter((t) => !t.cancelled)).toHaveLength(1)
+      expect(h.timers.filter((t) => !t.cancelled)[0].ms).toBe(DELIVERY_QUEUE_TTL_MS)
+    })
+  })
+
   it('a TTL lapse on a LIVE target re-arms instead of expiring (a busy turn may outlive the TTL)', async () => {
     const h = harness({ sessionLiveness: async () => 'live' })
     const q = new DeliveryQueue(h.deps, { ttlMs: 1000 })

@@ -4,6 +4,7 @@ import type { AgentId } from '@shared/agents/config'
 import type { AgentState } from '@shared/agents/normalize'
 import type { HeldPermission } from '@shared/agents/permission-answer'
 import type { NodeTerminalApi, ObservedClaudeAccount } from '@shared/types'
+import type { RateLimitReading } from '@shared/agents/agent-messaging'
 import type { WakeContext } from '../terminal/wake-identity'
 
 /**
@@ -260,6 +261,21 @@ export interface AgentNodeStatus {
    */
   lastTurnError?: { at: number }
   /**
+   * T228 — the station's provider is RATE LIMITING it, as read off its own pane when its last turn
+   * died (`TooManyRequests` / `Requests are too frequent` / `429` …). Pushed by main, which takes
+   * the reading and parses the retry-after; `detail` is the app's own vocabulary for the cause and
+   * NEVER the pane's words (the same rule every other surface here keeps about station output).
+   *
+   * `at + retryAfterMs` is the cooldown, so a column can count it DOWN without a timer of its own:
+   * the field is a reading, not a schedule. `defaulted` says the provider named no retry time and a
+   * conservative default was used, so a surface can say "≈" honestly.
+   *
+   * Cleared on the same edge as `lastTurnError` — a genuine new turn is past it. TRANSIENT, and for
+   * the same reason: after a relaunch the reading describes a turn from another app run, and the
+   * delivery gate reads the MAIN-side mirror anyway.
+   */
+  rateLimited?: RateLimitReading
+  /**
    * The station's LAST turn was interrupted by the user (Esc / Ctrl+C) instead of finishing — from
    * an interrupted `done` (`NormalizedAgentEvent.interrupted`: the transcript marker Claude writes,
    * a `Stop` with `is_interrupt`, or the `idle_prompt` rescue).
@@ -393,6 +409,12 @@ export interface AgentStatusStore {
   /** Record (or withdraw) that this node's CLI announced its exit. Transient; see `sessionEnded`.
    *  Bails when the flag already reads that way. */
   setSessionEnded(id: string, on: boolean): void
+  /**
+   * T228 — record (or, with `null`, RETIRE) the node's standing rate-limit reading. Pushed by main
+   * off the pane; transient, like `lastTurnError` (see `rateLimited`). A no-op for a node with no
+   * entry: a reading is an annotation on a station the canvas already knows about.
+   */
+  setRateLimited(id: string, verdict: RateLimitReading | null): void
   /** Record that this node just launched a background shell task (see `backgroundTaskAt`).
    *  Transient — nothing is written to localStorage. */
   markBackgroundTask(id: string): void
@@ -783,7 +805,8 @@ export function createAgentStatusSession(
         // same-state fast path below mutates IN PLACE to avoid a re-render — which is exactly what
         // a badge appearing or disappearing needs, so an event that moves this must not take it.
         const turnErrorMoves =
-          errored === true || (newTurn === true && prev.lastTurnError !== undefined)
+          errored === true ||
+          (newTurn === true && (prev.lastTurnError !== undefined || prev.rateLimited !== undefined))
         // The interrupt verdict moves on the same kinds of edge (see `lastTurnInterrupted`).
         const interruptNext = interruptVerdict(prev.lastTurnInterrupted, state, newTurn, interrupted)
         const turnInterruptMoves = (interruptNext === undefined) !== (prev.lastTurnInterrupted === undefined)
@@ -859,8 +882,14 @@ export function createAgentStatusSession(
         // asked something else, and the old failure no longer describes what it is doing. Anything
         // else LEAVES IT STANDING (it rides the spread): the intermediate transitions between the
         // error and the next prompt say nothing about whether that turn produced anything.
-        if (newTurn) next.lastTurnError = undefined
-        else if (errored) next.lastTurnError = { at: now }
+        if (newTurn) {
+          next.lastTurnError = undefined
+          // T228: the rate-limit reading describes the turn that ENDED. A genuine new turn — the
+          // station is being asked something else — is past it, on the same edge as the verdict.
+          // (A reading that is merely STALE is not cleared here: the column counts its own cooldown
+          // down and prints nothing once it lapses, and clearing on time would need a timer.)
+          next.rateLimited = undefined
+        } else if (errored) next.lastTurnError = { at: now }
         next.lastTurnInterrupted = interruptNext === 'set' ? { at: now } : interruptNext
         // A LIVE state is proof the CLI is running, so the hibernated flag is simply wrong and is
         // dropped here — the one self-heal this flag has. It is set by a controller that watched
@@ -1118,6 +1147,31 @@ export function createAgentStatusSession(
         // Transient (see `backgroundTaskAt`) — no save(): a stamp restored from disk would exempt
         // the node from Eco forever.
         return { byId: { ...s.byId, [id]: { ...prev, backgroundTaskAt: Date.now() } } }
+      }),
+
+    setRateLimited: (id, verdict) =>
+      set((s) => {
+        // A no-op for an unknown node: the reading annotates a station the canvas already has, and
+        // creating an entry here would put a bare row on `list` for a node no project lists.
+        if (!s.byId[id]) return s
+        const prev = s.byId[id]
+        // Replacing a reading with an identical one is the common case — an errored turn's `done`
+        // and the classification that follows it both arrive per turn. Bail rather than mint a new
+        // entry object for it: whole-map subscribers would re-render on every retried turn.
+        const same =
+          (prev.rateLimited === undefined && verdict === null) ||
+          (prev.rateLimited !== undefined &&
+            verdict !== null &&
+            prev.rateLimited.signature === verdict.signature &&
+            prev.rateLimited.detail === verdict.detail &&
+            prev.rateLimited.retryAfterMs === verdict.retryAfterMs &&
+            prev.rateLimited.defaulted === verdict.defaulted &&
+            prev.rateLimited.at === verdict.at)
+        if (same) return s
+        // Transient, no `save()`: see the field comment.
+        return {
+          byId: { ...s.byId, [id]: { ...prev, rateLimited: verdict ?? undefined } }
+        }
       }),
 
     markUnread: (id) =>

@@ -82,7 +82,21 @@ export type AgentMessageOutcome =
    *  answer that nothing is there, `session-unknown` is a probe that could not say (never a death),
    *  `not-restorable` is an entry that did not survive a restart with enough to deliver it. */
   | { kind: 'expired'; traceId: string; queuedForMs: number; reason?: QueueExpiryReason }
-  | { kind: 'rateLimited'; retryAfterMs: number }
+  /**
+   * Two different limits, ONE outcome (T228).
+   *
+   *  - `retryAfterMs` alone is THIS SENDER's pair window: the per-pair limiter (PR 4) says the two
+   *    nodes have been talking too fast. The caller is a language model; it retries when it likes.
+   *  - `rateLimitedUntil` present means the TARGET's own provider is rate limiting IT — an absolute
+   *    epoch, read off the target's pane and carried on its status mirror. Sending now would open a
+   *    turn that dies on the same text, so the shell HOLDS the message (the durable queue, a clock,
+   *    not the target's turn) rather than spending a delivery on it.
+   *
+   * They share a kind deliberately: `RETRYABLE`, `DECISION_ORDER` and every caller that already
+   * understands "rate limited" keep working unchanged, and the queue tells them apart by the one
+   * field that only the target's cooldown can set.
+   */
+  | { kind: 'rateLimited'; retryAfterMs: number; rateLimitedUntil?: number }
   | { kind: 'queueFull'; capacity: number }
   | { kind: 'targetBusy'; state: string }
   | { kind: 'targetNotIdleUnknown'; reason: string }
@@ -220,6 +234,18 @@ export interface DeliveryFacts {
   notPermitted?: NotPermittedReason
   /** Set by PR 4's per-pair limiter. `> 0` means refuse now and say when. */
   retryAfterMs?: number
+  /**
+   * T228 — the TARGET's provider is rate limiting it, from the reading the shell took off its pane
+   * when its last turn died (`MirrorEntry.rateLimited`). `until` is the epoch the cooldown ends and
+   * `retryAfterMs` is how much of it is left; the decider folds BOTH limits into ONE `rateLimited`
+   * decision (the later of the two wins) so `DECISION_ORDER` keeps a single entry for it, and the
+   * `until` rides through to the outcome — its presence is what tells the shell to HOLD the message
+   * instead of refusing it.
+   *
+   * A reading, not an authorization: nothing here may branch on it beyond declining to open a turn
+   * the provider would refuse anyway.
+   */
+  cooldown?: { until: number; retryAfterMs: number }
   /** Is there a live session for this node at all? False ⇒ `targetGone`. */
   targetLive: boolean
   /**
@@ -275,6 +301,32 @@ export interface DeliveryFacts {
 /** The one non-refusal. Kept out of `AgentMessageOutcome` so no caller can return it as a result. */
 export interface Proceed {
   kind: 'proceed'
+}
+
+/** The shape of a standing rate-limit reading — `MirrorEntry.rateLimited` and `MirrorRateLimit`
+ *  satisfy it structurally, so this module needs no dependency on the mirror to read one. */
+export interface RateLimitReading {
+  retryAfterMs: number
+  /** When the reading was taken; the cooldown runs from here. */
+  at: number
+}
+
+/**
+ * T228 — a standing rate-limit reading as a live cooldown, or `null`.
+ *
+ * `null` for a node with no reading and for one whose cooldown has already run out: the second case
+ * is why this is a function of `now` rather than a field. The reading is deliberately NOT deleted
+ * when it lapses — it still describes the turn that ended, which is what `list` reports — so the
+ * gate must judge the deadline itself. Pure; the clock arrives as an argument.
+ */
+export function rateLimitCooldown(
+  reading: RateLimitReading | undefined,
+  now: number
+): { until: number; retryAfterMs: number } | null {
+  if (!reading) return null
+  const until = reading.at + reading.retryAfterMs
+  const retryAfterMs = until - now
+  return retryAfterMs > 0 ? { until, retryAfterMs } : null
 }
 
 /**
@@ -418,7 +470,8 @@ export const SESSION_BOUNDARY_REASON =
  * the split the order would be a comment — the refusal text would be right and the round-trip would
  * be paid anyway, which is exactly the kind of gap a source-reading test cannot see.
  *
- * The set is exhaustive as of `FIRST_PAID_DECISION`: `notPermitted`, self-send, `rateLimited`,
+ * The set is exhaustive as of `FIRST_PAID_DECISION`: `notPermitted`, self-send, `rateLimited` (the
+ * sender's pair window AND, since T228, the target's own cooldown — both are a mirror/limiter read),
  * `targetGone`, the three identity refusals and the two idle ones. If a future gate is free, it
  * belongs here; if it needs a probe, it belongs after. The test asserts the boundary by RUNNING a
  * delivery and counting `paneOwner` calls, not by reading this sentence.
@@ -432,6 +485,7 @@ export function decidePreProbe(
     | 'targetNodeId'
     | 'notPermitted'
     | 'retryAfterMs'
+    | 'cooldown'
     | 'targetLive'
     | 'target'
     | 'tokenFilePresent'
@@ -449,8 +503,24 @@ export function decidePreProbe(
   // and no later caller can forget it.
   if (f.sourceNodeId && f.targetNodeId && f.sourceNodeId === f.targetNodeId)
     return { kind: 'notPermitted', reason: 'self-send' }
-  if (typeof f.retryAfterMs === 'number' && f.retryAfterMs > 0)
-    return { kind: 'rateLimited', retryAfterMs: f.retryAfterMs }
+  // ── THE TWO LIMITS, ONE DECISION (T228) ────────────────────────────────────────────────────────
+  //
+  // The pair window is the sender's own pacing and the target's cooldown is the provider refusing
+  // to run ITS turn. Both mean "do not open a turn now", so they answer with the same kind and the
+  // callers' existing retry rules keep working. The LATER deadline wins: reporting the shorter one
+  // would invite a retry straight into the other limit. `rateLimitedUntil` is set only for the
+  // target's cooldown, and that field is what tells the shell to hold the message in the queue.
+  //
+  // Cheap by construction: both facts are already in hand (`reserveFlow` and a mirror lookup), so
+  // this stays ahead of every pane round-trip and no bytes can reach a doomed turn.
+  const pairMs = typeof f.retryAfterMs === 'number' && f.retryAfterMs > 0 ? f.retryAfterMs : 0
+  const coolMs = f.cooldown && f.cooldown.retryAfterMs > 0 ? f.cooldown.retryAfterMs : 0
+  if (pairMs > 0 || coolMs > 0)
+    return {
+      kind: 'rateLimited',
+      retryAfterMs: Math.max(pairMs, coolMs),
+      ...(coolMs > 0 && f.cooldown ? { rateLimitedUntil: f.cooldown.until } : {})
+    }
   if (!f.targetLive) return { kind: 'targetGone' }
   // Identity and idleness are BOTH free — a map lookup and a local stat — so they belong here,
   // ahead of anything that touches a pane. See FIRST_PAID_DECISION.

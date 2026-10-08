@@ -8,6 +8,7 @@ import { PANE_PROBE_TIMEOUT_MS, probeWithin } from './pane-probe'
 import {
   decideDelivery,
   decidePreProbe,
+  rateLimitCooldown,
   WRITE_FAILURE_TEXT,
   type AgentMessageOutcome,
   type DeliveryFacts,
@@ -488,6 +489,10 @@ export async function deliverAgentMessage(
       targetNodeId: req.targetNodeId,
       notPermitted: req.notPermitted,
       retryAfterMs: req.retryAfterMs,
+      // T228: the target's own provider cooldown, read off its standing status reading. Judged here
+      // — with the pair window — so it is decided WITHOUT a tmux round-trip and no byte of the
+      // envelope can reach a turn the provider would refuse.
+      cooldown: rateLimitCooldown(deps.mirrorEntry(req.targetNodeId)?.rateLimited, deps.now()) ?? undefined,
       targetLive: req.targetLive ?? true,
       target: deps.mirrorEntry(req.targetNodeId),
       tokenFilePresent: deps.tokenFilePresent(req.targetNodeId),
@@ -512,6 +517,7 @@ export async function deliverAgentMessage(
     const facts: DeliveryFacts = {
       notPermitted: req.notPermitted,
       retryAfterMs: req.retryAfterMs,
+      cooldown: rateLimitCooldown(deps.mirrorEntry(req.targetNodeId)?.rateLimited, deps.now()) ?? undefined,
       targetLive: req.targetLive ?? true,
       pane: verdict,
       paneObserved: before?.command,

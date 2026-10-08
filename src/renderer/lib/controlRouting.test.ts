@@ -576,6 +576,35 @@ it('lists held, failed and unconfirmed launches without claiming an agent is hea
   expect(text).not.toContain('RUNNING')
 })
 
+it('T228: `list` carries 限流中(≈Xs) as its own segment, counting down and coexisting', () => {
+  const nodes = [{ id: 'hot', agentId: 'claude' }, { id: 'cold', agentId: 'claude' }]
+  const reading = (over: Record<string, unknown> = {}) => ({
+    kind: 'rateLimited' as const,
+    signature: 'too-many-requests',
+    detail: 'the provider is rate limiting (TooManyRequests)',
+    retryAfterMs: 120_000,
+    defaulted: false,
+    at: 1000,
+    ...over
+  })
+  const statuses = {
+    // Limited AND errored: the two segments must coexist, neither topping the other.
+    hot: { state: 'done' as const, lastTurnError: { at: 1 }, rateLimited: reading() },
+    cold: { state: 'done' as const, rateLimited: reading({ at: 0, retryAfterMs: 10 }) }
+  }
+  const text = controlListingText(storedNodeListing(nodes, statuses, {}, 1000 + 30_000), {
+    lookup: () => ({ proven: true, reason: 'ledger-row' as never })
+  })
+  expect(text).toContain('hot [terminal]  — IDLE — LAST TURN ERRORED — 限流中(≈90s)')
+  // The trust column still prints on the same row.
+  expect(text.split('\n')[0]).toContain('信任：')
+  // A LAPSED reading prints NOTHING — a limit an hour ago is not a live one — while the reading
+  // itself stays on the store (the turn-error verdict it came with is untouched).
+  const lapsed = controlListingText(storedNodeListing(nodes, statuses, {}, 1000 + 120_001))
+  expect(lapsed).not.toContain('限流中')
+  expect(lapsed).toContain('LAST TURN ERRORED')
+})
+
 it('T216: a failed launch names the gate that refused it and the way out', () => {
   const nodes = [
     { id: 'live', pendingLaunch: { command: 'codex' } },

@@ -268,6 +268,7 @@ export function storedNodeListing(
           handovers
         )
       : []
+    const rateLimitedFor = rateLimitSecondsLeft(status?.rateLimited, now)
     return {
       id: n.id, kind: n.kind ?? 'terminal', title: n.title ?? '',
       // T207: does this row belong to a messaging participant? The trust column needs to know
@@ -276,6 +277,11 @@ export function storedNodeListing(
       ...(issue ? { issue } : {}),
       ...(status?.lastTurnError ? { lastTurnErrored: true } : {}),
       ...(status?.lastTurnInterrupted && !status.lastTurnError ? { lastTurnInterrupted: true } : {}),
+      // T228: the cooldown, as the seconds still to run. Computed HERE from the reading and `now`
+      // rather than stored, so the row counts down with every `list` and a reading whose cooldown
+      // has lapsed prints NOTHING — an old limit is not a live one, and the annotation is about a
+      // turn the station could start now, not about history.
+      ...(rateLimitedFor !== undefined ? { rateLimitedFor } : {}),
       ...(launchState ? { launchState } : {}),
       // T216: the refusal's gate (and, for line-too-long, its byte count) rides the row.
       ...(launchFailure ? { failReason: launchFailure.reason,
@@ -304,6 +310,24 @@ function agentRowState(state: string | undefined): 'idle' | 'needs-you' | 'uncon
   if (state === 'done') return 'idle'
   if (state === 'waiting' || state === 'blocked') return 'needs-you'
   return 'unconfirmed'
+}
+
+/**
+ * T228 — how many seconds of a station's rate-limit cooldown are LEFT, or `undefined` when there is
+ * no standing limit.
+ *
+ * `undefined` for a lapsed cooldown on purpose: the reading is kept (it describes the turn that
+ * ended, and its detail is still true), so the deadline must be judged against the clock rather
+ * than by the field's presence. Rounded UP, because a column that said `0s` for a limit still in
+ * force would read as "it is over".
+ */
+function rateLimitSecondsLeft(
+  reading: { retryAfterMs: number; at: number } | undefined,
+  now: number
+): number | undefined {
+  if (!reading) return undefined
+  const left = reading.at + reading.retryAfterMs - now
+  return left > 0 ? Math.ceil(left / 1000) : undefined
 }
 
 const launchLabels = {
@@ -399,6 +423,9 @@ export function controlListingText(
     (n.outcomeSuperseded ? ' (before new work queued for it; not counted until it reports again)' : '') +
     (n.lastTurnErrored ? ' — LAST TURN ERRORED' : '') +
     (n.lastTurnInterrupted ? ' — LAST TURN INTERRUPTED' : '') +
+    // T228: its own segment, coexisting with the trust column and LAST TURN ERRORED — a station can
+    // be rate limited AND have errored AND be unproven, and each is a different action.
+    (n.rateLimitedFor !== undefined ? ` — 限流中(≈${n.rateLimitedFor}s)` : '') +
     ((): string => {
       // T201/T207: the trust column, on AGENT rows only. A failure is printed, never swallowed.
       if (!trust || !n.agent) return ''

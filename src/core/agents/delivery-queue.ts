@@ -102,6 +102,21 @@ export const DELIVERY_QUEUE_TTL_MS = 5 * 60_000
  *  fairness and tells the sender loudly instead of silently discarding a message already accepted. */
 export const DELIVERY_QUEUE_CAPACITY = 16
 
+/**
+ * T228③ — the bounds on re-offering an entry that met the TARGET's provider cooldown.
+ *
+ * The ticket's rule, as constants: never a silent drop and never a dead letter for a limit that is
+ * the provider's own advice, but also never an unbounded wait. `RATE_LIMIT_MAX_ATTEMPTS` is how many
+ * times the cooldown is allowed to REFUSE the entry before it becomes a dead letter — each refusal
+ * doubles the previous delay (the provider's own `retryAfter` is the first rung), capped at ten
+ * minutes. `RATE_LIMIT_MAX_WAIT_MS` bounds the total wait independently, since a short reading can
+ * ladder many rungs inside a long wait — whichever runs out first is the end, and a station whose
+ * provider keeps re-limiting it is a fact its sender needs rather than a message to hold forever.
+ */
+export const RATE_LIMIT_MAX_ATTEMPTS = 5
+export const RATE_LIMIT_MAX_BACKOFF_MS = 10 * 60_000
+export const RATE_LIMIT_MAX_WAIT_MS = 10 * 60_000
+
 /** The request the queue carries — opaque to the queue, handed straight back to `deps.deliver`. The
  *  queue keys everything on `targetNodeId` (the flush trigger and the per-target bound) and
  *  `sourceNodeId` (so an expiry can name who to tell); the rest travels untouched. */
@@ -196,6 +211,12 @@ export type QueueExpiryReason =
   | 'session-gone'
   /** The host could not say whether the session is still there. NOT a death. */
   | 'session-unknown'
+  /**
+   * T228③ — the TARGET's provider kept rate limiting it through every bounded retry. NOT a death
+   * either, and not the sender's fault: the entry waited out its own backoff ladder and the limit
+   * outlasted it.
+   */
+  | 'rate-limit-exhausted'
   /** The entry came back from a restart without enough to deliver it (its body was not stored, its
    *  verb does not survive a restart, or the target's queue was full). */
   | 'not-restorable'
@@ -208,6 +229,9 @@ export type QueueExpiryReason =
 export const EXPIRY_REASON_TEXT: Record<QueueExpiryReason, string> = {
   'session-gone': 'the target’s session is gone (the host asked, and nothing is there)',
   'session-unknown': 'nodeterm could not confirm whether the target’s session is still there',
+  'rate-limit-exhausted':
+    `the target’s provider kept rate limiting it through ${RATE_LIMIT_MAX_ATTEMPTS} attempts ` +
+    `(waited out its own backoff ladder; this is the provider’s limit, not your order)`,
   'not-restorable': 'the entry did not survive the restart with enough to deliver it'
 }
 
@@ -221,6 +245,14 @@ interface QueueEntry {
   binding?: QueueBinding
   /** Came back from disk after a restart: flushes only into the session it was queued for. */
   restored?: true
+  /**
+   * T228③ — how many flushes of THIS entry met the target's provider cooldown, and the epoch the
+   * next one is allowed (the backoff ladder's own deadline). Both are process-lifetime on purpose:
+   * the cooldown reading that drives them is in-memory mirror state too, so a restart starts the
+   * count over rather than resuming a ladder against a clock nobody remembers.
+   */
+  rateLimitAttempts?: number
+  holdUntil?: number
 }
 
 /** One queued message as written to disk. */
@@ -478,6 +510,19 @@ export class DeliveryQueue {
       const list = this.queues.get(nodeId)
       if (!list || list.length === 0) return
       const entry = list[0]
+      // T228③: the head is inside a RATE-LIMIT HOLD — do not spend an attempt on it. A `done` from
+      // the very turn that hit the limit arrives while the cooldown is still running, and without
+      // this guard that idle event would burn the ladder one rung per errored turn while telling
+      // the sender nothing. Re-arm the clock and wait it out.
+      //
+      // The entry is STILL IN THE LIST here (it is only shifted off below, just before a real
+      // attempt), so this must NOT call `requeueFront` — that unshifts a second copy of it. Its TTL
+      // timer is likewise still armed from the last requeue; only the nudge is owed.
+      const holdUntil = entry.holdUntil ?? 0
+      if (holdUntil > this.deps.now()) {
+        this.retryAfter(nodeId, holdUntil - this.deps.now())
+        return
+      }
       // Take it off before delivering: a re-entrant idle event (deliver can await a real round-trip)
       // must not flush the same entry twice. It goes back on failure, at the FRONT, preserving order.
       list.shift()
@@ -495,6 +540,14 @@ export class DeliveryQueue {
       }
       const outcome: AgentMessageOutcome =
         verdict === 'gone' ? { kind: 'targetGone' } : await this.deps.deliver(entry.req)
+      // T228③: the TARGET's provider cooldown is a clock, not a turn. Nothing will report "idle"
+      // when it ends, so this branch re-offers on a timer, with the ladder's own bound. It is
+      // checked BEFORE the generic requeue below, which would wait for an idle event that a
+      // rate-limited target has no reason to send.
+      if (outcome.kind === 'rateLimited' && outcome.rateLimitedUntil !== undefined) {
+        await this.holdForCooldown(nodeId, entry, outcome.retryAfterMs)
+        return
+      }
       if (REQUEUE_ON.has(outcome.kind)) {
         // Not ready yet (busy again, still unverified, or rate-limited): keep it, TTL counting from
         // its ORIGINAL enqueue, and stop draining — the target is evidently not idle after all.
@@ -507,6 +560,41 @@ export class DeliveryQueue {
       this.persist()
       this.deps.onFlushed?.(entry.req, outcome)
     }
+  }
+
+  /**
+   * T228③ — put a rate-limited entry back and re-offer it on an exponential ladder seeded by the
+   * provider's own `retryAfter`, or END it as a dead letter once the ladder's bound is reached.
+   *
+   * Both caps are the ticket's: `RATE_LIMIT_MAX_ATTEMPTS` re-offers, and `RATE_LIMIT_MAX_WAIT_MS` of
+   * total waiting (a much shorter reading can ladder past five attempts within the attempt count —
+   * whichever runs out first is the end). The end is `reportExpired`, the SAME leg every other
+   * queued ending takes, so the durable board line, the in-band dead letter and the receipt all say
+   * the one thing (`EXPIRY_REASON_TEXT`) rather than this path inventing a second notice.
+   */
+  private async holdForCooldown(nodeId: string, entry: QueueEntry, retryAfterMs: number): Promise<void> {
+    const attempts = (entry.rateLimitAttempts ?? 0) + 1
+    const waited = this.deps.now() - entry.enqueuedAt
+    if (attempts >= RATE_LIMIT_MAX_ATTEMPTS || waited >= RATE_LIMIT_MAX_WAIT_MS) {
+      const list = this.queues.get(nodeId)
+      const i = list?.indexOf(entry) ?? -1
+      if (list && i >= 0) {
+        list.splice(i, 1)
+        if (list.length === 0) this.queues.delete(nodeId)
+      }
+      entry.cancelTimer()
+      this.persist()
+      await this.reportExpired(entry, 'rate-limit-exhausted')
+      return
+    }
+    entry.rateLimitAttempts = attempts
+    const backoff = Math.min(
+      Math.max(0, retryAfterMs) * 2 ** (attempts - 1),
+      RATE_LIMIT_MAX_BACKOFF_MS
+    )
+    entry.holdUntil = this.deps.now() + backoff
+    this.requeueFront(nodeId, entry)
+    this.retryAfter(nodeId, backoff)
   }
 
   /**
