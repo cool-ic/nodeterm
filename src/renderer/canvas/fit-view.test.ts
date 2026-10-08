@@ -215,52 +215,61 @@ describe('the right rail gives the fit rectangle its height back', () => {
   })
 })
 
-// T232 (third revision, measured): the container holds ONLY the card — the collapse control moved
-// INSIDE as the card's first row, so the left card starts at the cluster band's left edge (22)
-// instead of 50px in. The solver's WINNING rect for the fleet canvas keeps its height (698) and
-// its zoom (0.5272) — the fit does not regress, and a live fit lands gapTop = gapBottom = 12px.
-// The width cost vs the single-rail win (958) is now 25px: 933 vs T230's 905. This is the honest
-// number; the width gain the spec hoped for shows up as the 112px total track footprint (vs 171px)
-// only when content is NOT height-limited.
-describe('T232: one 56px card per edge keeps the fit height and zoom, at 25px of width', () => {
+// T235 (fourth revision, measured): the two top clusters are GONE (their buttons moved into the
+// rails) and the rails moved UP onto the cluster row (window y=50). In the field's pane space the
+// winning rect was 858×698 with the clusters present and 933×698 without them. The content is
+// HEIGHT-limited, so the 75px of freed width does NOT move the zoom (0.5272 either way) — that is
+// the honest number. The width gain only becomes a zoom gain on a wide-limited canvas.
+describe('T235: the clusters are gone and the rails sit on their old row', () => {
   const PANE: FitRect = { left: 12, top: 56, right: 1252, bottom: 754 }
   const FLEET_W = 1550
   const FLEET_H = 1324
-  const SINGLE_RAIL = [
-    { left: 1068, top: 50, right: 1214, bottom: 724 },
-    { left: 1023, top: 575, right: 1273, bottom: 775 },
-    { left: -9, top: 623, right: 65, bottom: 775 }
+  const MINIMAP = { left: 1023, top: 575, right: 1273, bottom: 775 }
+  const FLOW_CONTROLS = { left: -9, top: 623, right: 65, bottom: 775 }
+  // T232 (before): rails 42px below the clusters, and both clusters were obstacles of their own.
+  const BEFORE = [
+    { left: 10, top: 92, right: 90, bottom: 519 }, // left rail card, inflated
+    { left: 1174, top: 92, right: 1254, bottom: 574 }, // right rail card, inflated
+    { left: 10, top: 38, right: 68, bottom: 96 }, // .sessions-icon-cluster, inflated
+    { left: 948, top: 38, right: 1254, bottom: 96 }, // .controls-cluster, inflated
+    MINIMAP,
+    FLOW_CONTROLS
   ]
-  const TWO_TRACKS = [
-    // T232: the container holds ONLY the card, so the left card starts at the cluster band's left
-    // edge (22) — 28px wider a clear run than T230's 50 — and the toggle lives inside the card.
-    { left: 10, top: 92, right: 90, bottom: 519 }, // left card 22..78, inflated
-    { left: 1174, top: 92, right: 1254, bottom: 574 }, // right card W-78..W-22, inflated
-    { left: 1023, top: 575, right: 1273, bottom: 775 }, // minimap (unchanged corner)
-    { left: -9, top: 623, right: 65, bottom: 775 } // flow controls (unchanged corner)
+  // T235 (after): rails on the old cluster row, no cluster rects. The card HEIGHTS do not enter
+  // the solve — it is x-limited (left rail → minimap), so only each rail's x band matters.
+  const AFTER = [
+    { left: 10, top: 50, right: 90, bottom: 600 }, // left rail card, inflated
+    { left: 1174, top: 50, right: 1254, bottom: 640 }, // right rail card, inflated
+    MINIMAP,
+    FLOW_CONTROLS
   ]
 
-  it('keeps the full pane height and the single-rail zoom for the fleet canvas', () => {
-    const single = largestFreeRect(PANE, SINGLE_RAIL, FLEET_W, FLEET_H)!
-    const two = largestFreeRect(PANE, TWO_TRACKS, FLEET_W, FLEET_H)!
-    expect(h(two)).toBe(h(single))
-    expect(zoomOf(two, FLEET_W, FLEET_H)).toBeCloseTo(zoomOf(single, FLEET_W, FLEET_H), 4)
-    // The measured widths, pinned so a future change to either track's footprint shows up.
-    // T232: the toggle moved INSIDE the card, so the left card's clear run grows 28px (933 vs
-    // 905 vs the single-rail baseline 958); height and zoom never move.
-    expect(w(two)).toBe(w(single) - 25)
+  it('removing the clusters widens the winning rect by exactly their intrusion', () => {
+    const before = largestFreeRect(PANE, BEFORE, FLEET_W, FLEET_H)!
+    const after = largestFreeRect(PANE, AFTER, FLEET_W, FLEET_H)!
+    expect(w(before)).toBe(858) // 90..948, stopped by the controls cluster's inflated left edge
+    expect(w(after)).toBe(933) // 90..1023, now stopped only by the minimap
+    expect(w(after) - w(before)).toBe(75)
+  })
+
+  it('claims no zoom gain: the fleet content is height-limited', () => {
+    const before = largestFreeRect(PANE, BEFORE, FLEET_W, FLEET_H)!
+    const after = largestFreeRect(PANE, AFTER, FLEET_W, FLEET_H)!
+    expect(h(after)).toBe(h(before))
+    expect(zoomOf(after, FLEET_W, FLEET_H)).toBeCloseTo(zoomOf(before, FLEET_W, FLEET_H), 6)
   })
 
   it('a live fit on the fleet canvas lands gapTop = gapBottom = 12px', () => {
-    // Height-limited content fills the free rect exactly; the rect is inset 12px from the pane
-    // on both axes, so the visible top and bottom gaps are both the edge inset.
-    const two = largestFreeRect(PANE, TWO_TRACKS, FLEET_W, FLEET_H)!
-    const slack = (h(two) - FLEET_H * zoomOf(two, FLEET_W, FLEET_H)) / 2
+    // Height-limited content fills the free rect exactly; the rect is inset 12px from the pane on
+    // both axes, so the visible top and bottom gaps are both the edge inset.
+    const after = largestFreeRect(PANE, AFTER, FLEET_W, FLEET_H)!
+    expect(after.top).toBe(PANE.top)
+    expect(after.bottom).toBe(PANE.bottom)
+    const slack = (h(after) - FLEET_H * zoomOf(after, FLEET_W, FLEET_H)) / 2
     expect(slack).toBeCloseTo(0, 6)
-    // The winning rect spans the viewport's full height, and the viewport is FIT_VIEW_GAP=12
-    // inside the pane on every side — so the visible gaps to the pane edges are 12px top and
-    // bottom, exactly what the employer will measure after a live Fit.
-    expect(two.top).toBe(PANE.top)
-    expect(two.bottom).toBe(PANE.bottom)
+  })
+
+  it('a collapsed canvas measures zero obstacles and the fit takes the whole pane', () => {
+    expect(largestFreeRect(PANE, [], FLEET_W, FLEET_H)).toEqual(PANE)
   })
 })

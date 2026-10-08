@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 //
-// T233: maximize reserves the same chrome fit-view does. The regression this guards: the old
+// T233: maximize reserves the same chrome fit-view does. The regression this guarded: the old
 // hand-written formula assumed `.dock` was a BOTTOM band (`depth = wrap.bottom − dock.top`), which
 // T223 invalidated when it moved the dock into the top right-hand track — so it read the top docks
 // as a 844px bottom inset on a 932px canvas, `maximizeTargetRect` returned null, and Maximize did
-// nothing. Every rect below is the employer's CDP measurement (t233-maximize-insets-spec.md), with
-// the T232 rail geometry the field now has.
+// nothing. Every rect below is the employer's CDP measurement (t233-maximize-insets-spec.md).
+// T235 moved on from that layout: the two top clusters are gone and the rails sit on the cluster
+// row (window y=50), so the fixture and its expected insets follow the new field.
 import { afterEach, describe, expect, it } from 'vitest'
 import fs from 'fs'
 import path from 'path'
@@ -19,8 +20,6 @@ const BUTTON_SRC = fs
 
 /** The canvas wrapper inside the field window: 1728 wide, 932 tall (the tab bar is above it). */
 const WRAP = { left: 0, top: 28, right: 1728, bottom: 960 }
-/** The two clusters' bottom edge — a maximized node's top must clear this. */
-const CLUSTER_BOTTOM = 84
 
 function chrome(
   className: string,
@@ -40,14 +39,13 @@ function chrome(
 }
 
 /** The chrome that actually paints over the fleet canvas: the two 56px rails (each ONE
- *  `data-canvas-chrome` body) with their docks nested inside, plus the two top clusters. */
+ *  `data-canvas-chrome` body) with their docks inside. T235: they sit on the old cluster row
+ *  (window y=50) and the two clusters are gone. */
 function fieldChrome() {
-  chrome('canvas-rail__body', 22, 92, 78, 507, true) // left rail body (T232: 22..78)
-  chrome('canvas-rail__body', 1650, 92, 1706, 562, true) // right rail body (T232: W-78..W-22)
-  chrome('dock', 28, 100, 70, 451) // the left rail's dock, INSIDE the body
-  chrome('dock', 1658, 100, 1700, 410) // the right rail's dock, inside the body
-  chrome('sessions-icon-cluster', 22, 50, 56, 84)
-  chrome('controls-cluster', 1424, 50, 1706, 84)
+  chrome('canvas-rail__body', 22, 50, 78, 630, true) // left rail body (22..78)
+  chrome('canvas-rail__body', 1650, 50, 1706, 640, true) // right rail body (W-78..W-22)
+  chrome('dock', 28, 58, 70, 560) // the left rail's dock, INSIDE the body
+  chrome('dock', 1658, 58, 1700, 500) // the right rail's dock, inside the body
 }
 
 afterEach(() => document.body.replaceChildren())
@@ -74,14 +72,13 @@ describe('maximize reserves the shared chrome model (T233 regression)', () => {
   it('produces a usable maximize rect on the field layout', () => {
     fieldChrome()
     const insets = measureMaximizeInsets(WRAP)
-    // The top band the controls cluster (bottom 84) forces: its inflated bottom is 96, i.e. 68
-    // below the wrap top.
-    expect(insets.top).toBe(68)
+    // T235: no top chrome, so nothing reserves a top band any more (it was 68 below the clusters).
+    expect(insets.top).toBe(0)
     const rect = maximizeTargetRect({ x: 0, y: 0, zoom: 1 }, 1728, 932, 24, insets)
     expect(rect).not.toBeNull()
     expect(rect!.height).toBeGreaterThanOrEqual(120)
-    // Top clears the clusters: margin (24) + top inset (68) + wrap top (28) = 120 ≥ 84.
-    expect(rect!.y + WRAP.top).toBeGreaterThanOrEqual(CLUSTER_BOTTOM)
+    // The node's top is now just the window margin: margin (24) + wrap top (28) = 52.
+    expect(rect!.y + WRAP.top).toBe(WRAP.top + 24)
   })
 
   it('keeps a maximized node clear of a pinned drawer the fit list does not name', () => {

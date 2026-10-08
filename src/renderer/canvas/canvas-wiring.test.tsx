@@ -92,7 +92,6 @@ describe('the canvas rail is fit-view chrome', () => {
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\] \.canvas-rail__toggle \{[^}]*width: 14px;/)
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.minimap-dock/)
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.minimap-restore/)
-    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.controls-cluster/)
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.react-flow__controls/)
   })
 })

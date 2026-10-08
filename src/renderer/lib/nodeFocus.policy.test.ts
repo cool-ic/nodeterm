@@ -9,7 +9,6 @@ const box = { left: 100, right: 1300, top: 36, bottom: 836, width: 1200, height:
 function addChrome() {
   for (const [className, left, top, right, bottom] of [
     ['sessions-sidebar--pinned', 114, 90, 422, 780],
-    ['controls-cluster', 950, 50, 1286, 84],
     ['dock', 500, 770, 900, 822]
   ] as const) {
     const el = document.createElement('div')
@@ -65,14 +64,13 @@ describe('Canvas focus policy (#743, #711)', () => {
 
     const rect = nodeFitRect(maximized[0], maximized)!
     const focus = viewportForNodeFocus(maximized[0], rect, box, zoom)!
-    // Measured reservations (T233, shared chrome model): left=322, top=60, bottom=78. The top and
-    // bottom both grew 28px against the old hand-written model (32/50) — its free rect ends above
-    // the cluster and below the dock — but the two shifted together, so the node's CENTRE (the
-    // assertions below) is unchanged, and the bounds simply hold with 28px more room to the bands.
+    // Measured reservations (shared chrome model): left=322, top=0, bottom=78. T235 dropped the
+    // top cluster that used to force a 60px top band, so the free rect starts at the pane top and
+    // the node's centre moves up to 361 (it was 391).
     expect((rect.x + rect.width / 2) * focus.zoom + focus.x).toBeCloseTo(761)
-    expect((rect.y + rect.height / 2) * focus.zoom + focus.y).toBeCloseTo(391)
-    expect(rect.y * focus.zoom + focus.y + box.top).toBeGreaterThanOrEqual(92 - 1e-8)
-    expect((rect.y + rect.height) * focus.zoom + focus.y + box.top).toBeLessThanOrEqual(762 + 1e-8)
+    expect((rect.y + rect.height / 2) * focus.zoom + focus.y).toBeCloseTo(361)
+    expect(rect.y * focus.zoom + focus.y + box.top).toBeGreaterThanOrEqual(60 - 1e-8)
+    expect((rect.y + rect.height) * focus.zoom + focus.y + box.top).toBeLessThanOrEqual(734 + 1e-8)
     if (zoom !== undefined) {
       expect(focus.zoom).toBe(zoom)
       expect(focus.x).toBeCloseTo(camera.x)
@@ -83,9 +81,8 @@ describe('Canvas focus policy (#743, #711)', () => {
 
 describe('ordinary focus without a pinned panel (#854)', () => {
   it.each([undefined, 0.7345, 2])('centres in the whole pane (keepZoom=%s)', (zoom) => {
-    // Only the controls cluster and the dock: nothing pinned at the sides.
+    // Only the dock: nothing pinned at the sides, no top cluster either (T235).
     for (const [className, left, top, right, bottom] of [
-      ['controls-cluster', 950, 50, 1286, 84],
       ['dock', 500, 770, 900, 822]
     ] as const) {
       const el = document.createElement('div')

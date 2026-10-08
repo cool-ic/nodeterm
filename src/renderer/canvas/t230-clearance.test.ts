@@ -1,103 +1,142 @@
 // @vitest-environment node
 //
-// T230/T232: the two canvas tracks must clear the two top clusters and the minimap; the collapse
-// control is the card's FIRST ROW, in the same family as .dock-btn (42×42, x aligned with the
-// buttons), and the collapsed tab stays at its own row's height instead of jumping to the canvas
-// center. Measured rects come from the field (the employer's CDP window, 1728×960): the clusters
-// are 34px tall at tabbar+float-gap; the tracks start 34+8px below; the card is 56px wide at the
-// cluster-band's edge (left 22, right W-22).
+// T235 (after T230/T232): EVERY canvas-level control lives in one of the two rails, and the rails
+// sit on the row the two top clusters used to occupy. The clusters themselves are gone. These pins
+// hold the geometry the employer measures with CDP: the rails' top row, their outer edges, the
+// sidebar yielding to the left rail (instead of pushing it), the resume card clearing the right
+// rail, the 42×42 .dock-btn column the moved buttons joined, and the collapsed tab.
 import { describe, expect, it } from 'vitest'
 import fs from 'fs'
 import path from 'path'
-import { rectsOverlap, type FitRect } from './fit-view'
+import { CANVAS_CHROME_SELECTOR, rectsOverlap, type FitRect } from './fit-view'
 
 const CANVAS_SRC = fs.readFileSync(path.join(__dirname, 'Canvas.tsx'), 'utf8').replace(/\r\n/g, '\n')
-const STYLES_SRC = fs.readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8').replace(/\r\n/g, '\n')
+const STYLES_SRC = fs
+  .readFileSync(path.join(__dirname, '..', 'styles.css'), 'utf8')
+  .replace(/\r\n/g, '\n')
 
 const W = 1728 // the field window
+const TABBAR_H = 28
+const FLOAT_GAP = 22
+const CLUSTER_ROW = TABBAR_H + FLOAT_GAP // 50 — where the (now removed) clusters sat
 
-// The top band the two clusters own (window coords, measured).
-const SESSIONS_CLUSTER: FitRect = { left: 22, top: 50, right: 56, bottom: 84 }
-const CONTROLS_CLUSTER: FitRect = { left: 1424, top: 50, right: 1706, bottom: 84 }
-// The minimap is 200×150 at the bottom-right corner, --float-gap from the edges (pane ≈932 tall).
-const MINIMAP: FitRect = { left: W - 222, top: 760, right: W - 22, bottom: 910 }
+// The two rails, flush with the float gap on their outer edge and 56px wide.
+const leftRail: FitRect = { left: FLOAT_GAP, top: CLUSTER_ROW, right: FLOAT_GAP + 56, bottom: 680 }
+const rightRail: FitRect = { left: W - 22 - 56, top: CLUSTER_ROW, right: W - 22, bottom: 690 }
+// The sessions sidebar now yields to the rail: left = rail right edge + one more float gap.
+const sidebar: FitRect = { left: FLOAT_GAP + 56 + FLOAT_GAP, top: CLUSTER_ROW, right: 400, bottom: 900 }
+// The resume card clears the right rail card by 8px.
+const resumeCard: FitRect = { left: W - (FLOAT_GAP + 56 + 8) - 260, top: CLUSTER_ROW, right: W - (FLOAT_GAP + 56 + 8), bottom: 200 }
 
-// T232 geometry: cards start at 92 (= 50 + 34 + 8); the toggle is the first ROW inside the card,
-// 42×42 at x = card.left + 7 (the card's 7px padding), so it shares .dock-btn's column.
-const LEFT_CARD_H = 415 // 7 + 42 + 6 + 6×42 + 5×6 + 3×17 + 7
-const RIGHT_CARD_H = 470
-const leftCard: FitRect = { left: 22, top: 92, right: 78, bottom: 92 + LEFT_CARD_H }
-const rightCard: FitRect = { left: W - 78, top: 92, right: W - 22, bottom: 92 + RIGHT_CARD_H }
-const leftToggle: FitRect = { left: 29, top: 99, right: 71, bottom: 141 }
-const rightToggle: FitRect = { left: W - 71, top: 99, right: W - 29, bottom: 141 }
-
-describe('T232: the tracks clear the top clusters and the minimap', () => {
-  it('both cards start below the cluster band (34px + 8px of air)', () => {
-    expect(leftCard.top).toBe(50 + 34 + 8)
-    expect(rightCard.top).toBe(50 + 34 + 8)
-    expect(leftCard.top).toBeGreaterThanOrEqual(SESSIONS_CLUSTER.bottom)
-    expect(rightCard.top).toBeGreaterThanOrEqual(CONTROLS_CLUSTER.bottom)
-  })
-
-  it('cards, clusters and minimap are pairwise disjoint', () => {
-    const all = [leftCard, rightCard, SESSIONS_CLUSTER, CONTROLS_CLUSTER, MINIMAP]
-    for (let i = 0; i < all.length; i++) {
-      for (let j = i + 1; j < all.length; j++) {
-        expect(rectsOverlap(all[i], all[j]), `rect ${i} vs ${j}`).toBe(false)
-      }
+describe('T235: the rails own all canvas chrome', () => {
+  it('the two former clusters are gone from markup, CSS and the fit obstacle list', () => {
+    for (const cls of ['sessions-icon-cluster', 'controls-cluster']) {
+      // No element carries the class…
+      expect(CANVAS_SRC).not.toContain(`className="${cls}"`)
+      // …no rule targets it…
+      expect(STYLES_SRC).not.toContain(`.${cls}`)
+      // …and fit no longer reserves a rect for it.
+      expect(CANVAS_CHROME_SELECTOR).not.toContain(cls)
     }
+    // The T230 token that described that band went with them: no declaration and no reader.
+    expect(STYLES_SRC).not.toMatch(/--top-cluster-band\s*:/)
+    expect(STYLES_SRC).not.toContain('var(--top-cluster-band)')
   })
 
-  it('each toggle lives inside its own card and clears the other card and the clusters', () => {
-    for (const [card, toggle] of [
-      [leftCard, leftToggle],
-      [rightCard, rightToggle]
-    ] as const) {
-      expect(rectsOverlap(toggle, card)).toBe(true) // it IS the card's first row
-      expect(toggle.left).toBeGreaterThanOrEqual(card.left)
-      expect(toggle.right).toBeLessThanOrEqual(card.right)
-      for (const other of [SESSIONS_CLUSTER, CONTROLS_CLUSTER, MINIMAP]) {
-        expect(rectsOverlap(toggle, other), 'toggle vs cluster/minimap').toBe(false)
-      }
-    }
-  })
-
-  it('the container holds ONLY the card, 56px wide, outer edge == cluster edge', () => {
+  it('both rails sit on the old cluster row and hold only their 56px card', () => {
+    // Container: 56px single column (T232), no extra chrome, positioned on the cluster row.
     expect(STYLES_SRC).toMatch(/\.canvas-rail \{[\s\S]*?width: 56px;/)
     expect(STYLES_SRC).toMatch(/\.canvas-rail \{[\s\S]*?flex-direction: column;/)
-    // The card sits at the cluster band's edge: left card's left == the sessions cluster's left,
-    // right card's right == the controls cluster's right.
-    expect(leftCard.left).toBe(SESSIONS_CLUSTER.left)
-    expect(rightCard.right).toBe(CONTROLS_CLUSTER.right)
-    expect(leftCard.right - leftCard.left).toBe(56)
+    expect(STYLES_SRC).toMatch(/\.canvas-rail \{[\s\S]*?top: var\(--float-gap\);/)
+    // Window y 50 = tabbar + float gap, i.e. the row the clusters occupied.
+    expect(leftRail.top).toBe(CLUSTER_ROW)
+    expect(leftRail.top).toBe(TABBAR_H + FLOAT_GAP)
+    expect(rightRail.top).toBe(leftRail.top)
   })
 
-  it('the collapse control is the card\u2019s first row, in the .dock-btn column (42×42, same x and width)', () => {
-    // JSX: the toggle is the body's FIRST child (children[0]) in both rails — it sits right
-    // after the body's opening tag, before the Dock.
-    const bodies = CANVAS_SRC.split('data-canvas-chrome={railCollapsed ? undefined : \'\'}>')
-    expect(bodies.length).toBeGreaterThanOrEqual(3)
-    expect(bodies[1]).toMatch(/^\s*<button\b[\s\S]*?className="canvas-rail__toggle[^"]*"/)
-    expect(bodies[2]).toMatch(/^\s*<button\b[\s\S]*?className="canvas-rail__toggle[^"]*"/)
-    // CSS: 42×42 at the card's 7px padding, radius 10 — same family as .dock-btn.
-    expect(STYLES_SRC).toMatch(/\.canvas-rail__toggle \{[^}]*width: 42px;[^}]*height: 42px;[^}]*border-radius: 10px;/)
-    expect(STYLES_SRC).toMatch(/\.canvas-rail__toggle:hover:not\(:disabled\) \{[^}]*background: var\(--panel-header\);/)
-    // Same column as .dock-btn: same x (card.left + 7) and same width (42).
-    expect(leftToggle.left).toBe(leftCard.left + 7)
-    expect(leftToggle.right - leftToggle.left).toBe(42)
-    expect(rightToggle.left).toBe(rightCard.left + 7)
+  it('each rail card is flush with its float gap on the outer edge', () => {
+    expect(leftRail.left).toBe(FLOAT_GAP)
+    expect(rightRail.right).toBe(W - FLOAT_GAP)
+    expect(leftRail.right - leftRail.left).toBe(56)
   })
 
-  it('the collapsed tab stays at its own row\u2019s height — no jump to the canvas center', () => {
-    // The container keeps its top (no top:50% + translateY); the card becomes the 14×56 tab with
-    // every other child hidden.
+  it('the cards, the sidebar and the resume card are pairwise disjoint', () => {
+    for (const [i, a] of [leftRail, rightRail, sidebar, resumeCard].entries()) {
+      for (const [j, b] of [leftRail, rightRail, sidebar, resumeCard].entries()) {
+        if (i >= j) continue
+        expect(rectsOverlap(a, b), `rect ${i} vs ${j}`).toBe(false)
+      }
+    }
+  })
+
+  it('the sidebar yields to the left rail instead of pushing it', () => {
+    // Self-yield, in the sidebar's own rule…
+    expect(STYLES_SRC).toMatch(
+      /\.sessions-sidebar \{[\s\S]*?left: calc\(var\(--float-gap\) \+ 56px \+ var\(--float-gap\)\);/
+    )
+    // …and the rule that moved the RAIL when the sidebar opened is gone, so the left rail's x no
+    // longer depends on the sidebar (the Sessions trigger now lives inside that rail).
+    expect(STYLES_SRC).not.toContain('.canvas-root:has(.sessions-sidebar) .canvas-rail--left')
+    expect(STYLES_SRC).toMatch(/\.canvas-rail--left \{\s*left: var\(--float-gap\);\s*\}/)
+    // Sidebar left edge == rail right edge + one float gap.
+    expect(sidebar.left).toBe(leftRail.right + FLOAT_GAP)
+  })
+
+  it('the resume card clears the right rail', () => {
+    expect(STYLES_SRC).toMatch(
+      /\.resume-card \{[\s\S]*?top: calc\(var\(--tabbar-h\) \+ var\(--float-gap\)\);[\s\S]*?right: calc\(var\(--float-gap\) \+ 56px \+ 8px\);/
+    )
+    expect(resumeCard.right).toBe(rightRail.left - 8)
+  })
+
+  it('the moved buttons are 42×42 and share the .dock-btn column', () => {
+    // JSX: seven opt-in buttons live inside the rail bodies as direct `.dock-btn` children —
+    // Sessions / Command palette / Explorer / Source Control on the left, Pair phone / Settings /
+    // Help on the right (plus the toggle, which is not a .dock-btn).
+    const railBodies = CANVAS_SRC.split('data-canvas-chrome={railCollapsed ? undefined : \'\'}>')
+    expect(railBodies.length).toBeGreaterThanOrEqual(3)
+    expect(railBodies[0]).toContain('canvas-rail canvas-rail--left')
+    for (const name of ['Sessions', 'Command palette', 'Explorer', 'Source Control']) {
+      expect(railBodies[1], `left rail: ${name}`).toContain(`aria-label="${name}"`)
+    }
+    for (const name of ['Pair phone', 'Settings', 'Help']) {
+      expect(railBodies[2], `right rail: ${name}`).toContain(`aria-label="${name}"`)
+    }
+    expect(railBodies[1].match(/className="dock-btn"/g) ?? []).toHaveLength(4)
+    expect(railBodies[2].match(/className="dock-btn"/g) ?? []).toHaveLength(3)
+    expect(CANVAS_SRC).not.toContain('cluster-search')
+    // CSS: the moved buttons ARE `.dock-btn` (42×42, radius 10, panel-header hover) — one size
+    // family with the Dock's own buttons, no second 34px box.
+    expect(STYLES_SRC).toMatch(/\.dock-btn \{[\s\S]*?width: 42px;[\s\S]*?height: 42px;[\s\S]*?border-radius: 10px;/)
+    expect(STYLES_SRC).toMatch(/\.dock-btn:hover:not\(:disabled\) \{\s*background: var\(--panel-header\);\s*\}/)
+    // The toggle joins that family: no fill, no border.
+    expect(STYLES_SRC).toMatch(/\.canvas-rail__toggle \{[\s\S]*?background: transparent;[\s\S]*?border: none;/)
+    // The moved-in glyphs keep the 18px the clusters gave them (targeted through the Tooltip's
+    // trigger wrapper, so the Dock's own buttons — one level deeper — keep their inline sizes).
+    expect(STYLES_SRC).toMatch(
+      /\.canvas-rail__body > \.tooltip-trigger > \.dock-btn svg \{[\s\S]*?width: 18px;/
+    )
+  })
+
+  it('the card keeps its first-row toggle and its scrolling cap', () => {
+    expect(STYLES_SRC).toMatch(/\.dock-sep \{[\s\S]*?width: 28px;[\s\S]*?height: 1px;/)
+    const railBodies = CANVAS_SRC.split('data-canvas-chrome={railCollapsed ? undefined : \'\'}>')
+    expect(railBodies[1]).toMatch(/^\s*<button\b[\s\S]*?className="canvas-rail__toggle/)
+    expect(railBodies[2]).toMatch(/^\s*<button\b[\s\S]*?className="canvas-rail__toggle/)
+    // Both rails cap their height and scroll inside it (the left one gains 5 rows in T235).
+    expect(STYLES_SRC).toMatch(/\.canvas-rail \{[\s\S]*?max-height: calc\(100% - 2 \* var\(--float-gap\)\);/)
+    expect(STYLES_SRC).toMatch(/\.canvas-rail--right \{[\s\S]*?max-height: calc\(100% - var\(--float-gap\) - 170px\);/)
+    expect(STYLES_SRC).toMatch(/\.canvas-rail__body \{[\s\S]*?overflow-y: auto;/)
+  })
+
+  it('the collapsed tab stays at its own row and keeps fit measuring zero', () => {
     expect(STYLES_SRC).not.toMatch(/\.canvas-root\[data-rail-collapsed\] \.canvas-rail \{[^}]*top: 50%/)
-    expect(STYLES_SRC).toMatch(/\.canvas-root\[data-rail-collapsed\] \.canvas-rail__body > :not\(\.canvas-rail__toggle\)[\s\S]*?display: none;/)
-    expect(STYLES_SRC).toMatch(/\.canvas-root\[data-rail-collapsed\] \.canvas-rail__body \{[^}]*width: 14px;[^}]*height: 56px;[^}]*padding: 0;/)
-    // Expanded toggle center == collapsed tab center (card.top + 7 + 21 == card.top + 28).
-    expect(leftToggle.top + 21).toBe(leftCard.top + 28)
-    expect(rightToggle.top + 21).toBe(rightCard.top + 28)
-    // Fit still sees ZERO obstacles: the card's data-canvas-chrome is dropped when collapsed.
+    expect(STYLES_SRC).toMatch(
+      /\.canvas-root\[data-rail-collapsed\] \.canvas-rail__body \{[^}]*width: 14px;[^}]*height: 56px;[^}]*padding: 0;/
+    )
+    expect(STYLES_SRC).toMatch(
+      /\.canvas-root\[data-rail-collapsed\] \.canvas-rail__body > :not\(\.canvas-rail__toggle\),[\s\S]*?display: none;/
+    )
     expect(CANVAS_SRC).toContain('data-canvas-chrome={railCollapsed ? undefined : \'\'}')
   })
 })
