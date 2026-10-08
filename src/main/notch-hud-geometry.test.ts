@@ -2,13 +2,17 @@ import { describe, it, expect } from 'vitest'
 import {
   hudGeometry,
   hudPlacement,
+  HUD_DOCK_TOP_GAP,
+  HUD_DOCK_WINDOW_HEIGHT,
+  HUD_DOCK_WINDOW_WIDTH,
   HUD_EDGE_MARGIN,
   HUD_PANEL_WIDTH,
   NOTCH_BAR_FLOOR,
   HUD_WINDOW_HEIGHT,
   PILL_TOP_GAP,
   type HudGeometryInput,
-  type HudPlacementInput
+  type HudPlacementInput,
+  type Rect
 } from './notch-hud-geometry'
 import type { NotchAlign } from '../shared/notch-hud'
 
@@ -200,5 +204,201 @@ describe('hudPlacement — the expanded panel stays on screen', () => {
     // Narrower than the panel itself: still on screen at 0, never negative.
     expect(hudPlacement(place({ align: 'right', width: 300, notchCenterX: 150 })).panelLeft).toBe(0)
     expect(hudPlacement(place({ align: 'center', width: 300, notchCenterX: 150 })).panelLeft).toBe(0)
+  })
+})
+
+// ---- T227: the bottom-right dock ----------------------------------------------------------
+
+/** The dock is about the WORK AREA, so every case here names one explicitly — including a Dock-sized
+ *  inset at the bottom and an offset menu bar, which is what the layout must dodge. */
+function docked(over: Partial<HudGeometryInput> = {}): HudGeometryInput {
+  return {
+    bounds: { x: 0, y: 0, width: 1710, height: 1112 },
+    // A 37 px menu bar above and a 90 px Dock below: `workArea` is what keeps us off both.
+    workArea: { x: 0, y: 37, width: 1710, height: 1112 - 37 - 90 },
+    internal: true,
+    notchWidth: 168,
+    offsetY: 0,
+    align: 'bottom-right',
+    ...over
+  }
+}
+
+const insideRect = (inner: Rect, outer: Rect): boolean =>
+  inner.x >= outer.x &&
+  inner.y >= outer.y &&
+  inner.x + inner.width <= outer.x + outer.width &&
+  inner.y + inner.height <= outer.y + outer.height
+
+describe('hudGeometry — the bottom-right dock (T227)', () => {
+  it('is a small box in the WORK AREA’s corner, never a full-width top strip', () => {
+    const g = hudGeometry(docked())
+    expect(g.docked).toBe(true)
+    expect(g.width).toBe(HUD_DOCK_WINDOW_WIDTH)
+    expect(g.height).toBe(HUD_DOCK_WINDOW_HEIGHT)
+    // Right/bottom edges flush with the work area's — the Dock and the menu bar are dodged by using
+    // `workArea` at all, which is the load-bearing part: `bounds` would put us UNDER the Dock.
+    expect(g.x + g.width).toBe(1710)
+    expect(g.y + g.height).toBe(37 + 985)
+    expect(g.x).toBe(1710 - HUD_DOCK_WINDOW_WIDTH)
+    // The top strip is still reported (the renderer draws the same mascots) but is not used.
+    expect(g.bar).toBe(37)
+    expect(g.hasNotch).toBe(true)
+  })
+
+  it('stays inside the work area on every display we ship to, Dock or no Dock', () => {
+    for (const [w, h, bar, dock] of [
+      [1710, 1112, 37, 90],
+      [1440, 932, 31, 0],
+      [1024, 768, 24, 60],
+      [1280, 800, 24, 0]
+    ] as const) {
+      const input = docked({
+        bounds: { x: 0, y: 0, width: w, height: h },
+        workArea: { x: 0, y: bar, width: w, height: h - bar - dock }
+      })
+      const g = hudGeometry(input)
+      expect(insideRect(g, input.workArea), `${w}x${h} dock ${dock}`).toBe(true)
+    }
+  })
+
+  it('never exceeds a SHORT work area (a small window, so the panel is bounded rather than clipped)', () => {
+    const g = hudGeometry(docked({ workArea: { x: 0, y: 24, width: 900, height: 300 } }))
+    // The height gives way (300 < 460); the width does not, because a 900-wide work area has room
+    // for the standard box and the panel needs its own width to stay legible.
+    expect(g.height).toBe(300)
+    expect(g.width).toBe(HUD_DOCK_WINDOW_WIDTH)
+    expect(g.y).toBe(24)
+    expect(g.y + g.height).toBe(324)
+  })
+
+  it('follows a work area that is not at the origin, and one on a second display', () => {
+    const g = hudGeometry(
+      docked({ workArea: { x: -1710, y: 37, width: 1710, height: 985 } })
+    )
+    expect(g.x).toBe(-HUD_DOCK_WINDOW_WIDTH)
+    expect(g.x + g.width).toBe(0)
+  })
+
+  it('ignores the vertical offset — the corner is the position, so the window never grows for one', () => {
+    // The top-strip layout grows the window by a downward offset so a lowered panel is not clipped.
+    // There is nothing below the dock's resting place to lower it into, and the spec pins the capsule
+    // to HUD_EDGE_MARGIN from the work area's bottom edge.
+    const base = hudGeometry(docked())
+    const lowered = hudGeometry(docked({ offsetY: 200 }))
+    expect({ x: lowered.x, y: lowered.y, width: lowered.width, height: lowered.height }).toEqual({
+      x: base.x,
+      y: base.y,
+      width: base.width,
+      height: base.height
+    })
+  })
+
+  it('is opt-in: omitting the side is the top strip, bit-for-bit what this function always returned', () => {
+    // Every existing caller/test constructs an input without `align`; nothing about those may move.
+    const { align: _drop, ...noAlign } = docked()
+    const g = hudGeometry(noAlign)
+    expect(g.docked).toBe(false)
+    expect({ x: g.x, y: g.y, width: g.width }).toEqual({ x: 0, y: 0, width: 1710 })
+    expect(g.height).toBe(37 + HUD_WINDOW_HEIGHT)
+  })
+})
+
+describe('hudPlacement — the bottom-right dock (T227)', () => {
+  /** The dock's own window, as `hudGeometry` reports it. */
+  const dockPlace = (over: Partial<HudPlacementInput> = {}): HudPlacementInput => ({
+    width: HUD_DOCK_WINDOW_WIDTH,
+    height: HUD_DOCK_WINDOW_HEIGHT,
+    bar: 37,
+    notchWidth: 168,
+    notchCenterX: 855,
+    hasNotch: true,
+    align: 'bottom-right',
+    offsetY: 0,
+    ...over
+  })
+
+  it('is NEVER fused, even on a notched display at a raised offset', () => {
+    // `center` + notch + offset ≤ 0 is the fused layout; `bottom-right` must not reach it however
+    // the other inputs are set — a square-cornered capsule fused to a notch a screen away is the
+    // "black box below the menu bar" bug one step further out.
+    for (const offsetY of [-48, 0, 40]) {
+      const p = hudPlacement(dockPlace({ offsetY }))
+      expect(p.fused, `offsetY ${offsetY}`).toBe(false)
+      expect(p.docked).toBe(true)
+    }
+    expect(hudPlacement(dockPlace({ hasNotch: false })).fused).toBe(false)
+  })
+
+  it('hangs by its BOTTOM edge, HUD_EDGE_MARGIN from the right and from the bottom', () => {
+    const p = hudPlacement(dockPlace())
+    expect(p.anchor).toBe('right')
+    expect(p.capsuleX).toBe(HUD_DOCK_WINDOW_WIDTH - HUD_EDGE_MARGIN)
+    expect(p.capsuleBottom).toBe(HUD_EDGE_MARGIN)
+    // `capsuleTop` is meaningless while docked (the renderer uses --capsule-bottom); pinned at 0 so
+    // a stale reader cannot position it by a leftover number.
+    expect(p.capsuleTop).toBe(0)
+    // In display coordinates: the pill's right/bottom edges are HUD_EDGE_MARGIN from the work area's.
+    const g = hudGeometry(docked())
+    expect(g.x + p.capsuleX).toBe(g.x + g.width - HUD_EDGE_MARGIN)
+    expect(g.y + g.height - p.capsuleBottom!).toBe(g.y + g.height - HUD_EDGE_MARGIN)
+  })
+
+  it('grows the panel UP and LEFT: its right edge is the capsule’s, inside the window', () => {
+    const p = hudPlacement(dockPlace())
+    expect(p.panelWidth).toBe(HUD_PANEL_WIDTH)
+    // Equal margins on both sides of the window — the panel's right edge IS the capsule's right edge.
+    expect(p.panelLeft).toBe(HUD_EDGE_MARGIN)
+    expect(p.panelLeft + p.panelWidth).toBe(p.capsuleX)
+    expect(p.panelLeft).toBeGreaterThanOrEqual(0)
+  })
+
+  it('bounds the expanded panel by the WINDOW, so it can never leave the work area', () => {
+    const p = hudPlacement(dockPlace())
+    // Room above the capsule's bottom edge, minus the edge margin and the top gap: the expanded box
+    // spans [topGap, height − edgeMargin] ⊂ [0, height] ⊂ workArea.
+    expect(p.expandedMaxHeight).toBe(HUD_DOCK_WINDOW_HEIGHT - HUD_EDGE_MARGIN - HUD_DOCK_TOP_GAP)
+    expect(p.capsuleBottom! + p.expandedMaxHeight!).toBeLessThanOrEqual(HUD_DOCK_WINDOW_HEIGHT)
+    // …and it is the room the top-strip layout gives the same panel, so nothing is lost by docking.
+    expect(p.expandedMaxHeight!).toBeGreaterThanOrEqual(420 + 16)
+  })
+
+  it('in a SHORT work area the panel is shortened, never allowed to overflow', () => {
+    // The nail's "矮工作区先向上顶而不是溢出": the window is as tall as the work area allows, and the
+    // panel gets exactly the room left above the capsule — the growth is clamped instead of the
+    // panel hanging off the top of the screen (or out of the window, which is inside the work area).
+    const g = hudGeometry(docked({ workArea: { x: 0, y: 24, width: 900, height: 300 } }))
+    const p = hudPlacement(dockPlace({ width: g.width, height: g.height, hasNotch: false, bar: 24 }))
+    expect(g.height).toBe(300)
+    expect(p.expandedMaxHeight).toBe(300 - HUD_EDGE_MARGIN - HUD_DOCK_TOP_GAP)
+    const topOfExpandedBox = g.height - p.capsuleBottom! - p.expandedMaxHeight!
+    expect(topOfExpandedBox).toBe(HUD_DOCK_TOP_GAP)
+    // Window coordinates: the expanded box fits the WINDOW with the top gap to spare, and the window
+    // itself is inside the work area (asserted above), so the panel cannot leave the work area.
+    expect(
+      insideRect(
+        { x: p.panelLeft, y: topOfExpandedBox, width: p.panelWidth, height: p.expandedMaxHeight! },
+        { x: 0, y: 0, width: g.width, height: g.height }
+      )
+    ).toBe(true)
+    // Even a work area shorter than the margin + gap yields a non-negative room, not a negative one.
+    expect(hudPlacement(dockPlace({ height: 10 })).expandedMaxHeight).toBe(0)
+  })
+
+  it('a window narrower than a panel keeps the panel on screen (never negative, never off the right)', () => {
+    const p = hudPlacement(dockPlace({ width: 300 }))
+    expect(p.panelLeft).toBe(0)
+    expect(p.panelLeft + p.panelWidth).toBeGreaterThan(300)
+    // …but the real window is a panel plus two margins, so this is the degenerate case only.
+    expect(hudPlacement(dockPlace()).panelLeft).toBe(HUD_EDGE_MARGIN)
+  })
+
+  it('leaves the three upstream sides bit-for-bit alone (no dock fields leak into them)', () => {
+    for (const align of ['left', 'center', 'right'] as const) {
+      const p = hudPlacement(place({ align }))
+      expect(p.docked).toBeUndefined()
+      expect(p.capsuleBottom).toBeUndefined()
+      expect(p.expandedMaxHeight).toBeUndefined()
+    }
   })
 })

@@ -28,6 +28,13 @@ export interface HudGeometryInput {
   /** Already-sanitized settings.notchOffsetY (px, positive = down). Only the window HEIGHT depends
    *  on it here — a capsule pushed down needs the window to grow with it (see `hudPlacement`). */
   offsetY: number
+  /**
+   * T227 — Already-sanitized settings.notchAlign. ABSENT means the top-strip layout, bit-for-bit
+   * what this function always returned: the three upstream sides all live on that strip, so only
+   * `bottom-right` changes anything here. Optional on purpose — a caller (or a test) that does not
+   * care about the dock cannot accidentally move a window by omitting it.
+   */
+  align?: NotchAlign
 }
 
 export interface HudGeometry {
@@ -40,6 +47,11 @@ export interface HudGeometry {
   notchWidth: number
   notchCenterX: number
   hasNotch: boolean
+  /**
+   * T227 — this window is the small box docked in the work area's bottom-right corner, not the
+   * full-width top strip. The renderer keys its bottom-anchored layout on it.
+   */
+  docked: boolean
 }
 
 /** Minimum strip height when there is no physical notch (menu-bar height floor). */
@@ -81,6 +93,32 @@ export function hudGeometry(input: HudGeometryInput): HudGeometry {
   const bar = Math.max(NOTCH_BAR_FLOOR, inset)
   // A physical notch requires a built-in panel whose reserved strip is a notch-sized SHARE of it.
   const hasNotch = input.internal && inset > 0 && b.height > 0 && inset / b.height >= NOTCH_BAR_RATIO
+  // ── T227: THE DOCKED LAYOUT ──────────────────────────────────────────────────────────────────
+  //
+  // `bottom-right` is not a fourth corner of the top strip — it is a standalone pill in the work
+  // area's bottom-right corner, so the WINDOW is a small box there rather than a full-width bar:
+  // the work area's right/bottom edge, minus the box's own size. `workArea` and NOT `bounds` is
+  // load-bearing: `bounds` includes the Dock and the menu bar, so a window placed against it would
+  // sit UNDER the Dock (the owner's own requirement — "用 workArea 避开 Dock").
+  //
+  // Sized to the top-strip layout's EXPANDED box (`HUD_WINDOW_HEIGHT`) plus one edge margin, so the
+  // panel gets exactly the room it gets up there. The notch inputs are still reported (`bar`,
+  // `hasNotch`, …) because the renderer draws the same mascots, but nothing on this path is fused.
+  if (input.align === 'bottom-right') {
+    const width = Math.min(HUD_DOCK_WINDOW_WIDTH, input.workArea.width)
+    const height = Math.min(HUD_DOCK_WINDOW_HEIGHT, input.workArea.height)
+    return {
+      x: input.workArea.x + input.workArea.width - width,
+      y: input.workArea.y + input.workArea.height - height,
+      width,
+      height,
+      bar,
+      notchWidth: input.notchWidth,
+      notchCenterX: Math.round(b.width / 2),
+      hasNotch,
+      docked: true
+    }
+  }
   // A capsule lowered by `offsetY` drags its expanded panel down with it, so the window grows by the
   // same amount — otherwise the panel's bottom rows would be clipped by the window edge. A RAISED
   // capsule (negative) needs nothing extra, and offset 0 keeps the historical height bit-for-bit.
@@ -93,7 +131,8 @@ export function hudGeometry(input: HudGeometryInput): HudGeometry {
     bar,
     notchWidth: input.notchWidth,
     notchCenterX: Math.round(b.width / 2),
-    hasNotch
+    hasNotch,
+    docked: false
   }
 }
 
@@ -109,6 +148,22 @@ export const PILL_TOP_GAP = 6
 /** Margin between a left/right-aligned capsule (and its panel) and the display's edge (px). */
 export const HUD_EDGE_MARGIN = 12
 
+/**
+ * T227 — the `bottom-right` dock's window: a small box in the work area's corner, sized so the
+ * expanded panel has exactly the room the top-strip layout gives it (`HUD_WINDOW_HEIGHT`, which the
+ * CSS `--panel-max-h` is tuned against). Width = one panel plus a margin on each side, which is why
+ * the panel lands `HUD_EDGE_MARGIN` from BOTH side edges of the window.
+ *
+ * Both are clamped to the work area by `hudGeometry`, so a small work area yields a small window and
+ * the panel is bounded by `expandedMaxHeight` (see `hudPlacement`) rather than by these numbers.
+ */
+export const HUD_DOCK_WINDOW_WIDTH = HUD_PANEL_WIDTH + 2 * HUD_EDGE_MARGIN
+export const HUD_DOCK_WINDOW_HEIGHT = HUD_WINDOW_HEIGHT
+/** Clearance between the docked window's top edge and the expanded panel's top edge (px). The panel
+ *  grows UP from the capsule's bottom edge, so this is what keeps it inside the window — and the
+ *  window is inside the work area, so it keeps it inside the work area too. */
+export const HUD_DOCK_TOP_GAP = 12
+
 export interface HudPlacementInput {
   /** Window / display width (px). */
   width: number
@@ -121,6 +176,10 @@ export interface HudPlacementInput {
   /** Already-sanitized settings.notchAlign / settings.notchOffsetY. */
   align: NotchAlign
   offsetY: number
+  /** T227 — the window's height, needed only by the docked layout to bound the expanded panel.
+   *  Absent ⇒ `HUD_DOCK_WINDOW_HEIGHT` (the standard docked window), which is what a caller that
+   *  never asks for `bottom-right` gets anyway. */
+  height?: number
 }
 
 export interface HudPlacement {
@@ -135,20 +194,36 @@ export interface HudPlacement {
    *   notch + center + offset > 0  → a pill hanging centered BELOW the notch
    *   notch + left / right         → a pill at that edge, below the menu-bar strip (± offset)
    *   no notch, any side           → a pill on that side, below the strip (± offset)
+   *   bottom-right (T227)          → a pill in the work area's corner, ALWAYS (never fused, and the
+   *                                   vertical offset is not applied — the corner is the position)
    */
   fused: boolean
   /** Which edge of the COLLAPSED capsule sits at `capsuleX` (the capsule is shrink-to-fit wide,
    *  so it is positioned by an anchor + a CSS translate, not by a left/width pair). Fused = `right`
-   *  (its right edge butts against the notch's right edge); a pill = the chosen side. */
-  anchor: NotchAlign
+   *  (its right edge butts against the notch's right edge); a pill = the chosen side. The dock
+   *  reports `right` too — it is a right-anchored pill that additionally hangs by its bottom edge
+   *  (`docked`), which is why this stays the three horizontal anchors rather than `NotchAlign`. */
+  anchor: 'left' | 'center' | 'right'
   /** X of that anchor edge (px, window coords). */
   capsuleX: number
   /** Top of the capsule (px, window coords) — 0 when fused; never negative (nothing is above the
-   *  display's top edge, so an offset that would raise the capsule past it is clamped there). */
+   *  display's top edge, so an offset that would raise the capsule past it is clamped there).
+   *  Meaningless when `docked` (the capsule hangs by its BOTTOM edge instead). */
   capsuleTop: number
   /** Left edge of the EXPANDED panel (px, window coords), clamped so the panel is on screen. */
   panelLeft: number
   panelWidth: number
+  /** T227 — docked to the work area's bottom-right corner: the renderer anchors the capsule by its
+   *  bottom edge (`--capsule-bottom`) and grows the panel UPWARD. */
+  docked?: boolean
+  /** Distance from the capsule's bottom edge to the window's bottom edge (px, window coords) —
+   *  `HUD_EDGE_MARGIN`. Only present when `docked`. */
+  capsuleBottom?: number
+  /** The tallest the EXPANDED capsule may grow in this window (px), i.e. the room left above the
+   *  capsule's bottom edge after the edge margin and the top gap. Only present when `docked`: the
+   *  window is inside the work area, so bounding the growth here keeps the panel inside it — which
+   *  is what a short work area needs (the panel is SHORTENED, never allowed to overflow). */
+  expandedMaxHeight?: number
 }
 
 /**
@@ -159,6 +234,36 @@ export interface HudPlacement {
 export function hudPlacement(input: HudPlacementInput): HudPlacement {
   const { width, bar, notchWidth, notchCenterX, align, offsetY } = input
   const panelWidth = HUD_PANEL_WIDTH
+  // ── T227: THE DOCKED PILL ────────────────────────────────────────────────────────────────────
+  //
+  // Answered BEFORE anything about the notch strip, because none of it applies: the dock is a
+  // standalone pill in the work area's corner, `fused` is false by construction (a square-cornered
+  // capsule fused to a notch that is nowhere near it is the "black box below the menu bar" bug, one
+  // screenful further away), and the vertical offset does not move it — the corner IS the position,
+  // pinned to `HUD_EDGE_MARGIN` from both edges so the setting cannot push it out of the work area.
+  //
+  // The panel grows UP (the renderer anchors the capsule's bottom edge) and LEFT (its right edge is
+  // the capsule's right edge, so `panelLeft` = that minus the panel's width). Both stay inside the
+  // window — and the window is inside the work area — so there is nothing to clamp horizontally
+  // beyond keeping `panelLeft` non-negative on a work area narrower than a panel.
+  if (align === 'bottom-right') {
+    const capsuleX = width - HUD_EDGE_MARGIN
+    const maxLeft = Math.max(0, width - panelWidth)
+    return {
+      fused: false,
+      anchor: 'right',
+      capsuleX,
+      capsuleTop: 0, // unused while docked; the capsule hangs by its bottom edge
+      panelLeft: Math.round(Math.max(0, Math.min(maxLeft, capsuleX - panelWidth))),
+      panelWidth,
+      docked: true,
+      capsuleBottom: HUD_EDGE_MARGIN,
+      expandedMaxHeight: Math.max(
+        0,
+        (input.height ?? HUD_DOCK_WINDOW_HEIGHT) - HUD_EDGE_MARGIN - HUD_DOCK_TOP_GAP
+      )
+    }
+  }
   // Fused only when the capsule actually touches the notch. A positive offset detaches it, and a
   // detached capsule with square top corners is the "black box below the menu bar" field bug, so
   // it becomes a pill; a negative offset has nowhere to go (top edge) and stays fused at 0.
