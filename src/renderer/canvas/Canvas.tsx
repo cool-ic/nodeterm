@@ -18179,9 +18179,16 @@ export function Canvas() {
             markDirty()
             return one(true)
           }
+          if (outcome === 'deferred') {
+            // The claim was withheld (the canvas epoch moved under the click): nothing was typed
+            // and the never-attempted intent is retained, so this is NOT a failure. Recording one
+            // here would raise a LAUNCH FAILED badge — with no gate to name — over a node that is
+            // simply still queued. Same rule the armed loop and relay path apply.
+            return one(false, 'deferred')
+          }
           useLaunchDelivery.getState().markFailed(nodeId, 1,
-            outcome === 'cancelled' || outcome === 'deferred' ? undefined : outcome.gate,
-            outcome === 'cancelled' || outcome === 'deferred' ? undefined : outcome.failBytes)
+            outcome === 'cancelled' ? undefined : outcome.gate,
+            outcome === 'cancelled' ? undefined : outcome.failBytes)
           return one(false, launchFailureText(outcome))
         }
         case 'headless': {

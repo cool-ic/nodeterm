@@ -18,8 +18,18 @@ export interface LaunchRefusal {
 }
 /** `cancelled` = refused with no gate attributable (a stale pending record, a dead writer). */
 export type LaunchFailure = LaunchRefusal | 'cancelled'
-type LaunchOutcome = Exclude<DeliveryOutcome, 'line-too-long'> | 'deferred' | LaunchRefusal
-type Writer = (command: string, manual: boolean) => Promise<LaunchOutcome>
+/**
+ * Every way a launch can end. `deferred` is deliberately NOT a `LaunchFailure`: the claim was
+ * withheld, nothing was typed, and the never-attempted intent is retained (see
+ * `deliverInitialLaunch`) — so it never reaches `launchFailureText`.
+ *
+ * `line-too-long` is excluded from `DeliveryOutcome` on purpose (T216): gate 4 arrives as the
+ * refusal object instead, carrying the byte count measured by the one place that knows the command
+ * length. The union is the single source for the gate-bearing shape — consumers narrow to
+ * `LaunchRefusal` rather than widening `gate` back to `string`.
+ */
+export type LaunchOutcome = Exclude<DeliveryOutcome, 'line-too-long'> | 'deferred' | LaunchRefusal
+export type Writer = (command: string, manual: boolean) => Promise<LaunchOutcome>
 
 /** T216 (c): gate 1 is the most transient refusal and nothing has been typed yet, so the
  *  automatic path retries the shell probe twice before giving up. A manual ▶ stays single-shot —
@@ -81,7 +91,10 @@ export function createLaunchWriter(opts: {
     if (submitted) return Promise.resolve('submitted') // stale UI/save; never paste twice
     if (inFlight) return inFlight
     if (disposed || (!manual && attempted)) return Promise.resolve('cancelled')
-    inFlight = (async () => {
+    // The settled type is spelled out so the gate-4 refusal keeps `gate` as a
+    // `LaunchFailureReason` instead of widening to `string`; `run` (not `inFlight`) is returned
+    // because `inFlight` is `| undefined` by declaration and its `.finally` clears it.
+    const run: Promise<LaunchOutcome> = (async () => {
       const ready = await confirmShell(manual)
       if (ready) return ready
       const claim = await opts.claimAttempt(manual, command)
@@ -100,15 +113,16 @@ export function createLaunchWriter(opts: {
           opts.cleanup(deliverCommand(opts.io, command, resolve, { killLine: opts.killLine }))
         } catch { resolve('cancelled') }
       })
-    })().then((outcome) => {
+    })().then((outcome): LaunchOutcome => {
       submitted = outcome === 'submitted'
       // Gate 4 carries the byte count; a `cancelled` from deliverCommand is a transport that
       // could not be written to — the pane is gone, which is gate 3's territory.
       if (outcome === 'line-too-long') return { gate: 'line-too-long', failBytes: lineBytes(command) }
       if (outcome === 'cancelled') return { gate: 'torn-down' }
       return outcome
-    }).catch(() => 'cancelled' as const).finally(() => { inFlight = undefined })
-    return inFlight
+    }).catch((): LaunchOutcome => 'cancelled').finally(() => { inFlight = undefined })
+    inFlight = run
+    return run
   }
 }
 
@@ -136,8 +150,11 @@ export function deliverInitialLaunch(command: string, opts: {
       if (outcome === 'deferred') return // no input/claim; retain never-attempted intent
       // The gate name rides the durable hold too: LAUNCH FAILED is found mostly on off-screen
       // nodes and after restarts, where only the persisted record can still answer "why".
-      const refused = outcome === 'cancelled' ? undefined
-        : { failReason: outcome.gate, ...(outcome.failBytes != null ? { failBytes: outcome.failBytes } : {}) }
+      // Only a `LaunchRefusal` (an object) carries a gate — `submitted`/`cancelled` name none, and
+      // this value is read only when the outcome is not `submitted`.
+      const refused = typeof outcome === 'object'
+        ? { failReason: outcome.gate, ...(outcome.failBytes != null ? { failBytes: outcome.failBytes } : {}) }
+        : undefined
       opts.update({ initialCommand: undefined,
         pendingLaunch: outcome === 'submitted' ? undefined
           : { ...pendingLaunch, attempted: true, manualOnly: true, ...refused } })
