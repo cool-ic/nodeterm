@@ -511,6 +511,12 @@ export const IconChevronRight = () => (
   </svg>
 )
 
+export const IconChevronLeft = () => (
+  <svg {...S}>
+    <path d="M14.5 6l-6 6 6 6" />
+  </svg>
+)
+
 export const IconClose = () => (
   <svg {...S}>
     <path d="M6 6l12 12M18 6L6 18" />

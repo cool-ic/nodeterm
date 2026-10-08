@@ -7,15 +7,13 @@
 // the wiring by reading the call site. A source read is a weak test in general, but it is the only
 // thing standing between a one-character deletion and a silently reintroduced bug — which is
 // exactly the shape that survived the whole suite once on this branch already.
-import { act } from 'react'
-import { createRoot } from 'react-dom/client'
-import { CanvasPills } from '../components/CanvasPills'
 import fs from 'fs'
 import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { chromeObstacles, FIT_VIEW_GAP } from './fit-view'
 
 const CANVAS_SRC = fs.readFileSync(path.join(__dirname, 'Canvas.tsx'), 'utf8').replace(/\r\n/g, '\n')
+const STYLES_SRC = fs.readFileSync(path.join(__dirname, '../styles.css'), 'utf8').replace(/\r\n/g, '\n')
 
 /** jsdom lays nothing out, so every rect is 0×0 and `chromeObstacles`'s size filter would drop the
  *  element. Give it the measurement a real bottom-left pill cluster has. */
@@ -28,46 +26,52 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('the canvas pill cluster is fit-view chrome', () => {
+describe('the canvas rail is fit-view chrome', () => {
   const VIEWPORT = { left: 0, top: 0, right: 1200, bottom: 800 }
-  const PILLS = { left: 60, top: 740, right: 300, bottom: 766 }
+  const RAIL = { left: 1080, top: 62, right: 1190, bottom: 700 }
 
   it('is picked up as an obstacle through data-canvas-chrome', () => {
-    // Exactly the markup Canvas renders: the ATTRIBUTE is the whole opt-in — `.canvas-pills` is not
-    // in CANVAS_CHROME_SELECTOR, so nothing else can reach this element.
-    document.body.innerHTML = '<div class="canvas-pills" data-canvas-chrome></div>'
-    const el = document.querySelector('.canvas-pills')!
-    measured(el, PILLS)
+    // Exactly the markup Canvas renders: the ATTRIBUTE is the whole opt-in — `.canvas-rail__body`
+    // is not in CANVAS_CHROME_SELECTOR, so nothing else can reach this element.
+    document.body.innerHTML = '<div class="canvas-rail__body" data-canvas-chrome></div>'
+    const el = document.querySelector('.canvas-rail__body')!
+    measured(el, RAIL)
     const obstacles = chromeObstacles(VIEWPORT)
     expect(obstacles).toHaveLength(1)
-    // Inflated by the gap, so fitView keeps content clear of the pills rather than flush against.
+    // Inflated by the gap, so fitView keeps content clear of the rail rather than flush against.
     expect(obstacles[0]).toEqual({
-      left: PILLS.left - FIT_VIEW_GAP,
-      top: PILLS.top - FIT_VIEW_GAP,
-      right: PILLS.right + FIT_VIEW_GAP,
-      bottom: PILLS.bottom + FIT_VIEW_GAP
+      left: RAIL.left - FIT_VIEW_GAP,
+      top: RAIL.top - FIT_VIEW_GAP,
+      right: RAIL.right + FIT_VIEW_GAP,
+      bottom: RAIL.bottom + FIT_VIEW_GAP
     })
   })
 
   it('is invisible to fit-view without the attribute', () => {
-    // The failure this pins: dropping `data-canvas-chrome` leaves a rendering, clickable cluster and
+    // The failure this pins: dropping `data-canvas-chrome` leaves a rendering, clickable rail and
     // a fitView that parks nodes underneath it — no error, no test, nothing to notice.
-    document.body.innerHTML = '<div class="canvas-pills"></div>'
-    measured(document.querySelector('.canvas-pills')!, PILLS)
+    document.body.innerHTML = '<div class="canvas-rail__body"></div>'
+    measured(document.querySelector('.canvas-rail__body')!, RAIL)
     expect(chromeObstacles(VIEWPORT)).toEqual([])
   })
 
-  it('the production cluster opts into fit-view obstacles', () => {
-    const host = document.createElement('div')
-    document.body.append(host)
-    const root = createRoot(host)
-    try {
-      act(() => root.render(<CanvasPills><button>Usage</button></CanvasPills>))
-      measured(host.querySelector('.canvas-pills')!, PILLS)
-      expect(chromeObstacles(VIEWPORT)).toHaveLength(1)
-    } finally {
-      act(() => root.unmount())
-    }
+  it('the production rail opts into fit-view obstacles as ONE rect', () => {
+    // T223: the rail body wrapper (dock + pills inside it) carries the attribute, so the solver
+    // sees a single rect instead of one per control.
+    expect(CANVAS_SRC).toContain('<div className="canvas-rail__body" data-canvas-chrome>')
+  })
+
+  it('the collapsed rail hides every bottom/top obstacle the rail owns', () => {
+    // 收起态 fit 零扣减: the toggle tab (14px, flush with the edge, no opt-in) sits inside
+    // fit-view's 12px edge inset, and everything else is display:none — zero measured rects.
+    // The data attribute lives on .canvas-root (Canvas.tsx); the display:none rules in
+    // styles.css — which is why the two halves are pinned against different sources.
+    expect(CANVAS_SRC).toContain('data-rail-collapsed={railCollapsed || undefined}')
+    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.canvas-rail__body/)
+    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.minimap-dock/)
+    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.minimap-restore/)
+    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.controls-cluster/)
+    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.react-flow__controls/)
   })
 })
 

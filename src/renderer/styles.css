@@ -849,20 +849,16 @@ body,
 }
 
 .dock {
-  position: absolute;
-  bottom: var(--float-gap);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 20;
-  display: flex;
-  align-items: center;
+  /* T223: the dock lives in the right rail now (`.canvas-rail`), stacked above the ambient
+     pills. The card look (background, blur, border) moved to the rail body — the whole rail is
+     ONE fit-view obstacle — so the dock itself is just the button grid: two columns keep the
+     12 controls short enough to clear the minimap on short panes. */
+  position: static;
+  display: grid;
+  grid-template-columns: 38px 38px;
   gap: 4px;
-  padding: 7px;
-  background: rgba(var(--menu-rgb), 0.92);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, calc(0.5 * var(--shadow-k)));
+  justify-content: center;
+  align-items: center;
 }
 
 .dock-btn {
@@ -908,15 +904,21 @@ body,
 }
 
 .dock-sep {
-  width: 1px;
-  height: 22px;
+  /* Horizontal in the vertical rail, and spanning both grid columns. */
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: 22px;
+  height: 1px;
   background: var(--border);
-  margin: 0 4px;
+  margin: 4px 0;
 }
 
 .dock-zoom-wrap {
   position: relative;
   display: inline-flex;
+  /* The % readout is wider than a 38px grid cell — it spans the rail. */
+  grid-column: 1 / -1;
+  justify-content: center;
 }
 
 .dock-zoom {
@@ -1005,8 +1007,9 @@ body,
 /* Add-node menu above the dock */
 .dock-menu {
   position: absolute;
-  bottom: calc(100% + 10px);
-  left: 0;
+  /* T223: the rail hugs the right edge, so menus open LEFTWARD from their trigger. */
+  top: 0;
+  right: calc(100% + 10px);
   min-width: 190px;
   display: flex;
   flex-direction: column;
@@ -1200,9 +1203,10 @@ body,
 /* ---- Dictation overlay: bottom-center floating card above the Dock ---- */
 .dictation {
   position: fixed;
+  /* T223: anchored left of the canvas rail (rail ~110px + its 22px inset + 8px gap) instead of
+     centered — a centered card would re-occupy the bottom band the rail just vacated. */
+  right: 140px;
   bottom: calc(var(--float-gap) + 52px + var(--float-gap));
-  left: 50%;
-  transform: translateX(-50%);
   z-index: 60; /* above the kanban board (25) and the card modal scrim (55) — the mic works there too */
   width: 420px;
   max-width: 92vw;
@@ -2395,6 +2399,13 @@ body,
    so the base rule's horizontal pull is dropped and the centering moves to the other axis. */
 .tooltip--right {
   transform: translateY(-50%);
+}
+
+/* Mirror of --right: the anchor x is the trigger's LEFT edge and must become the bubble's right
+   edge, so the horizontal pull flips to -100% — the canvas rail's tooltips (T223) open away from
+   the window edge. */
+.tooltip--left {
+  transform: translate(-100%, -50%);
 }
 
 
@@ -8239,14 +8250,84 @@ button.group-node__setup:disabled {
    z-index, transform, filter or opacity here — any of them would trap both pills below the sidebar.
    The left offset clears the controls column, which shares this corner: --controls-w plus the 12px
    the other chrome already uses between two adjacent clusters (see .resume-card). */
-.canvas-pills {
-  width: max-content;
+.canvas-rail {
+  /* T223: the right rail — the dock and the ambient pills stacked at the right edge, so the
+     fit-view free rectangle reaches the pane bottom (bottom chrome inset ~88px → 12px). The
+     whole body carries `data-canvas-chrome`, making the rail ONE obstacle rect for the solver.
+     The minimap cannot join (it needs React Flow's store context), so it stays its own obstacle
+     at the bottom-right anchor. */
   position: absolute;
-  left: calc(var(--float-gap) + var(--controls-w) + 12px);
-  bottom: var(--float-gap);
+  top: var(--float-gap);
+  right: var(--float-gap);
+  z-index: 20; /* the dock's old z — above the sidebar (12), below the banners (27) */
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-rail__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 7px;
+  background: rgba(var(--menu-rgb), 0.92);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, calc(0.5 * var(--shadow-k)));
+  max-height: calc(100% - var(--float-gap) - 170px); /* clear the minimap; scroll on short panes */
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.canvas-rail__pills {
+  display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 8px;
+}
+
+.canvas-rail__toggle {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--muted);
+  background: rgba(var(--menu-rgb), 0.92);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.canvas-rail__toggle:hover {
+  color: var(--text);
+}
+
+/* Collapsed: rail contents, the minimap and the top-right cluster all hide, and the toggle
+   becomes a slim tab flush with the window edge — 14px wide, inside fit-view's 12px edge inset
+   and carrying no chrome opt-in, so a collapsed canvas measures ZERO obstacles. */
+.canvas-root[data-rail-collapsed] .canvas-rail {
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+}
+
+.canvas-root[data-rail-collapsed] .canvas-rail__toggle {
+  width: 14px;
+  height: 56px;
+  border-radius: 8px 0 0 8px;
+}
+
+.canvas-root[data-rail-collapsed] .canvas-rail__body,
+.canvas-root[data-rail-collapsed] .minimap-dock,
+.canvas-root[data-rail-collapsed] .minimap-restore,
+.canvas-root[data-rail-collapsed] .controls-cluster,
+.canvas-root[data-rail-collapsed] .react-flow__controls {
+  display: none;
 }
 
 /* ---- Resume-where-you-left-off card (breadcrumb trail, once per project activation) ---- */
@@ -8356,7 +8437,7 @@ button.group-node__setup:disabled {
 }
 /* Only summary text may overflow: refresh and the usage opener remain reachable. Never clip
    the indicator/row itself, since the popover must escape it. */
-.canvas-pills > .sysres-indicator { flex: 0 0 auto; }
+.canvas-rail__pills > .sysres-indicator { flex: 0 0 auto; }
 .usage-indicator { min-width: 0; }
 .usage-pill { min-width: 0; }
 .usage-pill__icon, .usage-refresh { flex: 0 0 auto; }
@@ -16972,15 +17053,8 @@ body.focus-mode .dock:hover {
    QA round 3, NL1): each clears the dock's top edge by 8px. Add hangs from the dock itself; Layouts
    and Zoom from their wraps, which start 8px and 15px below the dock's top (7px padding + 1px
    border; the 24px zoom pill is centred in the 38px row). */
-:root[data-nt-glass='on'] .dock > .dock-menu {
-  bottom: calc(100% + 8px);
-}
-:root[data-nt-glass='on'] .dock-layouts-wrap > .dock-menu {
-  bottom: calc(100% + 16px);
-}
-:root[data-nt-glass='on'] .dock-zoom-wrap > .dock-menu {
-  bottom: calc(100% + 23px);
-}
+/* T223: the dock menus used to need per-wrap vertical offsets when they opened upward from the
+   bottom dock; opening leftward from the rail needs none, so the glass overrides are gone. */
 /* The RAM panel reached over the dock's + corner (NL2): it rises above the dock (54px tall, same
    baseline as the pill row) by 8px, and a long session name elides instead of pushing the row's
    actions onto a second line. */

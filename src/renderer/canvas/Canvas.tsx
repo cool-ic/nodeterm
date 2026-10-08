@@ -120,6 +120,8 @@ import {
   IconBroadcast,
   IconChat,
   IconCanvasView,
+  IconChevronLeft,
+  IconChevronRight,
   IconClose,
   IconCollapse,
   IconDino,
@@ -313,7 +315,6 @@ import {
   noteTerminalCapture,
   terminalShortcutPolicy
 } from '../lib/keybindingOverrides'
-import { CanvasPills } from '../components/CanvasPills'
 import { UsageIndicator, type AccountMoveProgress } from '../components/UsageIndicator'
 import { SystemResourcePill } from '../components/SystemResourcePill'
 import { PresenceLayer } from '../components/PresenceLayer'
@@ -648,6 +649,7 @@ import {
 import { useStationOutcomes } from '../state/stationOutcomes'
 import { installStationOutcomeWiring } from '../lib/stationOutcomeWiring'
 import { useStationHandovers } from '../state/stationHandovers'
+import { readRailCollapsed, writeRailCollapsed } from '../lib/railCollapse'
 import { installStationHandoverWiring } from '../lib/stationHandoverWiring'
 import { lookupPullRequests, pullBoardFor, useGitHubIssues } from '../state/githubIssues'
 import { usePullChase } from '../components/kanban/usePullAutoMove'
@@ -1950,6 +1952,9 @@ export function Canvas() {
    * object is rebuilt on every node serialization and would re-render the whole canvas per edit.
    */
   const [resumeProject, setResumeProject] = useState<Project | null>(null)
+  // T223: the canvas rail's collapsed state. Per-machine (localStorage via lib/railCollapse),
+  // default EXPANDED — a missing key keeps the controls on screen for every existing user.
+  const [railCollapsed, setRailCollapsed] = useState(readRailCollapsed)
   const {
     setViewport,
     getViewport,
@@ -18804,7 +18809,7 @@ export function Canvas() {
   const paletteChip = chipFor('app.commandPalette')
 
   return (
-    <div className="canvas-root" style={wallpaperStyle}>
+    <div className="canvas-root" data-rail-collapsed={railCollapsed || undefined} style={wallpaperStyle}>
       <TabBar
         onSwitch={switchProject}
         onReconnect={reconnectRelay}
@@ -19317,39 +19322,110 @@ export function Canvas() {
         </ReactFlow>
         </SessionProvider>
 
-        {/* MUST stay OUTSIDE <ReactFlow>. The library's wrapper carries inline
-            `position: relative; z-index: 0`, which makes the whole flow one stacking context
-            painted at 0 among flow-wrap's siblings — so no z-index INSIDE it, however large,
-            can ever rise above the sessions sidebar (z 12). Mounted here, each pill's own
-            z-index (5 collapsed, 13 with the popover open) competes in the same context as the
-            sidebar and the open popover wins. Neither uses React Flow hooks, and .flow-wrap is
-            position:relative, so the cluster's absolute left/bottom anchor is unchanged.
-            The cluster itself deliberately has NO z-index — see .canvas-pills in styles.css.
-            `data-canvas-chrome` is fit-view's own documented opt-in: it makes the whole cluster ONE
-            obstacle rect (instead of one per pill, overlapping after inflation), so fitView never
-            parks a node underneath either pill. */}
-        <CanvasPills>
-          {/* `travelToNode`, not `focusNodeById`: the panel resolves sessions in CLOSED projects
-              too (their tmux sessions keep running), and reaching one means reopening its tab
-              first — the same path a notification click and a peer jump take. */}
-          <SystemResourcePill
-            overBoard={kanbanOpen}
-            onGoToNode={travelToNode}
-            onKillSession={killSessionById}
-            pauseOfferFor={sessionPauseOfferFor}
-            onPauseSession={pauseSessionById}
-          />
-        
-          {/* Same write path as the TabBar caret menu (project.defaultAccountId + persist) — the
-              popover row is a second, better-placed entrance to the same action (issue #142). */}
-          <UsageIndicator
-            overBoard={kanbanOpen}
-            onSetDefaultAccount={setProjectDefaultAccount}
-            countAccountSessions={countAccountSessions}
-            onMoveSessions={(from, to, label) => void moveAccountSessions(from, to, label)}
-            accountMove={accountMove}
-          />
-        </CanvasPills>
+        {/* T223: the right rail — the dock and the ambient pills leave the bottom band for the
+            right edge, so the fit-view free rectangle reaches the pane bottom (bottom chrome
+            inset ~88px → 12px). MUST stay OUTSIDE <ReactFlow>, for the same stacking-context
+            reason as before: the library's wrapper carries inline `position: relative; z-index: 0`
+            (one stacking context painted at 0), and the pills' popovers must rise above the
+            sessions sidebar (z 12). Neither the dock nor the pills uses React Flow hooks.
+            `.canvas-rail__body` carries `data-canvas-chrome`, so the whole rail is ONE obstacle
+            rect for the solver. The minimap cannot join — it needs React Flow's store context —
+            and stays its own obstacle at the bottom-right anchor.
+            Collapse (per-machine, `lib/railCollapse`, default expanded) hides the rail, the
+            minimap and the top-right cluster: the toggle tab is 14px wide, flush with the edge
+            and carrying no chrome opt-in, so a collapsed canvas measures ZERO obstacles. */}
+        <div className="canvas-rail">
+          <button
+            type="button"
+            className="canvas-rail__toggle nodrag nopan"
+            aria-label={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
+            title={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
+            onClick={() => {
+              setRailCollapsed(!railCollapsed)
+              writeRailCollapsed(!railCollapsed)
+            }}
+          >
+            {railCollapsed ? <IconChevronLeft /> : <IconChevronRight />}
+          </button>
+          <div className="canvas-rail__body" data-canvas-chrome>
+            <Dock
+              dirty={dirty}
+              zoomPct={zoomPct}
+              canUndo={pastRef.current.length > 0}
+              canRedo={futureRef.current.length > 0}
+              // Enabled state must agree with what a click will DO: stepBreadcrumb skips deleted
+              // stops and answers null when every stop in that direction is dead, so a raw index
+              // comparison renders an enabled arrow that does nothing. Cheap at the 20-entry cap,
+              // and it stays honest as nodes are deleted (Canvas re-renders on both bumpNav and
+              // nodes).
+              canGoBack={
+                !!stepBreadcrumb(navRef.current, 'back', (id) =>
+                  nodesRef.current.some((n) => n.id === id)
+                )
+              }
+              canGoForward={
+                !!stepBreadcrumb(navRef.current, 'forward', (id) =>
+                  nodesRef.current.some((n) => n.id === id)
+                )
+              }
+              onUndo={undo}
+              onRedo={redo}
+              onGoBack={goBack}
+              onGoForward={goForward}
+              onAddTerminal={addTerminal}
+              onAddSticky={addSticky}
+              onSpawnTeam={() => setSpawnTeamDialog({})}
+              onAddDino={addDino}
+              onAddTrigger={addTrigger}
+              onAddFiles={() => addFiles()}
+              onAddRun={() => void addRun()}
+              onAddAgent={(aid, accountId) => addAgentNode(aid, undefined, undefined, accountId)}
+              onOpenFile={() => void openFileDialog()}
+              onAddRemote={() => openRemotePicker({ x: window.innerWidth / 2, y: window.innerHeight / 2 })}
+              onConnectRemote={() => void connectRemote()}
+              onAddBrowser={() => addBrowser()}
+              onAddWeb={() => void addWebView()}
+              onNewFile={() => void newProjectFile()}
+              onAddWorktree={() => openWorktreeDialog(null)}
+              onSave={persist}
+              onFitView={fitAll}
+              onSaveLayout={() => void saveCanvasLayout()}
+              onRestoreLayout={restoreCanvasLayout}
+              onUpdateLayout={updateCanvasLayout}
+              onRenameLayout={(layout) => void renameCanvasLayout(layout)}
+              onDeleteLayout={deleteCanvasLayout}
+              onZoomIn={() => zoomIn({ duration: ZOOM_STEP_DURATION_MS })}
+              onZoomOut={() => zoomOut({ duration: ZOOM_STEP_DURATION_MS })}
+              onZoomTo={zoomToPct}
+              onDictate={toggleDictation}
+              dictateActive={dictationOpen}
+            />
+
+            {/* `travelToNode`, not `focusNodeById`: the panel resolves sessions in CLOSED projects
+                too (their tmux sessions keep running), and reaching one means reopening its tab
+                first — the same path a notification click and a peer jump take. */}
+            <div className="canvas-rail__pills">
+              <SystemResourcePill
+                overBoard={kanbanOpen}
+                onGoToNode={travelToNode}
+                onKillSession={killSessionById}
+                pauseOfferFor={sessionPauseOfferFor}
+                onPauseSession={pauseSessionById}
+              />
+
+              {/* Same write path as the TabBar caret menu (project.defaultAccountId + persist) —
+                  the popover row is a second, better-placed entrance to the same action (issue
+                  #142). */}
+              <UsageIndicator
+                overBoard={kanbanOpen}
+                onSetDefaultAccount={setProjectDefaultAccount}
+                countAccountSessions={countAccountSessions}
+                onMoveSessions={(from, to, label) => void moveAccountSessions(from, to, label)}
+                accountMove={accountMove}
+              />
+            </div>
+          </div>
+        </div>
 
         {/* Canvas-mounted, deliberately NOT in the .top-banners column: this is about THIS canvas,
             not an app-wide message. Opening a row records a new breadcrumb through goToNode — which
@@ -20047,58 +20123,6 @@ export function Canvas() {
           onDismiss={() => setConsentOpen(false)}
         />
       )}
-
-      <Dock
-        dirty={dirty}
-        zoomPct={zoomPct}
-        canUndo={pastRef.current.length > 0}
-        canRedo={futureRef.current.length > 0}
-        // Enabled state must agree with what a click will DO: stepBreadcrumb skips deleted stops
-        // and answers null when every stop in that direction is dead, so a raw index comparison
-        // renders an enabled arrow that does nothing. Cheap at the 20-entry cap, and it stays
-        // honest as nodes are deleted (Canvas re-renders on both bumpNav and nodes).
-        canGoBack={
-          !!stepBreadcrumb(navRef.current, 'back', (id) =>
-            nodesRef.current.some((n) => n.id === id)
-          )
-        }
-        canGoForward={
-          !!stepBreadcrumb(navRef.current, 'forward', (id) =>
-            nodesRef.current.some((n) => n.id === id)
-          )
-        }
-        onUndo={undo}
-        onRedo={redo}
-        onGoBack={goBack}
-        onGoForward={goForward}
-        onAddTerminal={addTerminal}
-        onAddSticky={addSticky}
-        onSpawnTeam={() => setSpawnTeamDialog({})}
-        onAddDino={addDino}
-        onAddTrigger={addTrigger}
-        onAddFiles={() => addFiles()}
-        onAddRun={() => void addRun()}
-        onAddAgent={(aid, accountId) => addAgentNode(aid, undefined, undefined, accountId)}
-        onOpenFile={() => void openFileDialog()}
-        onAddRemote={() => openRemotePicker({ x: window.innerWidth / 2, y: window.innerHeight / 2 })}
-        onConnectRemote={() => void connectRemote()}
-        onAddBrowser={() => addBrowser()}
-        onAddWeb={() => void addWebView()}
-        onNewFile={() => void newProjectFile()}
-        onAddWorktree={() => openWorktreeDialog(null)}
-        onSave={persist}
-        onFitView={fitAll}
-        onSaveLayout={() => void saveCanvasLayout()}
-        onRestoreLayout={restoreCanvasLayout}
-        onUpdateLayout={updateCanvasLayout}
-        onRenameLayout={(layout) => void renameCanvasLayout(layout)}
-        onDeleteLayout={deleteCanvasLayout}
-        onZoomIn={() => zoomIn({ duration: ZOOM_STEP_DURATION_MS })}
-        onZoomOut={() => zoomOut({ duration: ZOOM_STEP_DURATION_MS })}
-        onZoomTo={zoomToPct}
-        onDictate={toggleDictation}
-        dictateActive={dictationOpen}
-      />
 
       {/* Focus mode surface (issue #78). ALWAYS mounted so the reparent target exists before the
           commit that moves a node into it, and OUTSIDE <ReactFlow> on purpose — the flow wrapper

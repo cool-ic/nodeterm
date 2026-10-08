@@ -11,7 +11,7 @@ const TOOLTIP_OFFSET = 6
  *  dock) must open upward: below it, the bubble lands off-screen. Chrome stacked vertically against
  *  the left edge (the canvas controls) opens sideways, where an upward bubble would cover the
  *  button above the one being pointed at. */
-export type TooltipPlacement = 'top' | 'bottom' | 'right'
+export type TooltipPlacement = 'top' | 'bottom' | 'right' | 'left'
 
 interface TooltipOptions {
   delay?: number
@@ -31,6 +31,9 @@ export function tooltipAnchor(
   if (placement === 'right') {
     return { x: rect.right + TOOLTIP_OFFSET, y: rect.top + rect.height / 2 }
   }
+  if (placement === 'left') {
+    return { x: rect.left - TOOLTIP_OFFSET, y: rect.top + rect.height / 2 }
+  }
   return {
     x: rect.left + rect.width / 2,
     y: placement === 'top' ? rect.top - TOOLTIP_OFFSET : rect.top + rect.height + TOOLTIP_OFFSET
@@ -47,7 +50,8 @@ export function tooltipClass(placement: TooltipPlacement): string {
  * a centered placement spends half its width each way, `right` spends all of it trailing.
  */
 function horizontalExtent(width: number, placement: TooltipPlacement): { leading: number; trailing: number } {
-  const leading = placement === 'right' ? 0 : width / 2
+  // `right` trails fully (the bubble's LEFT edge is pinned); `left` leads fully (its RIGHT edge is).
+  const leading = placement === 'right' ? 0 : placement === 'left' ? width : width / 2
   return { leading, trailing: width - leading }
 }
 

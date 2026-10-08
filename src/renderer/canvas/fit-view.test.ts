@@ -175,3 +175,42 @@ describe('solveFitFrame answers in the pane\u2019s own coordinates', () => {
     expect(solveFitFrame(pane({ left: 0, top: 0, width: 1200, height: 800 }), 0, 400)).toBeNull()
   })
 })
+
+// T223: the bottom band's chrome (dock + pills) moves into the right rail, so the fit free
+// rectangle reaches the pane bottom. Numbers measured from the fleet canvas (2026-10-08): pane
+// 1264×722 chrome (the same rects the fixtures above use), content bbox 1550×1324 — five live
+// nodes spanning x −205..1552, y 12..~1336 (node heights estimated from pane rows × 13px font).
+describe('the right rail gives the fit rectangle its height back', () => {
+  const PANE: FitRect = { left: 12, top: 56, right: 1252, bottom: 754 }
+  // Before: dock bottom-center, pills bottom-left, minimap bottom-right, flow controls bottom-left.
+  const BEFORE = [
+    { left: 407, top: 678, right: 858, bottom: 756 }, // .dock
+    { left: 48, top: 728, right: 312, bottom: 778 }, // .canvas-pills (inflated by data-canvas-chrome)
+    { left: 1023, top: 575, right: 1273, bottom: 775 }, // .minimap
+    { left: -9, top: 623, right: 65, bottom: 775 } // .react-flow__controls
+  ]
+  // After: ONE rail rect on the right edge (dock + pills merged via data-canvas-chrome); minimap
+  // and flow controls keep their corners.
+  const AFTER = [
+    { left: 1068, top: 50, right: 1214, bottom: 724 }, // .canvas-rail__body
+    { left: 1023, top: 575, right: 1273, bottom: 775 }, // .minimap
+    { left: -9, top: 623, right: 65, bottom: 775 } // .react-flow__controls
+  ]
+  // Collapsed: rail body, minimap, flow controls and the top-right cluster all hide; the 14px
+  // toggle tab sits inside the 12px edge inset, so the solver measures NOTHING.
+  const FLEET_W = 1550
+  const FLEET_H = 1324
+
+  it('the rail frees more height for the fleet canvas than the bottom band did', () => {
+    const before = largestFreeRect(PANE, BEFORE, FLEET_W, FLEET_H)!
+    const after = largestFreeRect(PANE, AFTER, FLEET_W, FLEET_H)!
+    expect(h(before)).toBeLessThan(h(after))
+    // The ruling's promise, in pixels: the freed bottom band is at least 76px of rect height.
+    expect(h(after) - h(before)).toBeGreaterThanOrEqual(76)
+    expect(zoomOf(after, FLEET_W, FLEET_H)).toBeGreaterThan(zoomOf(before, FLEET_W, FLEET_H))
+  })
+
+  it('a collapsed canvas measures zero obstacles and the fit takes the whole pane', () => {
+    expect(largestFreeRect(PANE, [], FLEET_W, FLEET_H)).toEqual(PANE)
+  })
+})
