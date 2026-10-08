@@ -63,10 +63,12 @@ import type { SessionLiveness } from '../../shared/agents/agent-messaging'
  *  - **It is typed only into the SAME session it was queued for.** At enqueue the target's agent
  *    and session id are recorded (`bindingOf`, the status mirror). A RESTORED entry flushes only if
  *    the target's current session and agent are the recorded ones; a different session (the pane
- *    was respawned, `/clear`, another agent now runs there) ends it as `targetGone` — the session it
- *    was addressed to is gone — and the sender is told. An entry with no recorded session is refused
- *    the same way (nothing proves it is the same conversation); a target whose session is not known
- *    YET waits (the flush trigger is a hook event, which names it). In-run entries are unchanged.
+ *    was respawned, `/clear`, another agent now runs there) is held pending the host's own answer —
+ *    only a probe that also says `gone` ends it as `targetGone`, and the sender is told (T237①). An
+ *    entry with no recorded session is not delivered either, and is NOT called a death: it is held
+ *    (T237②) and ends at its TTL with a notice saying the binding could not be proven. A target
+ *    whose session is not known YET waits (the flush trigger is a hook event, which names it).
+ *    In-run entries are unchanged.
  *  - **The whole gate chain still runs at flush**, as it always did (scope, pane ownership, grant,
  *    flow). Note what that means after a restart where tmux survived: pane ownership is recorded
  *    only on a fresh spawn (pane-ownership.ts), so the surviving pane is UNPROVEN and the flush is
@@ -217,6 +219,13 @@ export type QueueExpiryReason =
    * outlasted it.
    */
   | 'rate-limit-exhausted'
+  /**
+   * T237 — the entry came back from a restart unable to prove the target still runs the
+   * conversation it was addressed to, and the host did not say the session is gone either. NOT a
+   * death, and not a delivery: the message is held and then told to end, rather than typed into a
+   * session nobody could prove was the same one.
+   */
+  | 'binding-unproven'
   /** The entry came back from a restart without enough to deliver it (its body was not stored, its
    *  verb does not survive a restart, or the target's queue was full). */
   | 'not-restorable'
@@ -232,6 +241,9 @@ export const EXPIRY_REASON_TEXT: Record<QueueExpiryReason, string> = {
   'rate-limit-exhausted':
     `the target’s provider kept rate limiting it through ${RATE_LIMIT_MAX_ATTEMPTS} attempts ` +
     `(waited out its own backoff ladder; this is the provider’s limit, not your order)`,
+  'binding-unproven':
+    'the message was addressed to a conversation the target is no longer provably running, and the ' +
+    'target’s session was not confirmed gone either — nodeterm did not type it anywhere',
   'not-restorable': 'the entry did not survive the restart with enough to deliver it'
 }
 
@@ -253,6 +265,14 @@ interface QueueEntry {
    */
   rateLimitAttempts?: number
   holdUntil?: number
+  /**
+   * T237 — this restored entry may NOT be delivered (its binding to a conversation is unproven) AND
+   * the host did not confirm the target's session is gone. It is held, never typed, and never
+   * called a death — and because it is also NOT reachable, the TTL's live-session re-arm (T205's
+   * rule, which exists so that a message to a REACHABLE target is not expired under it) does not
+   * apply: the entry is allowed to reach its honest, notified ending.
+   */
+  bindingUnproven?: true
 }
 
 /** One queued message as written to disk. */
@@ -376,15 +396,29 @@ export const QUEUE_FACT: DurableFactSpec<PersistedQueueEntry> = {
 }
 
 /**
- * May a RESTORED entry go into the target now? `deliver` = run the gate chain; `wait` = the
- * target's session is not known yet (re-queue, TTL still running); `gone` = it is a different
- * conversation, or nothing recorded which one it was.
+ * May a RESTORED entry go into the target now? Four dispositions (T237), because the ledger alone
+ * may not issue a death certificate and may not decide that a question is unanswerable forever:
+ *
+ *  - `deliver`    — recorded and current agree on the conversation: run the gate chain.
+ *  - `wait`       — the CURRENT binding is not known YET (the mirror has not named a session for
+ *                   the node, which is normal for a beat after a restart). Re-queue; the TTL keeps
+ *                   running and the very next flush may deliver it.
+ *  - `unprovable` — the ENTRY recorded no session id, so nothing can ever prove the target is
+ *                   still the conversation it was addressed to. HOLD, do not deliver, and do NOT
+ *                   declare the target dead: the entry runs to its TTL and ends with the honest
+ *                   notice. (T237② — this arm used to return `gone`, and it is the arm that fired
+ *                   in the field: a `send` enqueued while the target was mid-turn was restored
+ *                   without a binding and dropped as a death, with the target's tmux session
+ *                   alive the whole time.)
+ *  - `gone`       — the ledger says a DIFFERENT conversation (another session id, or another agent
+ *                   in the pane). This is the ledger's OPINION, not a verdict: the caller asks the
+ *                   host before it may become terminal (T237①).
  */
 export function restoredBindingVerdict(
   recorded: QueueBinding | undefined,
   current: QueueBinding | undefined
-): 'deliver' | 'wait' | 'gone' {
-  if (!recorded?.sessionId) return 'gone'
+): 'deliver' | 'wait' | 'unprovable' | 'gone' {
+  if (!recorded?.sessionId) return 'unprovable'
   if (!current?.sessionId) return 'wait'
   if (current.sessionId !== recorded.sessionId) return 'gone'
   if (recorded.agentId && current.agentId && current.agentId !== recorded.agentId) return 'gone'
@@ -530,13 +564,43 @@ export class DeliveryQueue {
       // Written off disk BEFORE the attempt (claim before effect): a crash mid-delivery then loses
       // this one message rather than typing it twice after the next boot. At most once.
       this.persist()
-      // A restored entry goes only into the session it was queued for (see the header).
+      // ── A RESTORED ENTRY: THE LEDGER IS NOT ENOUGH (T237) ──────────────────────────────────────
+      //
+      // See `restoredBindingVerdict` for the four dispositions. Two of them change an ENTRY's state
+      // rather than answering: `unprovable` and an unconfirmed `gone` both mark the entry as
+      // carrying an unproven binding, which is what lets `expire` end it honestly instead of
+      // re-arming forever (see there).
       const verdict = entry.restored
         ? restoredBindingVerdict(entry.binding, this.deps.bindingOf?.(nodeId))
         : 'deliver'
+      if (verdict === 'deliver') {
+        // T237: a binding that AGREES again makes a held entry deliverable — the pane can legitimately
+        // come back under the same session id (a cold restore resumes it), and the hold must not
+        // outlive the reason for it.
+        delete entry.bindingUnproven
+      }
       if (verdict === 'wait') {
         this.requeueFront(nodeId, entry)
         return
+      }
+      if (verdict === 'unprovable') {
+        entry.bindingUnproven = true
+        this.requeueFront(nodeId, entry)
+        return
+      }
+      if (verdict === 'gone') {
+        // T237① — THE LEDGER'S OPINION, CROSS-CHECKED WITH THE HOST. `restoredBindingVerdict` says
+        // the conversation changed; that is a fact about the RECORD, and the record's own opinion
+        // was enough to drop a live station's mail in the field (02:55:05, same-millisecond
+        // board-log pair, no write attempted, the target's tmux session alive throughout). Only a
+        // host that ALSO says the session is absent licenses the terminal verdict; `live` and
+        // `unknown` keep the entry, with the honest ending the TTL owes it.
+        const liveness = await this.liveness(nodeId)
+        if (liveness !== 'gone') {
+          entry.bindingUnproven = true
+          this.requeueFront(nodeId, entry)
+          return
+        }
       }
       const outcome: AgentMessageOutcome =
         verdict === 'gone' ? { kind: 'targetGone' } : await this.deps.deliver(entry.req)
@@ -664,8 +728,28 @@ export class DeliveryQueue {
     // T207b: the probe's `unknown` is not `gone` — an expiry it causes still happens (nothing else
     // can end the wait, and the message cannot be typed into a pane the host cannot find), but the
     // sender hears "I could not confirm", never "it died".
+    //
+    // T237: the re-arm's PREMISE is reachability — it exists so that a message which could still be
+    // typed into a live target is not expired under it. An entry whose binding to a conversation is
+    // unproven is NOT reachable (the flush refused to type it, and nothing will make the record
+    // provable again), so the premise fails and the entry reaches its honest ending instead of
+    // being held against a clock forever.
+    //
+    // The ledger is consulted HERE too, not only at flush time: an entry whose target simply never
+    // emits another idle event would otherwise never be evaluated at all, and the honest ending this
+    // disposition owes would never arrive. Cheap (a mirror lookup) and it decides the REASON only —
+    // nothing is delivered from this path.
     const liveness = await this.liveness(nodeId)
-    if (liveness === 'live') {
+    const verdict = entry.restored
+      ? restoredBindingVerdict(entry.binding, this.deps.bindingOf?.(nodeId))
+      : 'deliver'
+    const unproven =
+      entry.bindingUnproven === true ||
+      verdict === 'unprovable' ||
+      // A record that DISAGREES is only a death when the host also says the session is gone; on a
+      // live or unanswered probe it is the same non-death as an unprovable one (T237①).
+      (verdict === 'gone' && liveness !== 'gone')
+    if (liveness === 'live' && !unproven) {
       entry.cancelTimer()
       entry.cancelTimer = this.schedule(DELIVERY_QUEUE_TTL_MS, () =>
         void this.expire(nodeId, entry)
@@ -676,7 +760,10 @@ export class DeliveryQueue {
     if (list.length === 0) this.queues.delete(nodeId)
     entry.cancelTimer()
     this.persist()
-    await this.reportExpired(entry, liveness === 'gone' ? 'session-gone' : 'session-unknown')
+    await this.reportExpired(
+      entry,
+      unproven ? 'binding-unproven' : liveness === 'gone' ? 'session-gone' : 'session-unknown'
+    )
   }
 
   /** Trace `expired` and tell the sender — the two legs every expiry owes, `reason` included so

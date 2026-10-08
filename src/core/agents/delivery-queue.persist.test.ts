@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   DeliveryQueue,
   DELIVERY_QUEUE_TTL_MS,
@@ -33,9 +33,10 @@ function instance(opts: {
   outcome?: AgentMessageOutcome
   trace?: DeliveryQueueDeps['trace']
   onDeliver?: (req: QueuedDeliveryRequest) => void
+  liveness?: DeliveryQueueDeps['sessionLiveness']
 }) {
   const delivered: QueuedDeliveryRequest[] = []
-  const expired: { req: QueuedDeliveryRequest; queuedForMs: number }[] = []
+  const expired: { req: QueuedDeliveryRequest; queuedForMs: number; reason?: string }[] = []
   const flushed: { req: QueuedDeliveryRequest; outcome: AgentMessageOutcome }[] = []
   const queued: QueuedDeliveryRequest[] = []
   const traced: string[] = []
@@ -54,7 +55,10 @@ function instance(opts: {
         traced.push(input.outcome)
         return { traceId: `t${traced.length}`, traced: 'memory' }
       }),
-    onExpired: (req, info) => expired.push({ req, queuedForMs: info.queuedForMs }),
+    // T237: the host's answer. Deliberately UNWIRED by default — the same shape a shell with no
+    // probe has, where `liveness()` is `unknown`, which must never be readable as a death.
+    ...(opts.liveness ? { sessionLiveness: opts.liveness } : {}),
+    onExpired: (req, info) => expired.push({ req, queuedForMs: info.queuedForMs, reason: info.reason }),
     onFlushed: (req, outcome) => flushed.push({ req, outcome }),
     onQueued: (req) => queued.push(req),
     schedule: (ms, fn): CancelTimer => {
@@ -117,21 +121,149 @@ describe('delivery queue across a restart', () => {
     expect(b.delivered).toEqual([])
   })
 
-  it('a DIFFERENT session in the pane ends the message as targetGone — nothing typed, sender told', async () => {
+  it('T237① — a DIFFERENT session in the pane is only a death once the HOST agrees it is gone', async () => {
     const a = instance({ now: () => 1000, binding: () => ({ sessionId: 's-A', agentId: 'claude' }) })
     await a.queue.enqueue(req())
-    const b = instance({ now: () => 2000, binding: () => ({ sessionId: 's-B', agentId: 'claude' }) })
+    // The ledger says another conversation is in the pane, and the host says the session is GONE:
+    // the one shape that licenses the terminal verdict, with the sender told through `onFlushed`.
+    const gone = instance({
+      now: () => 2000,
+      binding: () => ({ sessionId: 's-B', agentId: 'claude' }),
+      liveness: async () => 'gone'
+    })
+    await gone.queue.restore(onDisk(a.saved()))
+    await gone.queue.onTargetIdle('st1')
+    expect(gone.delivered).toEqual([])
+    expect(gone.flushed.map((f) => f.outcome.kind)).toEqual(['targetGone'])
+  })
+
+  it('T237① NAIL — the same mismatch with the host saying LIVE is NOT a death: held, nothing sent, no notice', async () => {
+    // The field shape (§六): the ledger's verdict was enough to drop a live station's mail at
+    // 02:55:05, with the target's tmux session alive the whole time. The entry must SURVIVE, must
+    // not be typed anywhere, and must NOT produce a sender-facing notice — nothing has been lost
+    // and nothing has died.
+    const a = instance({ now: () => 1000, binding: () => ({ sessionId: 's-A', agentId: 'claude' }) })
+    await a.queue.enqueue(req())
+    const live = instance({
+      now: () => 2000,
+      binding: () => ({ sessionId: 's-B', agentId: 'claude' }),
+      liveness: async () => 'live'
+    })
+    await live.queue.restore(onDisk(a.saved()))
+    await live.queue.onTargetIdle('st1')
+    expect(live.delivered).toEqual([])
+    expect(live.flushed).toEqual([])
+    expect(live.expired).toEqual([])
+    expect(live.queue.depth('st1')).toBe(1)
+    // …and a probe that CANNOT answer is the same non-death (T237③ at the flush path).
+    const unknown = instance({
+      now: () => 2000,
+      binding: () => ({ sessionId: 's-B', agentId: 'claude' }),
+      liveness: async () => 'unknown'
+    })
+    await unknown.queue.restore(onDisk(a.saved()))
+    await unknown.queue.onTargetIdle('st1')
+    expect(unknown.flushed).toEqual([])
+    expect(unknown.expired).toEqual([])
+    expect(unknown.queue.depth('st1')).toBe(1)
+  })
+
+  it('T237② NAIL — an entry that recorded NO session is held, not called a death', async () => {
+    // The arm that actually fired in the field. It used to return `gone` before any probe was
+    // consulted; now it holds (never typed, never a death claim) and reaches its TTL ending.
+    const a = instance({ now: () => 1000, binding: () => undefined })
+    await a.queue.enqueue(req())
+    expect(a.saved()[0]?.binding).toBeUndefined()
+    let clock = 2000
+    const live = instance({
+      now: () => clock,
+      binding: () => ({ sessionId: 's-B' }),
+      liveness: async () => 'live'
+    })
+    await live.queue.restore(onDisk(a.saved()))
+    await live.queue.onTargetIdle('st1')
+    expect(live.delivered).toEqual([])
+    expect(live.flushed).toEqual([])
+    expect(live.expired).toEqual([])
+    expect(live.queue.depth('st1')).toBe(1)
+    // TTL: the re-arm's premise is REACHABILITY, and this entry is not reachable — so the live
+    // session does NOT hold it forever. When its deadline arrives it ends with the honest reason,
+    // which claims no death and says nothing was typed.
+    clock = 1000 + DELIVERY_QUEUE_TTL_MS
+    live.timers.filter((t) => !t.cancelled).at(-1)!.fn()
+    await vi.waitFor(() => expect(live.expired).toHaveLength(1))
+    expect(live.expired[0].reason).toBe('binding-unproven')
+    expect(live.delivered).toEqual([])
+    expect(live.flushed).toEqual([])
+  })
+
+  it('T237 — an unprovable restored entry reaches its ending even if the target NEVER goes idle', async () => {
+    // The TTL path consults the ledger too, so the honest ending does not depend on the target
+    // emitting another idle event. Without this the entry would be re-armed forever by the live
+    // probe (T205's rule), which is a promise to a sender that never resolves.
+    const a = instance({ now: () => 1000, binding: () => undefined })
+    await a.queue.enqueue(req())
+    let clock = 2000
+    const live = instance({
+      now: () => clock,
+      binding: () => ({ sessionId: 's-B' }),
+      liveness: async () => 'live'
+    })
+    await live.queue.restore(onDisk(a.saved()))
+    expect(live.queue.depth('st1')).toBe(1)
+    clock = 1000 + DELIVERY_QUEUE_TTL_MS
+    live.timers.filter((t) => !t.cancelled).at(-1)!.fn()
+    await vi.waitFor(() => expect(live.expired).toHaveLength(1))
+    expect(live.expired[0].reason).toBe('binding-unproven')
+    expect(live.queue.depth('st1')).toBe(0)
+  })
+
+  it('T237 — a binding that AGREES again clears the hold: the entry becomes deliverable', async () => {
+    // A pane legitimately comes back under the same session id (a cold restore resumes it), and a
+    // hold whose reason is gone must not outlive it.
+    const a = instance({ now: () => 1000, binding: () => ({ sessionId: 's-A' }) })
+    await a.queue.enqueue(req())
+    let clock = 2000
+    let cur: QueueBinding = { sessionId: 's-B' }
+    const b = instance({
+      now: () => clock,
+      binding: () => cur,
+      liveness: async () => 'live'
+    })
+    await b.queue.restore(onDisk(a.saved()))
+    await b.queue.onTargetIdle('st1') // mismatch + live probe ⇒ held, nothing typed
+    expect(b.delivered).toEqual([])
+    expect(b.queue.depth('st1')).toBe(1)
+    cur = { sessionId: 's-A' } // the same conversation is provable again
+    clock += 1000
+    await b.queue.onTargetIdle('st1')
+    expect(b.delivered).toHaveLength(1)
+    expect(b.queue.depth('st1')).toBe(0)
+  })
+
+  it('T237 — a held entry is not expired early: it is its own TTL that ends it', async () => {
+    const a = instance({ now: () => 1000, binding: () => undefined })
+    await a.queue.enqueue(req())
+    const b = instance({
+      now: () => 1000 + 60_000, // one minute in, four minutes of TTL left
+      binding: () => ({ sessionId: 's-B' }),
+      liveness: async () => 'live'
+    })
     await b.queue.restore(onDisk(a.saved()))
     await b.queue.onTargetIdle('st1')
     expect(b.delivered).toEqual([])
-    expect(b.flushed.map((f) => f.outcome.kind)).toEqual(['targetGone'])
+    expect(b.queue.depth('st1')).toBe(1)
+    // Its TTL timer is still the REMAINING four minutes, not a fresh five — and it was not fired.
+    expect(b.timers.filter((t) => !t.cancelled).map((t) => t.ms)).toEqual([DELIVERY_QUEUE_TTL_MS - 60_000])
   })
 
-  it('another AGENT in the pane is also gone; an unknown session waits; no recorded session is gone', () => {
+  it('restoredBindingVerdict: four dispositions, and the two that change an ENTRY rather than answer', () => {
     expect(restoredBindingVerdict({ sessionId: 's', agentId: 'claude' }, { sessionId: 's', agentId: 'codex' })).toBe('gone')
     expect(restoredBindingVerdict({ sessionId: 's' }, undefined)).toBe('wait')
     expect(restoredBindingVerdict({ sessionId: 's' }, { agentId: 'claude' })).toBe('wait')
-    expect(restoredBindingVerdict(undefined, { sessionId: 's' })).toBe('gone')
+    // T237②: nothing was recorded, so nothing can ever PROVE the conversation — held, never a death.
+    expect(restoredBindingVerdict(undefined, { sessionId: 's' })).toBe('unprovable')
+    expect(restoredBindingVerdict({ agentId: 'claude' }, { sessionId: 's' })).toBe('unprovable')
     expect(restoredBindingVerdict({ sessionId: 's' }, { sessionId: 's' })).toBe('deliver')
   })
 

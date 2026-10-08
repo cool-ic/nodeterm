@@ -137,10 +137,10 @@ export interface AgentMessagingDeps {
    * session is gone", which turned a live pane's queued message into a dead letter and would make
    * `targetGone` terminal for a pane that was merely unregistered.
    *
-   * The `targetLive` fact is `liveness !== 'gone'` — unchanged for a positive answer and for an
-   * uncertain one, since only CONFIRMED absence may gate as gone. Asking only for an ATTACHED
-   * client told orchestrators that a parked or offscreen-released agent was gone while its session
-   * kept running, which is the same mistake one fold further along.
+   * T237③: this answer is passed into the delivery UNFOLDED (see `runDelivery`), and the gate is
+   * the ONE place that reads it — `gone` is the only death, `unknown` goes on to the pane probe.
+   * Asking only for an ATTACHED client told orchestrators that a parked or offscreen-released agent
+   * was gone while its session kept running, which is the same mistake one fold further along.
    */
   hasLiveSession(nodeId: string): SessionLiveness | Promise<SessionLiveness>
   mirrorEntry?(nodeId: string): MirrorEntry | undefined
@@ -974,10 +974,13 @@ export async function runDelivery(
         targetIsRemote: deps.isRemoteNode(req.targetNodeId),
         notPermitted,
         retryAfterMs,
-        // T207b: only CONFIRMED absence is gone. A probe that could not answer leaves the target
-        // live for this fact, exactly as the boolean contract said before the tri-state made
-        // "confirmed" expressible instead of assumed.
-        targetLive: (await deps.hasLiveSession(req.targetNodeId)) !== 'gone',
+        // T207b/T237③: the HOST's three-state answer, passed through UNFOLDED — only a confirmed
+        // `gone` may license the terminal `targetGone`, and `unknown` (a probe that could not
+        // answer) must reach the gate as uncertainty rather than as a death. This used to be
+        // `(await …) !== 'gone'`, which was correct but expressed the distinction as a boolean: the
+        // two non-`gone` states were already indistinguishable downstream, so a later edit could
+        // fold one into `targetGone` without changing a single type.
+        targetLiveness: await deps.hasLiveSession(req.targetNodeId),
         // T190: the recorded opener may WAKE its own station — a live attach-restored pane never
         // posts its first hook until something types into it, so the queue's flush trigger never
         // fires and a 5-minute TTL would silently eat every opener dispatch after a restart. Same

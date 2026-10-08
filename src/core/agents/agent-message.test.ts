@@ -315,7 +315,7 @@ describe('deliverAgentMessage — sequencing', () => {
       ['notPermitted', req({ notPermitted: 'switch-off' }), {}],
       ['self-send', req({ sourceNodeId: 'n-dst' }), {}],
       ['rateLimited', req({ retryAfterMs: 100 }), {}],
-      ['targetGone', req({ targetLive: false }), {}],
+      ['targetGone', req({ targetLiveness: 'gone' }), {}],
       ['targetBusy', req(), {}],
       ['targetNotAgentPane', req(), { paneOwner: async () => shellPane }],
       ['targetNotPasteAware', req(), { bracketPasteRequested: async () => false }]

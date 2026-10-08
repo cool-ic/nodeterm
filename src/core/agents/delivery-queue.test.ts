@@ -39,6 +39,7 @@ function harness(over: Partial<DeliveryQueueDeps> = {}) {
   const flushed: { req: QueuedDeliveryRequest; outcome: AgentMessageOutcome }[] = []
   const woken: string[] = []
   const timers: FakeTimer[] = []
+  let binding: { sessionId?: string; agentId?: string } | undefined
   let nextOutcome: AgentMessageOutcome = { kind: 'delivered', traceId: 'd', traced: 'memory', receipt: 'observed', signal: 'newTurn' }
   const delivered: QueuedDeliveryRequest[] = []
 
@@ -67,6 +68,7 @@ function harness(over: Partial<DeliveryQueueDeps> = {}) {
         t.cancelled = true
       }
     },
+    bindingOf: () => binding,
     ...over
   }
 
@@ -83,6 +85,10 @@ function harness(over: Partial<DeliveryQueueDeps> = {}) {
     },
     setOutcome: (o: AgentMessageOutcome): void => {
       nextOutcome = o
+    },
+    /** What the mirror says the target's conversation is right now (the RESTORED binding check). */
+    setBinding: (b: { sessionId?: string; agentId?: string } | undefined): void => {
+      binding = b
     },
     /** Fire the most recently armed (not-yet-cancelled) timer — a TTL lapse. */
     fireLatestTimer: (): void => {
@@ -187,6 +193,58 @@ describe('DeliveryQueue', () => {
     await q.onTargetIdle('dst')
     expect(q.depth('dst')).toBe(0)
     expect(h.flushed.map((f) => f.outcome.kind)).toEqual(['delivered'])
+  })
+
+  // ── T237: a restored entry's terminal verdict needs the HOST, not just the ledger ─────────────
+  describe('T237 — the flush path never reads an unanswered probe as a death', () => {
+    it('a probe that THROWS (a timeout, a dead transport) is `unknown`: the entry stays queued', async () => {
+      const h = harness({
+        sessionLiveness: async () => {
+          throw new Error('probe timed out')
+        }
+      })
+      const q = new DeliveryQueue(h.deps)
+      // A restored entry whose recorded binding no longer matches what the mirror says.
+      await q.restore([
+        {
+          // A restorable verb: only `send`/`reply`/`notify` survive a restart (a board comment and
+          // a station notice are expired at restore, which is a different rule entirely).
+          req: req({ verb: 'send' }),
+          enqueuedAt: 1000,
+          ttlMs: DELIVERY_QUEUE_TTL_MS,
+          queuedTraceId: 't0',
+          binding: { sessionId: 's-OLD' }
+        }
+      ])
+      h.setBinding({ sessionId: 's-NEW' })
+      await q.onTargetIdle('dst')
+      // Nothing typed, nothing announced, still ours — and the pane was never even consulted.
+      expect(h.delivered).toEqual([])
+      expect(h.flushed).toEqual([])
+      expect(h.expired).toEqual([])
+      expect(q.depth('dst')).toBe(1)
+    })
+
+    it('the ledger alone never kills one: mismatched binding, probe silent (unwired) ⇒ held', async () => {
+      const h = harness() // no `sessionLiveness` wired at all ⇒ `unknown`
+      const q = new DeliveryQueue(h.deps)
+      await q.restore([
+        {
+          // A restorable verb: only `send`/`reply`/`notify` survive a restart (a board comment and
+          // a station notice are expired at restore, which is a different rule entirely).
+          req: req({ verb: 'send' }),
+          enqueuedAt: 1000,
+          ttlMs: DELIVERY_QUEUE_TTL_MS,
+          queuedTraceId: 't0',
+          binding: { sessionId: 's-OLD' }
+        }
+      ])
+      h.setBinding({ sessionId: 's-NEW' })
+      await q.onTargetIdle('dst')
+      expect(h.delivered).toEqual([])
+      expect(h.flushed).toEqual([])
+      expect(q.depth('dst')).toBe(1)
+    })
   })
 
   // ── TTL expiry — never a silent drop ──────────────────────────────────────────────────────────

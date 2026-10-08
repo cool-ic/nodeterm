@@ -1,5 +1,6 @@
 import type { MirrorEntry } from '../agent-status-mirror'
 import type { AgentPaneVerdict } from '../../shared/agents/pane-owner-predicate'
+import type { SessionLiveness } from '../../shared/agents/agent-messaging'
 import type { QueueExpiryReason } from './delivery-queue'
 import { MIN_TOKEN_AWARE_REVISION } from './hooks/managed-script'
 
@@ -246,8 +247,25 @@ export interface DeliveryFacts {
    * the provider would refuse anyway.
    */
   cooldown?: { until: number; retryAfterMs: number }
-  /** Is there a live session for this node at all? False ⇒ `targetGone`. */
-  targetLive: boolean
+  /**
+   * Is there a live session for this node at all?
+   *
+   * T237③ — the HOST's answer, in all three states, rather than a boolean someone folded before it
+   * got here. `gone` alone licenses `targetGone`, which is TERMINAL (`RETRYABLE.targetGone` is
+   * false, and the queue drops such an entry instead of re-queueing it) — so the fold from "could
+   * not ask" to "it is dead" must not be able to happen at this gate, and must not be expressible
+   * here at all. `live` and `unknown` both proceed to the paid gates, which is what the old
+   * `targetLive: boolean` did with its `true`; the difference is that it is now impossible to hand
+   * this gate a fact that has already lost the distinction.
+   *
+   * Only the PROBE (`PtyManager.sessionLiveness`) produces `gone`, and only from tmux's own
+   * absence verdict for the exact session name. `unknown` is a probe that could not answer — a
+   * machine with no tmux to ask, a spawn failure, a timeout — and it is not evidence about the
+   * target. ABSENT means `unknown`, not `live`: nobody told this gate anything, which is neither a
+   * death nor a promise, and both non-`gone` answers proceed identically — so the default changes no
+   * behaviour and only stops the absent case from reading as a positive proof.
+   */
+  targetLiveness?: SessionLiveness
   /**
    * Gate 1, from `isAgentPane` over `PtyManager.paneOwner` — kernel truth, three-valued.
    *
@@ -486,7 +504,7 @@ export function decidePreProbe(
     | 'notPermitted'
     | 'retryAfterMs'
     | 'cooldown'
-    | 'targetLive'
+    | 'targetLiveness'
     | 'target'
     | 'tokenFilePresent'
     | 'targetIsRemote'
@@ -521,7 +539,10 @@ export function decidePreProbe(
       retryAfterMs: Math.max(pairMs, coolMs),
       ...(coolMs > 0 && f.cooldown ? { rateLimitedUntil: f.cooldown.until } : {})
     }
-  if (!f.targetLive) return { kind: 'targetGone' }
+  // T237③ — ONLY a confirmed absence is a death. `unknown` (the probe could not answer) and `live`
+  // both go on to the paid gates: the pane probe is the next fact, and a probe outage may delay a
+  // delivery, never assert one. This is the whole of the decision path's reading of liveness.
+  if (f.targetLiveness === 'gone') return { kind: 'targetGone' }
   // Identity and idleness are BOTH free — a map lookup and a local stat — so they belong here,
   // ahead of anything that touches a pane. See FIRST_PAID_DECISION.
   const identity = identityRefusal(f)

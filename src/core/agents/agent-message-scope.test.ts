@@ -12,7 +12,7 @@ const projects: ScopeProject[] = [
 
 /** Every other gate passing, so the only thing a refusal can be attributed to is the scope. */
 const facts = (over: Partial<DeliveryFacts> = {}): DeliveryFacts => ({
-  targetLive: true,
+  targetLiveness: 'live',
   pane: 'agent',
   target: { state: 'done', updatedAt: 1000, stateVerified: true, clientRevision: MANAGED_SCRIPT_REVISION },
   tokenFilePresent: true,
@@ -243,7 +243,7 @@ describe('scopeRefusal feeds decideDelivery, and the refusal is terminal', () =>
     const scope = resolveDeliveryScope(projects, 'a-1', 'b-1')
     expect(
       decidePreProbe({
-        targetLive: true,
+        targetLiveness: 'live',
         tokenFilePresent: true,
         target: undefined,
         notPermitted: scopeRefusal(scope)

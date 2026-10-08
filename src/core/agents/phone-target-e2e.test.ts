@@ -282,7 +282,7 @@ function realSendEnvelope(session: string): DeliveryDeps['sendEnvelope'] {
  *  to `agent` (gate 1 is proven separately against the real kernel in link 5). */
 function factsFor(nodeId: string, over: Partial<DeliveryFacts> = {}): DeliveryFacts {
   return {
-    targetLive: true,
+    targetLiveness: 'live',
     pane: 'agent',
     target: mirrorEntry(nodeId),
     tokenFilePresent: nodeTokenFilePresent(nodeId),

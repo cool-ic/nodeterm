@@ -93,14 +93,18 @@ export interface DeliveryRequest {
   retryAfterMs?: number
   /**
    * Does a live session exist for this node at all? Supplied by the caller (the shell knows;
-   * `src/core` does not), defaulting to true.
+   * `src/core` does not), as the host's THREE-state answer (T237③).
    *
    * Deliberately NOT derived from an unreadable pane. `paneOwner` answers null for a dead pane AND
    * for a tmux that is missing, a `ps` that failed, a lapsed deadline — calling all of those "the
    * node is gone" would be a confident answer to a question we did not ask. An unreadable pane is
    * `targetNotAgentPane` with `observed: 'unknown'`; only a node with no session is `targetGone`.
+   *
+   * Absent means `unknown`, NOT `live`: nobody told us anything, which is not a death and not a
+   * promise. Both non-`gone` answers proceed identically, so the default changes no behaviour — it
+   * only stops the absent case from being readable as a positive proof.
    */
-  targetLive?: boolean
+  targetLiveness?: SessionLiveness
   /**
    * Who the message is FROM, when it is not an agent node. `'board-comment'`: a person's comment on
    * the kanban board (`deliverBoardCommentFromUi`). It changes only the envelope's header lines —
@@ -493,7 +497,7 @@ export async function deliverAgentMessage(
       // — with the pair window — so it is decided WITHOUT a tmux round-trip and no byte of the
       // envelope can reach a turn the provider would refuse.
       cooldown: rateLimitCooldown(deps.mirrorEntry(req.targetNodeId)?.rateLimited, deps.now()) ?? undefined,
-      targetLive: req.targetLive ?? true,
+      targetLiveness: req.targetLiveness ?? 'unknown',
       target: deps.mirrorEntry(req.targetNodeId),
       tokenFilePresent: deps.tokenFilePresent(req.targetNodeId),
       targetIsRemote: req.targetIsRemote,
@@ -518,7 +522,7 @@ export async function deliverAgentMessage(
       notPermitted: req.notPermitted,
       retryAfterMs: req.retryAfterMs,
       cooldown: rateLimitCooldown(deps.mirrorEntry(req.targetNodeId)?.rateLimited, deps.now()) ?? undefined,
-      targetLive: req.targetLive ?? true,
+      targetLiveness: req.targetLiveness ?? 'unknown',
       pane: verdict,
       paneObserved: before?.command,
       target: deps.mirrorEntry(req.targetNodeId),

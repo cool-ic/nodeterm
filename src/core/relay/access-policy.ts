@@ -433,6 +433,10 @@ export const EDITOR_ONLY: ReadonlySet<string> = new Set<string>([
   IPC.contextUpdate,
   IPC.logBatch,
   IPC.agentStatus,
+  // T228: the rate-limit reading main takes off a node's pane (`{ nodeId, verdict|null }`), pushed
+  // so a relay canvas can print 限流中(≈Xs) as the desktop does. Node-scoped status metadata with
+  // no station output in it, exactly the class `agentStatus` already is — see VIEW_EVENTS.
+  IPC.agentRateLimited,
   IPC.agentUnreadClear,
   IPC.agentSubagentActivity,
   IPC.presenceSync,
@@ -488,6 +492,9 @@ const always: EventCheck = () => true
 export const VIEW_EVENTS: Readonly<Record<string, EventCheck>> = Object.freeze({
   [IPC.canvasMut]: (a, ctx) => sharedProject(a[0], ctx),
   [IPC.agentStatus]: (a, ctx) => sharedNode(field(a[0], 'nodeId'), ctx),
+  // T228: same rule as the status push it annotates — a node the viewer can see may show its
+  // cooldown. `verdict.detail` is OUR sentence about the provider, never the pane's text.
+  [IPC.agentRateLimited]: (a, ctx) => sharedNode(field(a[0], 'nodeId'), ctx),
   [IPC.agentSubagentActivity]: (a, ctx, owners) => {
     const toolUseId = field(a[0], 'toolUseId')
     return typeof toolUseId === 'string' && sharedNode(owners?.get(toolUseId), ctx)

@@ -32,7 +32,7 @@ const readyEntry = (over: Partial<MirrorEntry> = {}): MirrorEntry => ({
 })
 
 const ready = (over: Partial<DeliveryFacts> = {}): DeliveryFacts => ({
-  targetLive: true,
+  targetLiveness: 'live',
   pane: 'agent',
   target: readyEntry(),
   tokenFilePresent: true,
@@ -78,7 +78,7 @@ describe('decideDelivery — one case per refusal', () => {
       // The free/paid boundary is the guarantee that no bytes can reach a doomed turn: this must
       // answer from `decidePreProbe`, which never touches a pane.
       const facts = {
-        targetLive: true,
+        targetLiveness: 'live' as const,
         tokenFilePresent: true,
         target: readyEntry(),
         cooldown: { until: 61_000, retryAfterMs: 60_000 }
@@ -125,7 +125,7 @@ describe('decideDelivery — one case per refusal', () => {
   })
 
   it('targetGone when there is no live session', () => {
-    expect(decideDelivery(ready({ targetLive: false })).kind).toBe('targetGone')
+    expect(decideDelivery(ready({ targetLiveness: 'gone' })).kind).toBe('targetGone')
   })
 
   it('targetNotAgentPane on a kernel NO, naming what was observed', () => {
@@ -359,6 +359,32 @@ describe('the THREE unverified refusals — Correction C1 + Finding F2', () => {
   })
 })
 
+describe('T237③ — the decision path reads liveness as THREE states, and only `gone` is a death', () => {
+  it('`unknown` and `live` both proceed; only a confirmed `gone` is terminal', () => {
+    // `targetGone` is TERMINAL (`RETRYABLE` false; the queue drops such an entry rather than
+    // re-queueing it), so the one thing this gate must never do is infer it from "could not ask".
+    // The fact is the HOST's tri-state now, not a boolean someone folded upstream.
+    expect(decideDelivery(ready({ targetLiveness: 'gone' }))).toEqual({ kind: 'targetGone' })
+    expect(decideDelivery(ready({ targetLiveness: 'unknown' })).kind).toBe('proceed')
+    expect(decideDelivery(ready({ targetLiveness: 'live' })).kind).toBe('proceed')
+    // …and the absence of the fact at all is `unknown`, which is not a death either.
+    expect(decidePreProbe({ tokenFilePresent: true, target: readyEntry() })).toBeNull()
+    expect(decideDelivery({ pane: 'agent', target: readyEntry(), tokenFilePresent: true, pasteAware: true }).kind).toBe(
+      'proceed'
+    )
+  })
+
+  it('every other gate still answers on an `unknown` liveness — a probe outage delays, never asserts', () => {
+    // The refusal chain must stay reachable when the session question is unanswered, or a target
+    // that is busy or unproven would be reported as gone instead of as itself.
+    expect(decideDelivery(ready({ targetLiveness: 'unknown', target: readyEntry({ state: 'working' }) })).kind).toBe(
+      'targetBusy'
+    )
+    expect(decideDelivery(ready({ targetLiveness: 'unknown', notPermitted: 'switch-off' })).kind).toBe('notPermitted')
+    expect(decideDelivery(ready({ targetLiveness: 'unknown', pane: 'unknown' })).kind).toBe('targetPaneUnreadable')
+  })
+})
+
 describe('the decision ORDER is load-bearing', () => {
   it('walks DECISION_ORDER as each gate is cleared, one at a time', () => {
     // Start with EVERY gate failing, then clear exactly the gate that was just reported and assert
@@ -367,7 +393,7 @@ describe('the decision ORDER is load-bearing', () => {
     let f: DeliveryFacts = {
       notPermitted: 'switch-off',
       retryAfterMs: 5000,
-      targetLive: false,
+      targetLiveness: 'gone',
       pane: 'unknown',
       target: { state: 'working', updatedAt: 0, stateVerified: false, clientRevision: 1 },
       tokenFilePresent: false,
@@ -376,7 +402,7 @@ describe('the decision ORDER is load-bearing', () => {
     const clears: Array<(prev: DeliveryFacts) => DeliveryFacts> = [
       (p) => ({ ...p, notPermitted: undefined }),
       (p) => ({ ...p, retryAfterMs: undefined }),
-      (p) => ({ ...p, targetLive: true }),
+      (p) => ({ ...p, targetLiveness: 'live' }),
       (p) => ({ ...p, target: { ...p.target!, clientRevision: MANAGED_SCRIPT_REVISION } }),
       (p) => ({ ...p, tokenFilePresent: true }),
       (p) => ({ ...p, target: { ...p.target!, stateVerified: true, state: undefined } }),
@@ -408,21 +434,21 @@ describe('the decision ORDER is load-bearing', () => {
     const paidAt = DECISION_ORDER.indexOf(FIRST_PAID_DECISION)
     expect(paidAt).toBeGreaterThan(0)
     const free: Array<[AgentMessageOutcomeKind, Parameters<typeof decidePreProbe>[0]]> = [
-      ['notPermitted', { targetLive: true, notPermitted: 'switch-off', tokenFilePresent: true, target: readyEntry() }],
-      ['notPermitted', { targetLive: true, sourceNodeId: 'a', targetNodeId: 'a', tokenFilePresent: true, target: readyEntry() }],
-      ['rateLimited', { targetLive: true, retryAfterMs: 10, tokenFilePresent: true, target: readyEntry() }],
-      ['targetGone', { targetLive: false, tokenFilePresent: true, target: readyEntry() }],
-      ['targetHookScriptStale', { targetLive: true, tokenFilePresent: true, target: readyEntry({ stateVerified: false, clientRevision: 1 }) }],
-      ['targetStatusUnverified', { targetLive: true, tokenFilePresent: false, target: readyEntry({ stateVerified: false }) }],
-      ['targetStatusStale', { targetLive: true, tokenFilePresent: true, target: readyEntry({ stateVerified: false }) }],
-      ['targetNotIdleUnknown', { targetLive: true, tokenFilePresent: true, target: readyEntry({ restored: true }) }],
-      ['targetBusy', { targetLive: true, tokenFilePresent: true, target: readyEntry({ state: 'working' }) }]
+      ['notPermitted', { targetLiveness: 'live', notPermitted: 'switch-off', tokenFilePresent: true, target: readyEntry() }],
+      ['notPermitted', { targetLiveness: 'live', sourceNodeId: 'a', targetNodeId: 'a', tokenFilePresent: true, target: readyEntry() }],
+      ['rateLimited', { targetLiveness: 'live', retryAfterMs: 10, tokenFilePresent: true, target: readyEntry() }],
+      ['targetGone', { targetLiveness: 'gone', tokenFilePresent: true, target: readyEntry() }],
+      ['targetHookScriptStale', { targetLiveness: 'live', tokenFilePresent: true, target: readyEntry({ stateVerified: false, clientRevision: 1 }) }],
+      ['targetStatusUnverified', { targetLiveness: 'live', tokenFilePresent: false, target: readyEntry({ stateVerified: false }) }],
+      ['targetStatusStale', { targetLiveness: 'live', tokenFilePresent: true, target: readyEntry({ stateVerified: false }) }],
+      ['targetNotIdleUnknown', { targetLiveness: 'live', tokenFilePresent: true, target: readyEntry({ restored: true }) }],
+      ['targetBusy', { targetLiveness: 'live', tokenFilePresent: true, target: readyEntry({ state: 'working' }) }]
     ]
     for (const [kind, facts] of free) {
       expect(decidePreProbe(facts)?.kind, `${kind} needed a pane`).toBe(kind)
     }
     // …and the paid ones genuinely are not decidable without it.
-    expect(decidePreProbe({ targetLive: true, tokenFilePresent: true, target: readyEntry() })).toBeNull()
+    expect(decidePreProbe({ targetLiveness: 'live', tokenFilePresent: true, target: readyEntry() })).toBeNull()
     expect(DECISION_ORDER.slice(paidAt)).toEqual(['targetNotAgentPane', 'targetNotPasteAware'])
   })
 

@@ -486,6 +486,9 @@ export const SCOPED_REFUSED: ReadonlySet<string> = new Set<string>([
   IPC.contextUpdate,
   IPC.logBatch,
   IPC.agentStatus,
+  // T228: the rate-limit reading push. A scoped guest RECEIVES it only for a node of its own
+  // project — `filterScopedEvent` narrows through VIEW_EVENTS' `sharedNode` rule.
+  IPC.agentRateLimited,
   IPC.agentUnreadClear,
   IPC.agentSubagentActivity,
   IPC.presenceSync,

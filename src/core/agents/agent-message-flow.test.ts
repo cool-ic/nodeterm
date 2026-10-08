@@ -191,7 +191,7 @@ describe('the refusals are the union member, and they refuse for real', () => {
     const v = checkFanOut('a', T0 + 10)
     expect('ok' in v).toBe(false)
     const outcome = decidePreProbe({
-      targetLive: true,
+      targetLiveness: 'live',
       tokenFilePresent: true,
       target: { state: 'done', updatedAt: T0, stateVerified: true, clientRevision: MANAGED_SCRIPT_REVISION },
       retryAfterMs: (v as { retryAfterMs: number }).retryAfterMs
@@ -204,7 +204,7 @@ describe('the refusals are the union member, and they refuse for real', () => {
     noteSent('a', 'b', T0)
     const v = checkPairRate('a', 'b', T0 + 2500)
     const outcome = decidePreProbe({
-      targetLive: true,
+      targetLiveness: 'live',
       tokenFilePresent: true,
       target: { state: 'done', updatedAt: T0, stateVerified: true, clientRevision: MANAGED_SCRIPT_REVISION },
       retryAfterMs: (v as { retryAfterMs: number }).retryAfterMs

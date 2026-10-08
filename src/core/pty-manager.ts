@@ -6287,7 +6287,7 @@ export class PtyManager {
 
   /**
    * Does a live session exist for this node in THIS process right now? The messaging delivery's
-   * `targetLive` fact — deliberately not derived from an unreadable pane (see `DeliveryRequest`):
+   * `targetLiveness` fact — deliberately not derived from an unreadable pane (see `DeliveryRequest`):
    * only "no session is registered" may be reported as "the node is gone".
    */
   hasLiveSession(persistKey: string): boolean {
