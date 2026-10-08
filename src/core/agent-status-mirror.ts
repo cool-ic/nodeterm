@@ -8,6 +8,7 @@ import type { AgentState, NormalizedAgentEvent } from '@shared/agents/normalize'
 import type { ObservedClaudeAccount } from '@shared/types'
 import { WORKING_STALE_MS, isStaleWorking } from '@shared/agents/stale'
 import { parseIdentitySeed } from '@shared/agent-identity-seed'
+import type { RateLimitReading } from '@shared/agents/agent-messaging'
 
 /**
  * Mirrors the live per-node agent status to a small JSON file so an EXTERNAL reader (the
@@ -54,6 +55,16 @@ export const EXPIRE_MS = 6 * 60 * 60_000
 export const IDENTITY_EXPIRE_MS = 30 * 24 * 60 * 60_000
 // Coalesce bursty hook POSTs (a single turn fires many tool events) into one disk write.
 export const WRITE_DEBOUNCE_MS = 300
+
+/**
+ * The rate-limit reading T228 puts on a node's status (`MirrorEntry.rateLimited`).
+ *
+ * The SHAPE is declared once, in the shared messaging vocabulary (`@shared/agents/agent-messaging`),
+ * because three projects name it — this mirror (the authority), the IPC push, and the renderer's
+ * store — and a second local declaration would be a second thing to keep in step. Re-exported here
+ * under the name this module's readers already use.
+ */
+export type MirrorRateLimit = RateLimitReading
 
 export interface MirrorEntry {
   /** Tickets introduced concurrently with a picker, retained until reply or explicit reset. */
@@ -169,6 +180,18 @@ export interface MirrorEntry {
    * Runtime-only (not in `buildFile`'s allowlist); cleared by every state commit.
    */
   sessionStarted?: { sessionId: string; agentId: NormalizedAgentEvent['agentId']; at: number }
+  /**
+   * T228: the provider rate limit this node's last turn died on, read out of its PANE
+   * (`rate-limit-text.ts`) — the hook payloads carry `errored` and never the provider's own words,
+   * and those words are the only place the WAIT is written down. Written by the shell right after
+   * an errored `done` (the pane still shows the text), cleared by the node's next genuine new turn,
+   * and carried in `buildFile` so a reader with no canvas sees the same thing.
+   *
+   * A reading, not a gate: no authorization anywhere may branch on it. The DELIVERY gate uses it
+   * only to avoid opening a turn that the provider will refuse anyway (an optimization whose worst
+   * case is a queued message that waits a little longer).
+   */
+  rateLimited?: MirrorRateLimit
   /**
    * Claude only: the CLI's id (`prompt_id`) for the turn this node is in, from the
    * `UserPromptSubmit` that opened it (`NormalizedAgentEvent.turnId`). What lets a transcript
@@ -586,6 +609,11 @@ function reduceEffectiveEntry(
   // the state and its original evidence/identity until a correlated result or explicit reset.
   const resetApprovals = (ev.kind === 'session' && ev.sessionPhase === 'start') ||
     (ev.sessionId === prev?.sessionId && (ev.kind === 'session' || ev.newTurn || ev.interrupted))
+  // T228: the rate-limit reading describes the turn that ENDED. A genuine new turn (or a session
+  // boundary) is past it, so the flag goes — the same edge the renderer's `lastTurnError` uses.
+  // A same-session event that is NOT a turn start (a tool hook mid-turn) leaves it standing: the
+  // node is still inside the turn that died, and the reading is still the current one.
+  if (ev.kind === 'session' || (ev.newTurn === true)) delete next.rateLimited
   if (resetApprovals) delete next.concurrentApprovalIds
   else {
     if (ev.pendingId && ev.state === 'blocked' && ev.askKind === 'approval' &&
@@ -800,6 +828,7 @@ export function buildFile(
       ...(e.account ? { account: e.account } : {}),
       ...(e.name ? { name: e.name } : {}),
       ...(e.hibernated ? { hibernated: true as const } : {}),
+      ...(e.rateLimited ? { rateLimited: e.rateLimited } : {}),
       updatedAt: e.updatedAt
     }
   }
@@ -1916,8 +1945,25 @@ function clearActivity(nodeId: string, now: number): void {
 }
 
 /** Child hooks must not replace the parent transcript association while a picker is open. */
-export function ignoreQuestionHook(nodeId: string, payload: Record<string, unknown>): boolean {
-  if (payload.agent_id) return true
+/**
+ * T228: record (or clear, with `null`) the rate-limit reading for a node — called by the shell
+ * right after an errored `done`, once the pane text has been classified. Never invents an entry:
+ * a node the mirror does not know is not a status surface, and a reading with no entry to hang on
+ * means the event stream and the caller disagree about which node this is.
+ */
+export function noteRateLimit(nodeId: string, verdict: MirrorRateLimit | null): void {
+  const prev = state.get(nodeId)
+  if (!prev) return
+  if (verdict) state.set(nodeId, { ...prev, rateLimited: verdict })
+  else {
+    const next = { ...prev }
+    delete next.rateLimited
+    state.set(nodeId, next)
+  }
+  scheduleWrite()
+}
+
+export function ignoreQuestionHook(nodeId: string, payload: Record<string, unknown>): boolean {  if (payload.agent_id) return true
   const ask = state.get(nodeId)?.pendingQuestion
   return !!ask && payload.hook_event_name !== 'SessionStart' &&
     typeof payload.session_id === 'string' && payload.session_id !== ask.sessionId

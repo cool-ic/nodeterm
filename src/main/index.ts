@@ -242,8 +242,10 @@ import {
   nodeSessionName,
   workingNodes,
   mirrorEntry,
+  noteRateLimit,
   pendingTicketsFor
 } from '../core/agent-status-mirror'
+import { scanPaneForRateLimit } from '../core/agents/rate-limit-classify'
 import { mirrorCustomAgents } from '../core/mirror-custom-agents'
 import {
   initOwnershipPersistence,
@@ -2207,6 +2209,10 @@ app.whenReady().then(async () => {
     // The mirror's correlated, unanswered question — the one fact that says a station is really
     // waiting on a human (station-notice.ts: permission prompts are not a trigger).
     pendingQuestionOf: (id) => mirrorEntry(id)?.pendingQuestion?.toolUseId,
+    // T228: the reading main took off the station's pane when its turn died. The monitor turns it
+    // into the actionable `rate-limited` row (wait, do not retry) instead of the generic
+    // `turn-errored` one, and the notice body names the cooldown.
+    rateLimitOf: (id) => mirrorEntry(id)?.rateLimited,
     appendBoardLog: (projectId, entry) => appendBoardLogVia(boardLogRouter, projectId, entry),
     deliver: (notice) => deliverStationNotice(notice, messagingDeps),
     publish: (views) => sendToMain(IPC.stationNoticeChanged, views),
@@ -3287,6 +3293,30 @@ app.whenReady().then(async () => {
   // Fan a normalized agent event to BOTH consumers: the renderer's agentStatus store (canvas badge)
   // and the mobile-facing mirror. Named so the deterministic-approval answer handler below can reuse
   // it for the optimistic flip.
+  /**
+   * T228 — read a dying turn's rate-limit verdict out of its PANE, and publish it.
+   *
+   * The hook payloads carry `errored` — a fact about the turn — and never the provider's words,
+   * which are the half that says how long to wait. The pane still shows them at turn end, so this
+   * runs once per errored turn (never on a healthy one) and costs the one `capture-pane` the
+   * AI-name and palette paths already pay for.
+   *
+   * An errored turn that is NOT a rate limit CLEARS a stale reading: the previous cooldown must not
+   * outlive the turn it described, or a node limited an hour ago would keep claiming to be limited.
+   * A pane we could not read says nothing at all — no verdict is invented either way. Both legs
+   * publish, because the renderer's `list` column has to stop saying 限流中 when it stops being true.
+   */
+  const classifyRateLimit = async (e: NormalizedAgentEvent): Promise<void> => {
+    const scan = await scanPaneForRateLimit(
+      e.nodeId,
+      (id) => ptyManager.captureSession(id, false),
+      () => Date.now()
+    )
+    if (scan.kind !== 'read') return // nothing to read ⇒ no evidence ⇒ leave the reading alone
+    noteRateLimit(e.nodeId, scan.verdict)
+    sendToMain(IPC.agentRateLimited, { nodeId: e.nodeId, verdict: scan.verdict })
+  }
+
   const emitAgentStatus = (e: NormalizedAgentEvent): void => {
     // Claude subagent events first become one card per child (claudeSubagents); every other event
     // comes back as itself, so for them this loop runs exactly once, over `e`.
@@ -3295,6 +3325,9 @@ app.whenReady().then(async () => {
       // event ENRICHED for a needs-you edge (a question strips its pendingId), so the canvas keys off
       // the same single source of truth as the mirror/phone. Then broadcast the enriched event.
       const enriched = recordAgentEvent(out) ?? out
+      // T228: an errored turn's pane still holds the provider's own words, and those words are the
+      // only place the WAIT is written down. Read them here, off the one stream every shell shares.
+      if (enriched.state === 'done' && enriched.errored === true) void classifyRateLimit(enriched)
       // The hand-over tracker FIRST: it stamps when a station's turn starts and ends, and the
       // messaging queue below may flush new work into the station on this very `done`.
       stationHandovers.onAgentEvent(enriched)

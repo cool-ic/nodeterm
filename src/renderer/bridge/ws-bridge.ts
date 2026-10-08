@@ -785,6 +785,7 @@ export function buildAgentApi(
 ): Pick<
   NodeTerminalApi,
   | 'onAgentStatus'
+  | 'onAgentRateLimited'
   | 'onSubagentActivity'
   | 'onUnreadClear'
   | 'answerPermission'
@@ -801,6 +802,11 @@ export function buildAgentApi(
       (cb) => client.subscribe(IPC.agentStatus, cb as Listener),
       () => client.request(IPC.agentSubagentSnapshot) as Promise<NormalizedAgentEvent[]>, listener
     ),
+    // T228: the Server Edition writes the same reading into its own mirror (its hook path runs
+    // `scanPaneForRateLimit`), so the browser canvas subscribes to the push like any other. A REAL
+    // forward — this is the channel that makes 限流中(≈Xs) appear on a tab as it does on the desktop.
+    onAgentRateLimited: (listener) =>
+      client.subscribe(IPC.agentRateLimited, listener as Listener),
     // REAL forward: the Server Edition writes its own agent-status mirror, and the phone reads it
     // over its SSH browse path — a browser canvas hibernating a node must reach that file too.
     reportHibernated: (nodeId, on) => {

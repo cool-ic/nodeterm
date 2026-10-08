@@ -54,6 +54,37 @@ export type DeliveryVerb = AgentMessageVerb | typeof STATION_NOTICE_VERB
  */
 export type SessionLiveness = 'live' | 'gone' | 'unknown'
 
+/**
+ * T228 — a station's standing RATE-LIMIT READING, taken off its own pane when its last turn died
+ * with the provider's own words (`TooManyRequests` / `Requests are too frequent` / `429` …).
+ *
+ * Shared because three layers name it: the main-side status mirror (the authority), the IPC push
+ * that carries it to every renderer, and the delivery gate that reads it as a cooldown. The shape
+ * is the delivery layer's existing vocabulary (`{ kind: 'rateLimited', … }`), so a caller that
+ * already knows a rate limit needs no second concept.
+ *
+ * `signature` and `detail` are the APP's words for the cause (an id and a sentence from
+ * `core/agents/rate-limit-text.ts`), never the pane's text — station output is never quoted on any
+ * surface. `at + retryAfterMs` is the cooldown; `defaulted` says the provider named no retry time
+ * and a conservative default was used.
+ *
+ * A READING, not an authorization and not a schedule: no gate may branch on it beyond declining to
+ * open a turn the provider would refuse anyway, and nothing counts it down — surfaces compute
+ * `remaining = at + retryAfterMs - now` wherever they need it.
+ */
+export interface RateLimitReading {
+  kind: 'rateLimited'
+  /** Which row of the classifier's table matched — an id, for logs and tests. */
+  signature: string
+  /** The cause in one app-authored sentence. Never the pane's text. */
+  detail: string
+  retryAfterMs: number
+  /** The provider named no retry time; `retryAfterMs` is the conservative default. */
+  defaulted: boolean
+  /** When the reading was taken; the cooldown runs from here. */
+  at: number
+}
+
 /** A delivery as the SERVICE sees it: the IPC request, or an app-composed notice. */
 export interface AgentMessageDeliveryInput extends Omit<AgentMessageDeliverRequest, 'verb'> {
   verb: DeliveryVerb

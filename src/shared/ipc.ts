@@ -194,6 +194,12 @@ export const IPC = {
    *  load/save (and every external project.json change) so an entry whose node was deleted out
    *  from under the running app heals without a restart. Never pushed when the set is unknown. */
   agentKnownNodeIdsChanged: 'agent:known-node-ids-changed',
+  /** main → renderer (T228): the rate-limit verdict recovered from a node's PANE right after an
+   *  errored turn — `{ nodeId, kind: 'rateLimited', signature, detail, retryAfterMs, defaulted,
+   *  at }`, or the same shape with `verdict: null` when an errored turn turned out NOT to be a
+   *  rate limit (which retires a stale reading). The hook payloads carry `errored` and never the
+   *  provider's words; this is where the wait comes from, so `list` can print 限流中(≈Xs). */
+  agentRateLimited: 'agent:rate-limited',
   /** Renderer → main/server: a node's Eco hibernation flag changed (the renderer owns the flag —
    *  `agentStatus.setHibernated` — and main only mirrors it, like `terminalFocused`). Arg:
    *  `{ nodeId: string, on: boolean }`. Fire-and-forget cast; feeds the agent-status mirror so the

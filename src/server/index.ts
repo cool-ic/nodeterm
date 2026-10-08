@@ -555,7 +555,11 @@ export async function startServer(
   registerStationOutcomeIpc(platform, () => canvasControl?.stationOutcomes ?? null)
   registerStationHandoverIpc(platform, () => canvasControl?.stationHandovers ?? null)
   const { contextTail, geminiContextTail, codexContextTail } = wireAgentStatus(platform, {
-    onEvent: (event) => canvasControl?.onAgentEvent(event)
+    onEvent: (event) => canvasControl?.onAgentEvent(event),
+    // T228: the rate-limit reading, taken off the pane the same way the desktop takes it. Sharing
+    // the ONE reader (`scanPaneForRateLimit`) is the point — two readings of the same pane would be
+    // two answers to what `list` prints and what the delivery gate holds senders for.
+    captureSession: (nodeId) => ptyManager.captureSession(nodeId, false)
   })
   // The ⌘M chat view + the find-bar's transcript index. Registered HERE rather than with the rest
   // of the handlers because the hook-fed path authority is the tail created just above. No remote

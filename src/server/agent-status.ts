@@ -12,8 +12,9 @@ import { join, resolve } from 'path'
 import { homedir } from 'os'
 import { hookServer } from '../core/agents/hook-server'
 import { recordAgentEvent, recordRawToolEvent, recordContextUsage,
-  recordQuestionResult, turnInterruptEvent, ignoreQuestionHook
+  recordQuestionResult, turnInterruptEvent, ignoreQuestionHook, noteRateLimit
 } from '../core/agent-status-mirror'
+import { scanPaneForRateLimit } from '../core/agents/rate-limit-classify'
 import { createSubagentTail, type SubagentTail } from '../core/subagent-tail'
 import { ClaudeSubagentLifecycle } from '../core/claude-subagent-lifecycle'
 import { claudeSubagentTranscriptPath, isClaudeAgentId } from '../shared/agents/claude-subagents'
@@ -54,6 +55,14 @@ export interface WireAgentStatusOptions {
   /** One tap on the normalized, mirror-enriched stream for in-process consumers such as the
    * Server Edition delivery queue and `--after` scheduler. */
   onEvent?: (event: NormalizedAgentEvent) => void
+  /**
+   * T228 — read a node's PANE (`ptyManager.captureSession`). Called only at an errored turn end, to
+   * lift the provider's rate-limit words — the one place the wait is written down — into the status
+   * mirror and out to every browser canvas. Absent ⇒ no reading is taken, and an errored turn is
+   * reported exactly as it was before T228 (the desktop and this shell share the code path, so a
+   * missing probe is the only way they can differ).
+   */
+  captureSession?: (nodeId: string) => Promise<string>
 }
 
 /**
@@ -181,11 +190,28 @@ export function wireAgentStatus(
     // mirror/phone — then broadcast the enriched one.
     for (const out of claudeSubagents.apply(e)) {
       const enriched = recordAgentEvent(out) ?? out
+      // T228 — the same trigger the desktop runs (`src/main/index.ts`): an errored turn's pane still
+      // holds the provider's own words, and those words are the only place the WAIT is written down.
+      // This shell wires the reading too, so `list` cannot say 限流中 on one shell and nothing on the
+      // other; `captureSession` absent leaves it exactly pre-T228.
+      if (enriched.state === 'done' && enriched.errored === true) void scanPaneRateLimit(enriched.nodeId)
       platform.broadcast(IPC.agentStatus, enriched)
       opts.onEvent?.(enriched)
     }
   }
   hooks.setListener(emit)
+
+  /** T228 — take the reading off the pane, put it on the mirror, and push it to every tab. The
+   *  mirror write comes first: it is what the DELIVERY gate reads, and it must be true before any
+   *  sender is refused (a renderer that missed the push still sees the next `list`). */
+  const scanPaneRateLimit = async (nodeId: string): Promise<void> => {
+    const capture = opts.captureSession
+    if (!capture) return
+    const scan = await scanPaneForRateLimit(nodeId, capture, () => Date.now())
+    if (scan.kind !== 'read') return // nothing to read ⇒ no evidence ⇒ leave the reading alone
+    noteRateLimit(nodeId, scan.verdict)
+    platform.broadcast(IPC.agentRateLimited, { nodeId, verdict: scan.verdict })
+  }
 
   // Security: hook POSTs can be forged, so a forged POST could set transcript_path to an
   // arbitrary local path (e.g. ~/.ssh/id_rsa) and have the app read it. The tails read the

@@ -11,6 +11,7 @@ import type {
   Project,
   PtyCreateOptions,
   PtyPressure,
+  AgentRateLimitPush,
   LogRecord,
   RecycledInfo,
   RelayClosedReason,
@@ -889,6 +890,13 @@ const api: NodeTerminalApi = {
     const handler = (_e: unknown, ids: string[]) => listener(ids)
     ipcRenderer.on(IPC.agentKnownNodeIdsChanged, handler)
     return () => ipcRenderer.removeListener(IPC.agentKnownNodeIdsChanged, handler)
+  },
+  // T228: a node's rate-limit verdict, read out of its pane after an errored turn. `null` retires
+  // a stale reading (the turn died on something else).
+  onAgentRateLimited: (listener) => {
+    const handler = (_e: unknown, payload: AgentRateLimitPush) => listener(payload)
+    ipcRenderer.on(IPC.agentRateLimited, handler)
+    return () => ipcRenderer.removeListener(IPC.agentRateLimited, handler)
   },
   onAgentStatus: (listener) => subscribeAgentReplay((cb) => {
     const handler = (_e: unknown, payload: Parameters<typeof listener>[0]) => cb(payload)

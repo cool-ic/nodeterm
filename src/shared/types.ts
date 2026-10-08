@@ -16,7 +16,7 @@ import type { AnswerPermissionPayload, ChatQuestion } from './agents/permission-
 import type { HostChatQuery, HostChatReply } from './mobile-chat'
 import type { AgentId, AgentPermissionMode, BuiltinAgentId, PromptInjectionMode } from './agents/config'
 import type { ControlConfirmWaivers } from './control-confirm'
-import type { AgentMessageDeliverRequest, AgentMessageReply } from './agents/agent-messaging'
+import type { AgentMessageDeliverRequest, AgentMessageReply, RateLimitReading } from './agents/agent-messaging'
 import type { BoardCommentDeliverRequest } from './board-comment'
 import type { ChatTranscriptPageRequest } from './chat-page'
 import type { BrowserLeasePush } from './browser-indicator'
@@ -4244,6 +4244,15 @@ export interface TriggersApi {
   ): Promise<{ outcome: 'fired' | 'missed' | 'failed' | 'queued'; detail?: string }>
 }
 
+/** T228: a node's rate-limit verdict on its way to the renderer. `verdict: null` RETIRES a stale
+ *  reading — an errored turn that was not a rate limit must not leave an old cooldown standing. */
+export interface AgentRateLimitPush {
+  nodeId: string
+  /** T228: the node's new standing rate-limit reading, or `null` to RETIRE one (the reading
+   *  described a turn that is now past, or the pane's text no longer reads as a limit). */
+  verdict: RateLimitReading | null
+}
+
 export interface NodeTerminalApi {
   pty: PtyApi
   workspace: WorkspaceApi
@@ -4413,6 +4422,10 @@ export interface NodeTerminalApi {
    *  a node deleted out from under the running app heals without a restart. Never fires for an
    *  unknown set. Returns unsubscribe. */
   onKnownNodeIds?(listener: (ids: string[]) => void): () => void
+  /** T228: fires when a node's rate-limit verdict is read out of its pane after an errored turn —
+   *  or with a `null` verdict when that turn turned out NOT to be a rate limit. Lets `list` say
+   *  限流中(≈Xs) and the row keep LAST TURN ERRORED beside it. Returns unsubscribe. */
+  onAgentRateLimited?(listener: (p: AgentRateLimitPush) => void): () => void
   /** Fires on each normalized agent hook event (working/done/waiting/subagent/…). Returns unsubscribe. */
   onAgentStatus(listener: (e: NormalizedAgentEvent) => void): () => void
   /** Report a node's Eco hibernation flag to the core (the renderer owns the flag; the core only
