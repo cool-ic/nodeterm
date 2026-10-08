@@ -215,14 +215,14 @@ describe('the right rail gives the fit rectangle its height back', () => {
   })
 })
 
-// T226 (second revision, measured): the single 146px rail becomes TWO 56px single-column tracks
-// (left = create/history, right = view/status). The solver's WINNING rect for the fleet canvas
-// keeps its height (698) and its zoom (0.5272) — the fit does not regress, and a live fit lands
-// gapTop = gapBottom = 12px — but it is 37px NARROWER than the single-rail win: the left track is
-// a new full-height obstacle where the old layout had only the small flow-controls corner. This is
-// the honest number; the width gain the spec hoped for shows up as the 112px total track footprint
-// (vs 171px) only when content is NOT height-limited.
-describe('T226: two 56px tracks keep the fit height and zoom, at 37px of width', () => {
+// T232 (third revision, measured): the container holds ONLY the card — the collapse control moved
+// INSIDE as the card's first row, so the left card starts at the cluster band's left edge (22)
+// instead of 50px in. The solver's WINNING rect for the fleet canvas keeps its height (698) and
+// its zoom (0.5272) — the fit does not regress, and a live fit lands gapTop = gapBottom = 12px.
+// The width cost vs the single-rail win (958) is now 25px: 933 vs T230's 905. This is the honest
+// number; the width gain the spec hoped for shows up as the 112px total track footprint (vs 171px)
+// only when content is NOT height-limited.
+describe('T232: one 56px card per edge keeps the fit height and zoom, at 25px of width', () => {
   const PANE: FitRect = { left: 12, top: 56, right: 1252, bottom: 754 }
   const FLEET_W = 1550
   const FLEET_H = 1324
@@ -232,10 +232,10 @@ describe('T226: two 56px tracks keep the fit height and zoom, at 37px of width',
     { left: -9, top: 623, right: 65, bottom: 775 }
   ]
   const TWO_TRACKS = [
-    // T230: the tracks sit below the two top clusters (34px + 8px below the cluster band) and the
-    // toggles hug the cards' OUTER sides, so each card is 56px starting 50px in from its edge.
-    { left: 38, top: 92, right: 118, bottom: 451 }, // left card (toggle hugs its left)
-    { left: 1146, top: 92, right: 1226, bottom: 530 }, // right card (toggle hugs its right)
+    // T232: the container holds ONLY the card, so the left card starts at the cluster band's left
+    // edge (22) — 28px wider a clear run than T230's 50 — and the toggle lives inside the card.
+    { left: 10, top: 92, right: 90, bottom: 519 }, // left card 22..78, inflated
+    { left: 1174, top: 92, right: 1254, bottom: 574 }, // right card W-78..W-22, inflated
     { left: 1023, top: 575, right: 1273, bottom: 775 }, // minimap (unchanged corner)
     { left: -9, top: 623, right: 65, bottom: 775 } // flow controls (unchanged corner)
   ]
@@ -246,9 +246,9 @@ describe('T226: two 56px tracks keep the fit height and zoom, at 37px of width',
     expect(h(two)).toBe(h(single))
     expect(zoomOf(two, FLEET_W, FLEET_H)).toBeCloseTo(zoomOf(single, FLEET_W, FLEET_H), 4)
     // The measured widths, pinned so a future change to either track's footprint shows up.
-    // T230: lowering the tracks does not move this number's height side; the outer toggles cost
-    // 16px of width (905 vs 921) against the single-rail baseline (958).
-    expect(w(two)).toBe(w(single) - 53)
+    // T232: the toggle moved INSIDE the card, so the left card's clear run grows 28px (933 vs
+    // 905 vs the single-rail baseline 958); height and zoom never move.
+    expect(w(two)).toBe(w(single) - 25)
   })
 
   it('a live fit on the fleet canvas lands gapTop = gapBottom = 12px', () => {

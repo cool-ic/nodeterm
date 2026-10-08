@@ -19331,16 +19331,16 @@ export function Canvas() {
             obstacles. The left track steps right when the sessions sidebar is open. */}
         <div className="canvas-rail canvas-rail--left">
           <div className="canvas-rail__body" data-canvas-chrome={railCollapsed ? undefined : ''}>
-          <button
-            type="button"
-            className="canvas-rail__toggle nodrag nopan"
-            aria-label={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
-            title={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
-            onClick={() => {
-              setRailCollapsed(!railCollapsed)
-              writeRailCollapsed(!railCollapsed)
-            }}
-          >
+            <button
+              type="button"
+              className="canvas-rail__toggle nodrag nopan"
+              aria-label={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
+              title={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
+              onClick={() => {
+                setRailCollapsed(!railCollapsed)
+                writeRailCollapsed(!railCollapsed)
+              }}
+            >
               {railCollapsed ? <IconChevronRight /> : <IconChevronLeft />}
             </button>
             <Dock
@@ -19401,16 +19401,16 @@ export function Canvas() {
 
         <div className="canvas-rail canvas-rail--right">
           <div className="canvas-rail__body" data-canvas-chrome={railCollapsed ? undefined : ''}>
-          <button
-            type="button"
-            className="canvas-rail__toggle nodrag nopan"
-            aria-label={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
-            title={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
-            onClick={() => {
-              setRailCollapsed(!railCollapsed)
-              writeRailCollapsed(!railCollapsed)
-            }}
-          >
+            <button
+              type="button"
+              className="canvas-rail__toggle nodrag nopan"
+              aria-label={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
+              title={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
+              onClick={() => {
+                setRailCollapsed(!railCollapsed)
+                writeRailCollapsed(!railCollapsed)
+              }}
+            >
               {railCollapsed ? <IconChevronLeft /> : <IconChevronRight />}
             </button>
             <Dock
