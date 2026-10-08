@@ -29,11 +29,14 @@ import {
   controlLaunchState,
   handedOverDeps,
   holdReason,
+  isLaunchFailureReason,
+  LAUNCH_FAILURE_TEXT,
   successDepFacts,
   type HandoverById,
   type LaunchDelivery,
   type StatusById
 } from './pendingLaunch'
+import type { LaunchFailureReason } from '@shared/types'
 import { projectTravel } from './presenceTravel'
 import {
   projectCapabilityGrantedFor,
@@ -222,6 +225,18 @@ export function storedNodeListing(
     const successState = successHold ? successWaitStatus(successHold, successFacts, now) : undefined
     // Every agent row names its state: an unlabelled row used to mean idle, waiting on a person, or
     // not an agent at all, so an orchestrator read a station stuck on a permission prompt as finished.
+    // T216: the gate that refused the launch. The live delivery record names it for this app
+    // run; the durable hold names it after a restart — live wins when both exist. A persisted
+    // value is believed only when it names a known gate (pendingLaunch is unvalidated here).
+    const launchFailure = ((): { reason?: LaunchFailureReason; failBytes?: number } | undefined => {
+      const live = deliveries[n.id]
+      if (live?.kind === 'failed' && live.reason)
+        return { reason: live.reason, ...(live.failBytes != null ? { failBytes: live.failBytes } : {}) }
+      const held = n.pendingLaunch as { failReason?: unknown; failBytes?: unknown } | undefined
+      if (held && isLaunchFailureReason(held.failReason))
+        return { reason: held.failReason, ...(typeof held.failBytes === 'number' ? { failBytes: held.failBytes } : {}) }
+      return undefined
+    })()
     const launchState = controlLaunchState(!!n.pendingLaunch, deliveries[n.id] ?? ((n.pendingLaunch as { manualOnly?: boolean } | undefined)?.manualOnly ? { kind: 'failed', attempts: 1, at: 0 } : undefined), status, prExpired, successState) ??
       (n.agentId ? agentRowState(status?.state) : undefined)
     // A session started on an issue is told so on its OWN row, so `list` is enough for an agent to
@@ -262,6 +277,9 @@ export function storedNodeListing(
       ...(status?.lastTurnError ? { lastTurnErrored: true } : {}),
       ...(status?.lastTurnInterrupted && !status.lastTurnError ? { lastTurnInterrupted: true } : {}),
       ...(launchState ? { launchState } : {}),
+      // T216: the refusal's gate (and, for line-too-long, its byte count) rides the row.
+      ...(launchFailure ? { failReason: launchFailure.reason,
+        ...(launchFailure.failBytes != null ? { failBytes: launchFailure.failBytes } : {}) } : {}),
       ...(launchState === 'queued' && prHold && !prHold.invalid ? { prWait: formatPrWaits(prHold) } : {}),
       ...(successWait ? { successWait } : {}),
       ...(handedOver.some((d) => holdReason(handovers[d]) === 'work')
@@ -304,6 +322,14 @@ const launchLabels = {
   'waiting-success': 'WAITING FOR SUCCESS',
   'blocked-failure': 'BLOCKED BY FAILURE (will not start on its own; run it with `run`)'
 } as const
+
+/** T216 (b): a failed launch names the gate that refused it and the way out, in the same shape
+ *  as the expired/blocked labels. A record with no gate (older binary, or a refusal with none
+ *  attributable) still says so plainly, and still names the escape. */
+function failedLaunchLabel(reason?: LaunchFailureReason, failBytes?: number): string {
+  return `LAUNCH FAILED (${reason ? LAUNCH_FAILURE_TEXT[reason] : 'the refusing gate was not recorded'}` +
+    `${failBytes != null ? `, ${failBytes} bytes` : ''}; run it with \`run\`)`
+}
 
 /**
  * T201 (second landing) + T207: the read-only trust answer for a listing, from the main-side ledger
@@ -364,7 +390,7 @@ export function controlListingText(
 ): string {
   return rows.map((n) => `${n.id} [${n.kind}] ${n.title}` +
     (n.issue ? ` — issue ${n.issue}` : '') +
-    (n.launchState ? ` — ${launchLabels[n.launchState]}` : '') +
+    (n.launchState ? ` — ${n.launchState === 'failed' ? failedLaunchLabel(n.failReason, n.failBytes) : launchLabels[n.launchState]}` : '') +
     (n.prWait ? ` — waits on ${n.prWait}` : '') +
     (n.successWait ? ` — needs success from: ${n.successWait}` : '') +
     (n.handoverWait ? ` — waiting for ${n.handoverWait} to finish the work handed to it` : '') +

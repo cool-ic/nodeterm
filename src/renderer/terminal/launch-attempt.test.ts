@@ -89,7 +89,7 @@ it.each([false, true])('refuses scoped relay persistence (manual=%s) without rep
       command: 'claude brief', manual, update, save
     })
   })
-  expect(await writer('claude brief', manual)).toBe('cancelled')
+  expect(await writer('claude brief', manual)).toEqual({ gate: 'hold-not-committed' })
   expect(save).not.toHaveBeenCalled()
   expect(update).not.toHaveBeenCalled()
   expect(input).not.toHaveBeenCalled()

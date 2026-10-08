@@ -54,7 +54,7 @@ describe('durable launch delivery', () => {
     const command = 'x'.repeat(2000)
     const result = f.writer(command, false)
     await vi.advanceTimersByTimeAsync(VERIFY_TIMEOUT_MS * DELIVERY_ATTEMPTS)
-    expect(await result).toBe('line-too-long')
+    expect(await result).toEqual({ gate: 'line-too-long', failBytes: 2000 })
     expect(f.write).not.toHaveBeenCalledWith('\r')
     const calls = f.write.mock.calls.length
     expect(await f.writer(command, false)).toBe('cancelled')
@@ -66,10 +66,12 @@ describe('durable launch delivery', () => {
   })
   it('does not replay a durable command on warm resume even if its successful clear was never saved', async () => {
     const f = fixture(true)
-    expect(await f.writer('codex brief', false)).toBe('cancelled')
+    // The durable hold already says attempted — the write-ahead claim refuses to double-claim
+    // (gate 2, "inconsistent"), and nothing is typed.
+    expect(await f.writer('codex brief', false)).toEqual({ gate: 'hold-not-committed' })
     expect(f.write).not.toHaveBeenCalled()
     f.shellReady.mockResolvedValue(false) // running agent/editor: manual retry also refuses
-    expect(await f.writer('codex brief', true)).toBe('cancelled')
+    expect(await f.writer('codex brief', true)).toEqual({ gate: 'shell-unconfirmed' })
     expect(f.write).not.toHaveBeenCalled()
     f.shellReady.mockResolvedValue(true)
     const retry = f.writer('codex brief', true)
@@ -94,7 +96,7 @@ describe('durable launch delivery', () => {
     const result = f.writer('codex brief', false)
     f.dispose()
     ready(true)
-    expect(await result).toBe('cancelled')
+    expect(await result).toEqual({ gate: 'torn-down' })
     expect(f.write).not.toHaveBeenCalled()
   })
   it('cancels teardown during echo verification without Enter or an orphan retry timer', async () => {
@@ -103,7 +105,7 @@ describe('durable launch delivery', () => {
     const result = f.writer('codex brief', false)
     await tick()
     f.dispose()
-    expect(await result).toBe('cancelled')
+    expect(await result).toEqual({ gate: 'torn-down' })
     await vi.runAllTimersAsync()
     expect(f.write.mock.calls).toEqual([['codex brief']])
   })
@@ -116,7 +118,9 @@ describe('durable launch delivery', () => {
     const result = f.writer('claude brief', false)
     await tick()
     f.echo('claude brief')
-    expect(await result).toBe('cancelled')
+    // A rejected probe is our own blindness (a dead transport): no gate names it. A rejected
+    // write or Enter is a pane that could not take bytes — gate 3's territory.
+    expect(await result).toEqual(failure === 'probe' ? 'cancelled' : { gate: 'torn-down' })
     f.write.mockReset()
     const retry = f.writer('claude brief', true)
     await tick()
@@ -196,18 +200,60 @@ describe('warm launch recovery after the park expires', () => {
     expect(f.snapshot().attempted).toBe(true)
     expect(f.write).not.toHaveBeenCalled()
     reject(new Error('disk offline'))
-    expect(await result).toBe('cancelled')
+    expect(await result).toEqual({ gate: 'hold-not-committed' })
     expect(f.write).not.toHaveBeenCalled()
   })
-  it('rechecks shell ownership after persistence before writing', async () => {
+  it('rechecks shell ownership after persistence before writing, with the bounded probe retry', async () => {
+    vi.useFakeTimers()
     const f = fixture()
-    f.shellReady.mockResolvedValueOnce(true).mockResolvedValueOnce(false)
-    expect(await f.writer('claude brief', false)).toBe('cancelled')
+    f.shellReady.mockResolvedValueOnce(true).mockResolvedValue(false)
+    const delivery = f.writer('claude brief', false)
+    // Gate 1 retries at 1s and 3s before giving up; nothing was typed, so the hold is durable
+    // but the pane never received a byte.
+    await vi.advanceTimersByTimeAsync(1000 + 3000)
+    expect(await delivery).toEqual({ gate: 'shell-unconfirmed' })
     expect(f.save).toHaveBeenCalledTimes(1)
     expect(f.write).not.toHaveBeenCalled()
     const warm = fixture(f.snapshot().attempted)
-    expect(await warm.writer('claude brief', false)).toBe('cancelled')
+    // The claim already marked the hold attempted, so the warm writer's claim refuses (gate 2).
+    expect(await warm.writer('claude brief', false)).toEqual({ gate: 'hold-not-committed' })
     expect(warm.write).not.toHaveBeenCalled()
+  })
+})
+
+describe('T216: the shell probe is the only gate that auto-retries, and only twice', () => {
+  it('retries the probe at 1s then 3s, then names the gate without claiming or typing', async () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    f.shellReady.mockResolvedValue(false)
+    const delivery = f.writer('claude brief', false)
+    await vi.advanceTimersByTimeAsync(1000) // first backoff elapsed → second probe
+    expect(f.shellReady).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(3000) // second backoff elapsed → third and last probe
+    expect(await delivery).toEqual({ gate: 'shell-unconfirmed' })
+    expect(f.shellReady).toHaveBeenCalledTimes(3)
+    expect(f.write).not.toHaveBeenCalled()
+    expect(f.save).not.toHaveBeenCalled()
+    expect(f.snapshot().attempted).toBe(false)
+  })
+  it('a manual run probes once — pressing ▶ again is the retry', async () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    f.shellReady.mockResolvedValue(false)
+    const delivery = f.writer('claude brief', true)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(await delivery).toEqual({ gate: 'shell-unconfirmed' })
+    expect(f.shellReady).toHaveBeenCalledTimes(1)
+  })
+  it('a failed durable save (gate 2) refuses once and never rewrites', async () => {
+    vi.useFakeTimers()
+    const f = fixture()
+    f.save.mockRejectedValue(new Error('disk offline'))
+    const delivery = f.writer('claude brief', false)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(await delivery).toEqual({ gate: 'hold-not-committed' })
+    expect(f.save).toHaveBeenCalledTimes(1)
+    expect(f.write).not.toHaveBeenCalled()
   })
 })
 

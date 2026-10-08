@@ -1,6 +1,5 @@
 import type { PendingLaunch } from '@shared/types'
-import { createLaunchWriter } from './launch-command'
-import type { DeliveryOutcome } from '@shared/command-delivery'
+import { createLaunchWriter, type LaunchFailure } from './launch-command'
 
 // Transient proof is scoped to this connection, never restored from workspace data. Consume
 // before settle so a parked/remounted view cannot retry even if no bytes ultimately arrived.
@@ -14,7 +13,7 @@ export function deliverRelayInitialLaunch(opts: {
   consume(): void
   whenReady(run: () => void): void
   writer: Omit<Parameters<typeof createLaunchWriter>[0], 'claimAttempt'>
-  onFailure(outcome: DeliveryOutcome): void
+  onFailure(failure: LaunchFailure): void
 }): void {
   let ids = consumed.get(opts.scope)
   if (!ids) { ids = new Set(); consumed.set(opts.scope, ids) }

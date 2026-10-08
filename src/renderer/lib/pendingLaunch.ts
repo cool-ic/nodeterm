@@ -14,7 +14,7 @@ import {
   type SuccessDepFacts,
   type SuccessWaitHold
 } from '@shared/station-outcome'
-import type { PendingLaunch } from '@shared/types'
+import type { LaunchFailureReason, PendingLaunch } from '@shared/types'
 import type { StationHandoverRecord } from '@shared/station-handover'
 import { prHoldSatisfied } from './prWait'
 
@@ -388,11 +388,30 @@ export const LAUNCH_STALL_MS = 45_000
  */
 export type LaunchDelivery =
   | { kind: 'stalled'; since: number }
-  | { kind: 'failed'; attempts: number; at: number }
+  /** T216: `reason` names the gate that refused the launch; `failBytes` rides `line-too-long`.
+   *  Both absent on records from before the change (or a refusal with no gate attributable). */
+  | { kind: 'failed'; attempts: number; at: number; reason?: LaunchFailureReason; failBytes?: number }
   /** A headless start (#925) is in flight: core owns the pane, so ▶ must not type into it. */
   | { kind: 'starting'; since: number }
   /** The file the launch reads its prompt from was gone at delivery: held for ▶, never typed. */
   | { kind: 'brief-missing'; path: string; at: number }
+
+/**
+ * T216: the four launch gates, in words a reader can act on. One table so the QUEUED tooltip and
+ * the `list` label cannot drift apart. Ordered by the delivery chain, not by severity.
+ */
+export const LAUNCH_FAILURE_TEXT: Record<LaunchFailureReason, string> = {
+  'shell-unconfirmed': 'no shell could be confirmed in the pane (probe timed out)',
+  'hold-not-committed': 'the write-ahead hold did not commit',
+  'torn-down': 'the delivery window was torn down (view unmounted)',
+  'line-too-long': 'the command is longer than a terminal line can carry'
+}
+
+/** `pendingLaunch` is unvalidated wherever it is listed, so a persisted reason is believed only
+ *  when it names a gate this table knows — an older binary's value must degrade, not crash. */
+export function isLaunchFailureReason(v: unknown): v is LaunchFailureReason {
+  return typeof v === 'string' && v in LAUNCH_FAILURE_TEXT
+}
 
 /**
  * Which delivery records the Canvas sweep retires: every record whose node is no longer an armed
@@ -452,11 +471,18 @@ export function launchTooltip(
       'It was not started, because the agent would get no brief. Open the node again with its ' +
       `prompt, or press \u25b6 to run it anyway.\n${runs}`
     )
-  if (delivery?.kind === 'failed')
+  if (delivery?.kind === 'failed') {
+    // T216: name the gate when the record carries one. A record from before the change (or a
+    // refusal with no gate attributable) keeps the generic sentence — never invent a cause.
+    const why = delivery.reason
+      ? `The gate that refused it: ${LAUNCH_FAILURE_TEXT[delivery.reason]}` +
+        `${delivery.failBytes != null ? ` (${delivery.failBytes} bytes)` : ''}.\n`
+      : ''
     return (
-      'Launch delivery is unconfirmed; automatic retry is stopped.\n' +
+      'Launch delivery is unconfirmed; automatic retry is stopped.\n' + why +
       `Inspect the terminal, then press \u25b6 to retry at a shell prompt.\n${runs}`
     )
+  }
   // Issue #521: an errored upstream is idle, so without this the tooltip would say "waiting for X
   // to finish" about a station that finished twenty minutes ago. Named first, because it is the
   // one case where waiting will not end on its own.

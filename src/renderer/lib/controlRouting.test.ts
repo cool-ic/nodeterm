@@ -576,6 +576,27 @@ it('lists held, failed and unconfirmed launches without claiming an agent is hea
   expect(text).not.toContain('RUNNING')
 })
 
+it('T216: a failed launch names the gate that refused it and the way out', () => {
+  const nodes = [
+    { id: 'live', pendingLaunch: { command: 'codex' } },
+    { id: 'persisted', pendingLaunch: { command: 'codex', manualOnly: true, failReason: 'line-too-long', failBytes: 2048 } },
+    { id: 'legacy', pendingLaunch: { command: 'codex', manualOnly: true } },
+    { id: 'bogus', pendingLaunch: { command: 'codex', manualOnly: true, failReason: 'someone-elses-gate' } }
+  ]
+  const rows = storedNodeListing(nodes, {}, {
+    live: { kind: 'failed', attempts: 1, at: 1, reason: 'shell-unconfirmed' }
+  })
+  const text = controlListingText(rows)
+  // The live delivery record names the gate for this app run…
+  expect(text).toContain('live [terminal]  — LAUNCH FAILED (no shell could be confirmed in the pane (probe timed out); run it with `run`)')
+  // …the durable hold names it after a restart, bytes included for line-too-long…
+  expect(text).toContain('persisted [terminal]  — LAUNCH FAILED (the command is longer than a terminal line can carry, 2048 bytes; run it with `run`)')
+  // …and a record with no gate still says so plainly, always with the escape.
+  expect(text).toContain('legacy [terminal]  — LAUNCH FAILED (the refusing gate was not recorded; run it with `run`)')
+  // A persisted value that names no known gate is not believed (pendingLaunch is unvalidated).
+  expect(text).toContain('bogus [terminal]  — LAUNCH FAILED (the refusing gate was not recorded; run it with `run`)')
+})
+
 it('lists a background start as STARTING, not as the failed launch its manualOnly claim would read as (#925)', () => {
   const rows = storedNodeListing(
     [{ id: 'bg', pendingLaunch: { command: 'claude', attempted: true, manualOnly: true } }],

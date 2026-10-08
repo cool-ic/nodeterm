@@ -257,6 +257,7 @@ import { ensureCodexLaunchCaps } from '../state/codexCli'
 import { useAgentStatus, agentStatusForApi, inferInterruptAfterSettle } from '../state/agentStatus'
 import { useLaunchDelivery } from '../state/launchDelivery'
 import { erroredDeps, handedOverDeps, holdReason, interruptedDeps, launchTooltip } from '../lib/pendingLaunch'
+import type { LaunchFailureReason } from '@shared/types'
 import { useStationHandovers } from '../state/stationHandovers'
 import { useSuccessWait } from '../lib/useSuccessWait'
 import { StationFailedChip } from '../components/StationFailedChip'
@@ -345,6 +346,15 @@ const isMac = isMacPlatform()
  *  path the Omni board's "Open on canvas" takes (it also handles a node in another project). */
 function travelToStation(nodeId: string): void {
   window.dispatchEvent(new CustomEvent('nodeterm:focus-node', { detail: { nodeId } }))
+}
+
+/** T216: the one place a launch refusal becomes a delivery record — the gate that refused (and,
+ *  for line-too-long, the byte count) rides along rather than being dropped. `cancelled`/
+ *  `deferred` name no gate: the record keeps whatever reason it already carried. */
+function recordLaunchFailure(nodeId: string, attempts: number,
+  failure: 'cancelled' | 'deferred' | { gate: LaunchFailureReason; failBytes?: number }): void {
+  const refused = failure === 'cancelled' || failure === 'deferred' ? undefined : failure
+  useLaunchDelivery.getState().markFailed(nodeId, attempts, refused?.gate, refused?.failBytes)
 }
 
 /** How long a remote terminal waits for its project's ControlMaster before giving up and showing
@@ -2118,7 +2128,11 @@ export function TerminalNode({
   // another node's delivery.
   const observedLaunchDelivery = useLaunchDelivery((s) => s.byId[id])
   const launchDelivery = observedLaunchDelivery ?? (pendingLaunch?.manualOnly
-    ? { kind: 'failed' as const, attempts: 1, at: 0 } : undefined)
+    ? { kind: 'failed' as const, attempts: 1, at: 0,
+        // T216: after a restart the transient record is gone; the durable hold still names the gate.
+        ...(pendingLaunch.failReason ? { reason: pendingLaunch.failReason } : {}),
+        ...(pendingLaunch.failBytes != null ? { failBytes: pendingLaunch.failBytes } : {}) }
+    : undefined)
   // A headless start (#925) is typing this node's launch from core: the badge says so, without the
   // warning, and ▶ stands aside — a click would splice a second copy into the pane.
   const startingNow = launchDelivery?.kind === 'starting'
@@ -4125,9 +4139,10 @@ export function TerminalNode({
             deliverRelayInitialLaunch({ scope: api, id, fresh, pending: data.pendingLaunch, command,
               consume: () => updateNodeData(id, { initialCommand: undefined }),
               whenReady: whenShellSettled, writer: launchWriterOptions,
-              onFailure: (outcome) => {
-                useLaunchDelivery.getState().markFailed(id, 1)
-                if (outcome === 'line-too-long') setCo(termKey, { launchTooLongBytes: lineBytes(command) })
+              onFailure: (failure) => {
+                recordLaunchFailure(id, 1, failure)
+                if (failure !== 'cancelled' && failure.gate === 'line-too-long')
+                  setCo(termKey, { launchTooLongBytes: failure.failBytes ?? lineBytes(command) })
               }
             })
           } else deliverInitialLaunch(command, {
@@ -4135,9 +4150,10 @@ export function TerminalNode({
             whenReady: whenShellSettled,
             write: launchWriter,
             update: (patch) => updateNodeData(id, patch),
-            onFailure: (outcome) => {
-              useLaunchDelivery.getState().markFailed(id, 1)
-              if (outcome === 'line-too-long') setCo(termKey, { launchTooLongBytes: lineBytes(command) })
+            onFailure: (failure) => {
+              recordLaunchFailure(id, 1, failure)
+              if (failure !== 'cancelled' && failure.gate === 'line-too-long')
+                setCo(termKey, { launchTooLongBytes: failure.failBytes ?? lineBytes(command) })
             }
           })
         } else if (skipResume) {
@@ -6323,7 +6339,7 @@ export function TerminalNode({
                     useLaunchDelivery.getState().clear(id)
                     updateNodeData(id, { initialCommand: undefined, pendingLaunch: undefined })
                   } else {
-                    useLaunchDelivery.getState().markFailed(id, 1)
+                    recordLaunchFailure(id, 1, outcome)
                   }
                 })
               }}

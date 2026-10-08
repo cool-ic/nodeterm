@@ -215,6 +215,17 @@ describe('launchTooltip — the QUEUED badge never goes silent (#569 item 1)', (
     expect(t).toContain(cmd)
   })
 
+  it('T216: a failed launch names the gate that refused it — with bytes for a too-long line', () => {
+    const t = launchTooltip({ kind: 'failed', attempts: 2, at: 1, reason: 'shell-unconfirmed' }, 'Builder', cmd)
+    expect(t).toContain('The gate that refused it: no shell could be confirmed in the pane (probe timed out).')
+    const long = launchTooltip({ kind: 'failed', attempts: 1, at: 1, reason: 'line-too-long', failBytes: 2048 }, '', cmd)
+    expect(long).toContain('The gate that refused it: the command is longer than a terminal line can carry (2048 bytes).')
+    // A record from before the change (or with no gate attributable) keeps the generic sentence.
+    const legacy = launchTooltip({ kind: 'failed', attempts: 1, at: 1 }, '', cmd)
+    expect(legacy).not.toContain('The gate that refused it')
+    expect(legacy).toContain('Inspect the terminal')
+  })
+
   it('a manual refusal instructs the user to inspect the terminal', () => {
     expect(launchTooltip({ kind: 'failed', attempts: 1, at: 1 }, 'Builder', cmd)).toContain(
       'Inspect the terminal'

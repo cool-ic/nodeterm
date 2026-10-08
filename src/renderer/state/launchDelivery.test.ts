@@ -48,6 +48,22 @@ describe('useLaunchDelivery', () => {
     s.clear('term-1')
     expect(useLaunchDelivery.getState().byId['term-1']).toBeUndefined()
   })
+
+  // T216: a bare LAUNCH FAILED was undiagnosable after the fact — the record now names the gate.
+  it('markFailed records the gate that refused, and line-too-long carries the byte count', () => {
+    useLaunchDelivery.getState().markFailed('term-1', 3, 'shell-unconfirmed')
+    expect(useLaunchDelivery.getState().byId['term-1']).toMatchObject({ kind: 'failed', reason: 'shell-unconfirmed' })
+    useLaunchDelivery.getState().markFailed('term-2', 1, 'line-too-long', 1500)
+    expect(useLaunchDelivery.getState().byId['term-2']).toMatchObject({ kind: 'failed', reason: 'line-too-long', failBytes: 1500 })
+  })
+
+  it('a reason-less refusal keeps the reason the record already named, and a named one replaces it', () => {
+    useLaunchDelivery.getState().markFailed('term-1', 2, 'hold-not-committed')
+    useLaunchDelivery.getState().markFailed('term-1', 2) // e.g. the stale-pending path: no gate attributable
+    expect(useLaunchDelivery.getState().byId['term-1']).toMatchObject({ reason: 'hold-not-committed' })
+    useLaunchDelivery.getState().markFailed('term-1', 2, 'torn-down')
+    expect(useLaunchDelivery.getState().byId['term-1']).toMatchObject({ reason: 'torn-down' })
+  })
 })
 
 /**

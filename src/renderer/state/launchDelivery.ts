@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { LaunchDelivery } from '../lib/pendingLaunch'
+import type { LaunchFailureReason } from '@shared/types'
 
 /**
  * What happened to an ARMED node's held launch (canvas-control `--after`, or the cold-open arming
@@ -41,8 +42,10 @@ interface LaunchDeliveryStore {
   byId: Record<string, LaunchDelivery | undefined>
   /** The gate opened but the node's session is not up yet — still waiting, and saying so. */
   markStalled: (nodeId: string) => void
-  /** Every attempt in the schedule was refused. Terminal: only ▶ (or a respawn) revives it. */
-  markFailed: (nodeId: string, attempts: number) => void
+  /** Every attempt in the schedule was refused. Terminal: only ▶ (or a respawn) revives it.
+   *  T216: `reason` names the gate that refused (absent on a refusal with no gate attributable —
+   *  then a previous record's reason is kept, so the badge never loses a cause it already had). */
+  markFailed: (nodeId: string, attempts: number, reason?: LaunchFailureReason, failBytes?: number) => void
   /** A headless start (#925) is about to type this node's launch: ▶ must stand aside until it settles. */
   markStarting: (nodeId: string) => void
   /** The launch's prompt file was gone at delivery: held for ▶, with the path, never typed. */
@@ -66,13 +69,26 @@ export const useLaunchDelivery = create<LaunchDeliveryStore>((set) => ({
     set((s) => ({ byId: { ...s.byId, [nodeId]: { kind: 'starting', since: Date.now() } } })),
   markBriefMissing: (nodeId, path) =>
     set((s) => ({ byId: { ...s.byId, [nodeId]: { kind: 'brief-missing', path, at: Date.now() } } })),
-  markFailed: (nodeId, attempts) =>
+  markFailed: (nodeId, attempts, reason, failBytes) =>
     set((s) => {
       // Never let a later, smaller count shrink the record: the manual ▶ reports its own single
       // refusal, and it must not rewrite "5 attempts were refused" as "1 was".
       const prev = s.byId[nodeId]
       const total = Math.max(attempts, prev?.kind === 'failed' ? prev.attempts : 0)
-      return { byId: { ...s.byId, [nodeId]: { kind: 'failed', attempts: total, at: Date.now() } } }
+      // A reason-less refusal keeps the reason a previous record already named; a named one
+      // overwrites it (the latest gate is the one a reader would find in the pane).
+      const keptReason = reason ?? (prev?.kind === 'failed' ? prev.reason : undefined)
+      const keptBytes = failBytes ?? (prev?.kind === 'failed' ? prev.failBytes : undefined)
+      return {
+        byId: {
+          ...s.byId,
+          [nodeId]: {
+            kind: 'failed', attempts: total, at: Date.now(),
+            ...(keptReason ? { reason: keptReason } : {}),
+            ...(keptBytes != null ? { failBytes: keptBytes } : {})
+          }
+        }
+      }
     }),
   clear: (nodeId) =>
     set((s) => {

@@ -42,13 +42,30 @@ it('new relay UI initial command uses verified delivery once without durable int
   expect(f.scope.workspace.save).not.toHaveBeenCalled()
   expect(flowToNodeStates([f.node], false)[0].pendingLaunch).toBeUndefined()
 })
-it('a failed shell check cannot be retried or replayed on remount', async () => {
+it('a failed shell check cannot be retried or replayed on remount; the bounded retry names the gate', async () => {
+  vi.useFakeTimers()
   const f = fixture()
-  f.shellReady.mockResolvedValueOnce(false)
-  f.launch(); f.ready(); await tick()
-  f.ready(); f.launch(); f.ready(); await tick()
+  f.shellReady.mockResolvedValue(false)
+  f.launch(); f.ready(); await vi.advanceTimersByTimeAsync(1000 + 3000)
+  f.ready(); f.launch(); f.ready(); await vi.advanceTimersByTimeAsync(1000 + 3000)
   expect(f.input).not.toHaveBeenCalled()
+  // T216: the refusal names gate 1, and the bounded probe retry (2×) ran inside the ONE
+  // transient attempt — a remount still cannot obtain another one.
   expect(f.failure).toHaveBeenCalledTimes(1)
+  expect(f.failure).toHaveBeenCalledWith({ gate: 'shell-unconfirmed' })
+})
+it('the bounded probe retry delivers when the shell shows up within the backoff window', async () => {
+  vi.useFakeTimers()
+  const f = fixture()
+  f.shellReady.mockResolvedValueOnce(false).mockResolvedValue(true)
+  f.launch(); f.ready()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(f.input).not.toHaveBeenCalled() // refused once, waiting out the first backoff
+  await vi.advanceTimersByTimeAsync(1000) // backoff elapses → re-probe succeeds → delivers
+  expect(f.input.mock.calls).toEqual([['claude brief']])
+  f.echo('claude brief')
+  await vi.advanceTimersByTimeAsync(0)
+  expect(f.failure).not.toHaveBeenCalled()
 })
 it('teardown before settle consumes the attempt without replaying after remount', async () => {
   const f = fixture()
@@ -84,6 +101,6 @@ it('uncertain delivery after input never pastes again on remount', async () => {
   f.dispose(); await tick()
   f.launch(); f.ready(); await tick()
   expect(f.input.mock.calls).toEqual([['claude brief']])
-  expect(f.failure).toHaveBeenCalledWith('cancelled')
+  expect(f.failure).toHaveBeenCalledWith({ gate: 'torn-down' })
   expect(f.scope.workspace.save).not.toHaveBeenCalled()
 })

@@ -409,11 +409,34 @@ export type NodeKind = 'terminal' | 'sticky' | 'group' | 'editor' | 'diff' | 'vi
  * that its deps already finished. That is why the node carries a manual "run now" escape:
  * a stalled station must never be a dead end.
  */
+/**
+ * T216: the gate that refused an automatic launch, recorded AT the failure. A bare LAUNCH FAILED
+ * was undiagnosable after the fact — five gates shared one reason-less terminal state — so every
+ * refusal now names the gate that refused, in words a reader can act on. Ordered by the delivery
+ * chain, not by severity.
+ */
+export type LaunchFailureReason =
+  /** The pane probe could not confirm a shell (a timeout, an IPC error, a non-shell foreground).
+   *  The most transient gate, and the only one that auto-retries: nothing has been typed. */
+  | 'shell-unconfirmed'
+  /** The write-ahead hold did not commit (a failed durable save). Possibly a larger storage
+   *  problem, so it never auto-retries. */
+  | 'hold-not-committed'
+  /** The delivery window was torn down (view unmounted, PTY replaced). A remount re-enters. */
+  | 'torn-down'
+  /** The launch line is longer than the pane's tty can carry (`MAX_LAUNCH_LINE_BYTES`), so the
+   *  pending line was killed instead of submitted (#706). Never auto-retries. */
+  | 'line-too-long'
+
 export interface PendingLaunch {
   /** false proves no input attempt; true/absent require explicit recovery after reload. */
   attempted?: boolean
   /** An attempted/uncertain delivery requires explicit Run now; never replay on hooks. */
   manualOnly?: boolean
+  /** T216: why the last automatic attempt was refused (`failBytes` rides `line-too-long`).
+   *  Recorded durably so `list` can name the gate for an off-screen node after a restart. */
+  failReason?: LaunchFailureReason
+  failBytes?: number
   /**
    * Node ids to wait for. Only nodes running a hook-reporting agent may appear here — a plain
    * terminal never reports `done`, so waiting on one would stall forever (refused at creation).

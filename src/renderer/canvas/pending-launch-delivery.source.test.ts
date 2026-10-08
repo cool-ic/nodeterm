@@ -56,7 +56,7 @@ describe('armed-launch delivery (source pins)', () => {
     expect(warn).toBeGreaterThan(-1)
     // markFailed must accompany the log. This is the misleading-error rule: a failure the user
     // can only find in DevTools is a failure the user cannot find.
-    expect(body).toContain('markFailed(f.id, attempt)')
+    expect(body).toContain('markFailed(f.id, attempt, refused?.gate, refused?.failBytes)')
     expect(body.slice(0, warn)).toContain('markFailed')
   })
 

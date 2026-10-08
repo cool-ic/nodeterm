@@ -12,7 +12,7 @@ import { LINK_ENDPOINT_NOT_FOUND } from '@shared/canvas-link'
 import { arrangeArgsRefusal, isTopLevelGroupArg, TOP_ARRANGE_LAYOUTS } from '@shared/arrange-verb'
 import { createControlOpenBatch } from '../lib/controlOpenBatch'
 import { commitOwnedLaunchAttempt, registerLaunchCommit } from '../terminal/launch-attempt'
-import { hasLaunchWriter, launchCommand } from '../terminal/launch-command'
+import { hasLaunchWriter, launchCommand, launchFailureText } from '../terminal/launch-command'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useContextLinkSync } from './useContextLinkSync'
 import { useMirrorIdentitySeed } from './useMirrorIdentitySeed'
@@ -2596,12 +2596,17 @@ export function Canvas() {
         }
         // The verified writer already exhausted its bounded echo repair. A failed launch
         // needs an explicit retry; unrelated hooks and remounts must never inject it later.
+        // T216: the gate that refused rides both the durable hold and the delivery record, so
+        // an off-screen LAUNCH FAILED can still answer "why" after a restart.
+        const refused = outcome === 'cancelled' ? undefined : outcome
         setNodes((ns) => ns.map((n) => n.id === f.id && n.data.pendingLaunch
-          ? { ...n, data: { ...n.data, pendingLaunch: { ...n.data.pendingLaunch, attempted: true, manualOnly: true } } }
+          ? { ...n, data: { ...n.data, pendingLaunch: { ...n.data.pendingLaunch, attempted: true, manualOnly: true,
+              ...(refused ? { failReason: refused.gate } : {}),
+              ...(refused?.failBytes != null ? { failBytes: refused.failBytes } : {}) } } }
           : n))
         markDirty()
-        useLaunchDelivery.getState().markFailed(f.id, attempt)
-        console.warn('[pending-launch] gave up delivering held launch for', f.id)
+        useLaunchDelivery.getState().markFailed(f.id, attempt, refused?.gate, refused?.failBytes)
+        console.warn('[pending-launch] gave up delivering held launch for', f.id, refused?.gate ?? outcome)
       })
       // The file the launch reads its prompt from must still be there: a held launch may be
       // delivered weeks after it was armed (a cold open waits for its project to be viewed), and
@@ -18140,8 +18145,10 @@ export function Canvas() {
             markDirty()
             return one(true)
           }
-          useLaunchDelivery.getState().markFailed(nodeId, 1)
-          return one(false, outcome)
+          useLaunchDelivery.getState().markFailed(nodeId, 1,
+            outcome === 'cancelled' || outcome === 'deferred' ? undefined : outcome.gate,
+            outcome === 'cancelled' || outcome === 'deferred' ? undefined : outcome.failBytes)
+          return one(false, launchFailureText(outcome))
         }
         case 'headless': {
           // No await between the plan above and this call: the claim lands in the same tick, while
