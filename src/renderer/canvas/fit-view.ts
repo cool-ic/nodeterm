@@ -43,35 +43,38 @@ export const rectsOverlap = (a: FitRect, b: FitRect): boolean =>
 const width = (r: FitRect): number => r.right - r.left
 const height = (r: FitRect): number => r.bottom - r.top
 
+/** Area of a rect, and its Chebyshev-ish distance from a point — the two tie-breakers the
+ *  scoring functions below share. */
+const areaOf = (r: FitRect): number => width(r) * height(r)
+const offCentreOf = (r: FitRect, cx: number, cy: number): number =>
+  Math.abs((r.left + r.right) / 2 - cx) + Math.abs((r.top + r.bottom) / 2 - cy)
+
+/** Does `candidate` beat the incumbent `best`? Callers encode "biggest zoom" / "biggest area"
+ *  here; the enumeration below only supplies the candidates. */
+type FreeRectScorer = (candidate: FitRect, best: FitRect) => boolean
+
 /**
- * Largest chrome-free rectangle inside `viewport`, chosen to maximize the zoom a
- * `contentW × contentH` box can reach inside it (ties → bigger area, then closer to centre).
+ * The best chrome-free rectangle inside `viewport`, per `isBetter`. Every maximal empty rectangle
+ * has each edge either on the viewport border or flush against an obstacle edge, so enumerating
+ * obstacle/viewport edge pairs is exhaustive: this finds the true optimum, not an approximation.
+ * ~8 overlays → ~18 boundaries per axis, comfortably under a ms.
  *
- * Every maximal empty rectangle has each edge either on the viewport border or flush against an
- * obstacle edge, so enumerating obstacle/viewport edge pairs is exhaustive: this returns the true
- * optimum, not an approximation. ~8 overlays → ~18 boundaries per axis, comfortably under a ms.
+ * The single enumeration every public picker runs through (see `largestFreeRect` and
+ * `largestFreeAreaRect`) — the two differ only in what they score, never in what they look at.
  *
  * Returns null only if no non-degenerate free rectangle exists.
  */
-export function largestFreeRect(
+function bestFreeRect(
   viewport: FitRect,
   obstacles: FitRect[],
-  contentW: number,
-  contentH: number
+  isBetter: FreeRectScorer
 ): FitRect | null {
-  if (contentW <= 0 || contentH <= 0) return null
   const axis = (lo: number, hi: number, edges: number[]): number[] =>
     [...new Set([lo, hi, ...edges.filter((v) => v > lo && v < hi)])].sort((a, b) => a - b)
   const xs = axis(viewport.left, viewport.right, obstacles.flatMap((o) => [o.left, o.right]))
   const ys = axis(viewport.top, viewport.bottom, obstacles.flatMap((o) => [o.top, o.bottom]))
 
-  const vcx = (viewport.left + viewport.right) / 2
-  const vcy = (viewport.top + viewport.bottom) / 2
   let best: FitRect | null = null
-  let bestZoom = -1
-  let bestArea = -1
-  let bestOffCentre = Infinity
-
   for (let i = 0; i < xs.length - 1; i++) {
     for (let j = i + 1; j < xs.length; j++) {
       for (let k = 0; k < ys.length - 1; k++) {
@@ -81,26 +84,60 @@ export function largestFreeRect(
           const h = height(r)
           if (w < 1 || h < 1) continue
           if (obstacles.some((o) => rectsOverlap(o, r))) continue
-          // Zoom this rect affords the content. Ties are common once the caller's maxZoom clamps,
-          // so fall back to area and then centredness to keep results stable and pleasant.
-          const zoom = Math.min(w / contentW, h / contentH)
-          const area = w * h
-          const offCentre =
-            Math.abs((r.left + r.right) / 2 - vcx) + Math.abs((r.top + r.bottom) / 2 - vcy)
-          const better =
-            zoom > bestZoom + 1e-6 ||
-            (zoom > bestZoom - 1e-6 &&
-              (area > bestArea + 1e-6 || (area > bestArea - 1e-6 && offCentre < bestOffCentre)))
-          if (!better) continue
-          best = r
-          bestZoom = zoom
-          bestArea = area
-          bestOffCentre = offCentre
+          if (best === null || isBetter(r, best)) best = r
         }
       }
     }
   }
   return best
+}
+
+/**
+ * Largest chrome-free rectangle inside `viewport`, chosen to maximize the zoom a
+ * `contentW × contentH` box can reach inside it (ties → bigger area, then closer to centre).
+ */
+export function largestFreeRect(
+  viewport: FitRect,
+  obstacles: FitRect[],
+  contentW: number,
+  contentH: number
+): FitRect | null {
+  if (contentW <= 0 || contentH <= 0) return null
+  const vcx = (viewport.left + viewport.right) / 2
+  const vcy = (viewport.top + viewport.bottom) / 2
+  return bestFreeRect(viewport, obstacles, (candidate, best) => {
+    // Zoom this rect affords the content. Ties are common once the caller's maxZoom clamps, so
+    // fall back to area and then centredness to keep results stable and pleasant.
+    const zoom = Math.min(width(candidate) / contentW, height(candidate) / contentH)
+    const bestZoom = Math.min(width(best) / contentW, height(best) / contentH)
+    const area = areaOf(candidate)
+    const bestArea = areaOf(best)
+    return (
+      zoom > bestZoom + 1e-6 ||
+      (zoom > bestZoom - 1e-6 &&
+        (area > bestArea + 1e-6 ||
+          (area > bestArea - 1e-6 &&
+            offCentreOf(candidate, vcx, vcy) < offCentreOf(best, vcx, vcy))))
+    )
+  })
+}
+
+/**
+ * Largest chrome-free rectangle inside `viewport` by AREA (ties → closer to centre). The shape a
+ * caller wants when it fills a panel rather than fitting content at an aspect ratio — maximize
+ * uses it to reserve the chrome, where "the biggest empty box" is the whole question.
+ */
+export function largestFreeAreaRect(viewport: FitRect, obstacles: FitRect[]): FitRect | null {
+  const vcx = (viewport.left + viewport.right) / 2
+  const vcy = (viewport.top + viewport.bottom) / 2
+  return bestFreeRect(viewport, obstacles, (candidate, best) => {
+    const area = areaOf(candidate)
+    const bestArea = areaOf(best)
+    return (
+      area > bestArea + 1e-6 ||
+      (area > bestArea - 1e-6 && offCentreOf(candidate, vcx, vcy) < offCentreOf(best, vcx, vcy))
+    )
+  })
 }
 
 /** Inflate a measured chrome rect by the gap so content keeps its distance. */
