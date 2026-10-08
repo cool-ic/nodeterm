@@ -1,7 +1,7 @@
 import { commitLaunchAttempt } from './launch-attempt'
 import type { PendingLaunch } from '@shared/types'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createLaunchWriter, deliverInitialLaunch, hasLaunchWriter, launchCommand, registerLaunchWriter } from './launch-command'
+import { createLaunchWriter, deliverInitialLaunch, hasLaunchWriter, launchCommand, registerLaunchWriter, type LaunchOutcome } from './launch-command'
 import { trustsFreshShell } from '@shared/launch-trust'
 import { KILL_LINE, WINDOWS_KILL_LINE, VERIFY_TIMEOUT_MS, DELIVERY_ATTEMPTS } from '@shared/command-delivery'
 
@@ -147,11 +147,17 @@ describe('durable launch delivery', () => {
 })
 
 describe('UI initial-command lifecycle', () => {
-  it.each(['submitted', 'cancelled', 'line-too-long'] as const)('retains intent through settle and only discards it on submitted (%s)', async (outcome) => {
+  it.each([
+    ['submitted', 'submitted'],
+    ['cancelled', 'cancelled'],
+    // T216 gate 4: the writer converts a raw `line-too-long` into the refusal object (byte count
+    // included), so the refusal shape is what reaches the consumer — and what intent must survive.
+    ['line-too-long', { gate: 'line-too-long', failBytes: 12 }]
+  ] as const)('retains intent through settle and only discards it on submitted (%s)', async (label, outcome) => {
     let ready!: () => void
-    let settle!: (outcome: 'submitted' | 'cancelled' | 'line-too-long') => void
+    let settle!: (outcome: LaunchOutcome) => void
     const state: { initialCommand?: string; pendingLaunch?: { command: string } } = { initialCommand: 'claude original-brief' }
-    const write = vi.fn(() => new Promise<'submitted' | 'cancelled' | 'line-too-long'>((resolve) => { settle = resolve }))
+    const write = vi.fn(() => new Promise<LaunchOutcome>((resolve) => { settle = resolve }))
     const onFailure = vi.fn()
     deliverInitialLaunch(state.initialCommand!, {
       whenReady: (run) => { ready = run }, write,
@@ -167,7 +173,7 @@ describe('UI initial-command lifecycle', () => {
     settle(outcome)
     await tick()
     expect(state.initialCommand).toBeUndefined()
-    if (outcome === 'submitted') {
+    if (label === 'submitted') {
       expect(state.pendingLaunch).toBeUndefined()
       expect(onFailure).not.toHaveBeenCalled()
     } else {

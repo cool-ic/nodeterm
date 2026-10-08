@@ -9,7 +9,7 @@
 // transcript (whisper's "Thank you." over silence, or a meeting's audio) into the terminal.
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -67,7 +67,7 @@ const CAP_PLUS_MARGIN_MS = 200_000 // past MAX_RECORDING_MS (2:30)
 
 let host: HTMLDivElement
 let root: Root
-let onClose: ReturnType<typeof vi.fn>
+let onClose: Mock<() => void>
 let micConsent: ReturnType<typeof vi.fn>
 let transcribe: ReturnType<typeof vi.fn>
 
@@ -97,7 +97,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   h.FakeCapture.instances = []
   h.sendText.mockClear()
-  onClose = vi.fn()
+  onClose = vi.fn<() => void>()
   micConsent = vi.fn(async () => true)
   transcribe = vi.fn(async () => ({ text: 'Thank you.' }))
   ;(window as unknown as { nodeTerminal: unknown }).nodeTerminal = { speech: { micConsent, transcribe } }
