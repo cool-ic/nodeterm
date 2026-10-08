@@ -62,12 +62,12 @@ import { IntegrationSettings } from '../IntegrationConsent'
 
 const ROWS = {
   integrations: {
-    title: 'Agent integrations',
-    keywords: ['integration', 'consent', 'hook', 'hooks', 'skill', 'skills', 'install', 'opt out', 'decline', 'clean up', 'ssh', 'host', 'agents.md', 'gemini.md']
+    title: 'Hooks & skills (integrations)',
+    keywords: ['agent integrations', 'integration', 'remove', 'uninstall', 'consent', 'hook', 'hooks', 'skill', 'skills', 'install', 'opt out', 'decline', 'clean up', 'ssh', 'host', 'agents.md', 'gemini.md']
   },
   agents: {
-    title: 'Agents',
-    keywords: ['agent', 'claude', 'codex', 'gemini', 'enable', 'disable', 'default']
+    title: 'Show in Add menus',
+    keywords: ['agent', 'claude', 'codex', 'gemini', 'enable', 'disable', 'show', 'hide', 'menu', 'default']
   },
   launchCommands: {
     title: 'Launch commands',
@@ -285,6 +285,11 @@ const CONTROL_CONFIRM_VERB_COPY: Record<string, { label: string; description: st
     label: 'Ask before an agent closes nodes',
     description:
       'The `close` verb deletes nodes and ends their terminal sessions. Waiving the dialog lets any canvas-control agent do that without asking.'
+  },
+  'open-project': {
+    label: 'Ask before an agent opens or adds a project',
+    description:
+      'The `open-project` verb lets an agent open sessions in another project you already have, or add a folder as a new project, so it can start work there. Waiving the dialog lets any canvas-control agent do that without asking.'
   }
 }
 
@@ -455,16 +460,17 @@ export function AgentsSection({ isActive }: { isActive: boolean }): React.JSX.El
       id="agents"
       title="Agents"
       description={agentChip
-        ? `Enable or disable agents in the Add menus, and pick the default (${agentChip}).`
-        : 'Enable or disable agents in the Add menus, and pick the default.'}
+        ? `Choose which agents the Add menus show and the default (${agentChip}), and whether nodeterm installs its hooks and skills into each agent.`
+        : 'Choose which agents the Add menus show and the default, and whether nodeterm installs its hooks and skills into each agent.'}
       isActive={isActive}
       searchEntries={ENTRIES}
     >
-      <SearchableRow {...ROWS.integrations}>
-        <FieldRow label="Agent integrations" description="What nodeterm may write into each agent CLI’s own configuration, on this machine and on each SSH host." control={null} />
-        <IntegrationSettings />
-      </SearchableRow>
       <SearchableRow {...ROWS.agents}>
+        <FieldRow
+          label="Show in Add menus"
+          description="Which agents appear in the Add menus, the Dock and ⌘K, and which one “New agent” opens. Hiding one only changes the menus — nothing is installed or removed."
+          control={null}
+        />
         <div className="space-y-2">
           {rows.map((row) => {
             const enabled = isAgentEnabled(settings, row.id)
@@ -484,10 +490,10 @@ export function AgentsSection({ isActive }: { isActive: boolean }): React.JSX.El
                 </Button>
                 <SegmentedPill<'enabled' | 'disabled'>
                   value={enabled ? 'enabled' : 'disabled'}
-                  ariaLabel={`${row.label} availability`}
+                  ariaLabel={`Show ${row.label} in the Add menus`}
                   options={[
-                    { value: 'enabled', label: 'Enabled' },
-                    { value: 'disabled', label: 'Disabled' }
+                    { value: 'enabled', label: 'Shown' },
+                    { value: 'disabled', label: 'Hidden' }
                   ]}
                   onChange={(v) => update(setAgentEnabled(settings, row.id, v === 'enabled'))}
                 />
@@ -495,6 +501,18 @@ export function AgentsSection({ isActive }: { isActive: boolean }): React.JSX.El
             )
           })}
         </div>
+      </SearchableRow>
+      <SearchableRow {...ROWS.integrations}>
+        <FieldRow
+          label="Hooks & skills (integrations)"
+          description={
+            'Files nodeterm installs into each agent CLI’s own config: a status hook (RUNNING / NEEDS YOU badges, notifications) ' +
+            'and two skills (canvas control, reading linked nodes). Remove deletes exactly what nodeterm added. ' +
+            'Without it the agent still runs in a terminal, just without those features. This is separate from the menu list above.'
+          }
+          control={null}
+        />
+        <IntegrationSettings />
       </SearchableRow>
       <SearchableRow {...ROWS.launchCommands}>
         <FieldRow
@@ -631,7 +649,7 @@ export function AgentsSection({ isActive }: { isActive: boolean }): React.JSX.El
                   always
                     ? undefined
                     : sessionWaived
-                      ? 'Waived until nodeterm quits (you ticked "Don\u2019t ask again"). Revoke restores the dialog now.'
+                      ? 'Waived until nodeterm quits, in every project (you chose that in an agent\u2019s dialog). Revoke restores the dialog now.'
                       : inProjects.length
                         ? `Waived permanently in ${inProjects.map((r) => `"${r.name}"`).join(', ')} \u2014 revoke below.`
                         : undefined
@@ -669,7 +687,7 @@ export function AgentsSection({ isActive }: { isActive: boolean }): React.JSX.El
               // per-project waiver is granted from a DIALOG, which is gone the moment it is
               // answered — so without this row the grant would be permanent, invisible, and
               // findable only by hand-editing settings.json.
-              description="You ticked \u201cDon\u2019t ask again\u201d and chose one project. These survive restarts, and apply only inside the project named. A project you delete takes its waivers with it."
+              description="You chose \u201cDon\u2019t ask again for agents in \u2026\u201d in an agent\u2019s dialog. These survive restarts, and apply only to agents running in the project named. A project you delete takes its waivers with it."
               control={
                 <div className="flex flex-col items-end gap-2">
                   {projectWaiverRows.map((row) =>

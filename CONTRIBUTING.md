@@ -328,10 +328,11 @@ anything else. Board-level fields survive every transform — `pullLinks` is one
   never grants anything, a waived action still announces itself on screen and NAMES the waiver that
   let it through, and which gates may be waived at all is a TABLE, not an `if` at each call site —
   so "this one can never be waived" is a tested fact rather than a line somebody forgot to write.
-  **What a dialog may grant is bounded by SCOPE, not by permanence.** It offers "while nodeterm is
-  running" (in-memory — not `settings.json`, not `localStorage`, so quitting restores the gate) or
-  "always in this project" (machine-local, keyed by project id, pruned like
-  `settings.sidebarCollapsedItems`). The machine-WIDE waiver stays Settings-only, because that is
+  **What a dialog may grant is bounded by SCOPE, not by permanence.** It offers, as radios visible
+  from the start with "ask me again" selected, "don't ask again for agents in <project>"
+  (machine-local, keyed by project id, pruned like `settings.sidebarCollapsedItems`) or "don't ask
+  again in any project until nodeterm quits" (in-memory — not `settings.json`, not `localStorage`,
+  so quitting restores the gate). Hiding a reach behind a checkbox made it read as missing. The machine-WIDE waiver stays Settings-only, because that is
   the one a stray click in a dialog that appeared under the user's hands must not be able to grant.
   Offering only the app-run one was its own failure: it is not what a user who ticks "don't ask
   again" means, so the real choices were "be asked forever" or "turn it off everywhere". Two rules

@@ -19,6 +19,7 @@ import { useMirrorIdentitySeed } from './useMirrorIdentitySeed'
 import { useShallow } from 'zustand/react/shallow'
 import { playSfx, primeSfx } from '@renderer/lib/sfx'
 import { fanoutStillWorking } from '@renderer/lib/completionAlert'
+import { publishCanvasZoom } from '@renderer/lib/canvasZoomVar'
 import {
   addEdge,
   applyEdgeChanges,
@@ -32,6 +33,7 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useStoreApi,
   type Connection,
   type EdgeChange,
   type Viewport
@@ -812,8 +814,10 @@ import { useExpiringDialog } from '../lib/useExpiringDialog'
 import {
   confirmExpiresAt,
   isWaivableVerb,
+  waiveChoices,
   waivedNotice,
-  CONTROL_REQUEST_TIMEOUT_MS
+  CONTROL_REQUEST_TIMEOUT_MS,
+  type ConfirmWaiveChoice
 } from '@shared/control-confirm'
 import { useControlConfirm } from '../state/controlConfirm'
 import { autoApproveForGate, controlConfirmDecision, waiveControlConfirmForProject } from '../state/controlConfirmGate'
@@ -835,7 +839,10 @@ import {
   applyMutationToFlow,
   agentLaunchOverride,
   claudeLaunchCommand,
-  COLLAPSED_HEIGHT,
+  toggleCollapsed,
+  canToggleCollapse,
+  endMaximizeOnUserGeometry,
+  movedGestureEnds,
   alignNodes,
   arrangeByLineage,
   arrangeGroupChildren,
@@ -1969,6 +1976,10 @@ export function Canvas() {
     getNodesBounds
   } = useReactFlow()
 
+  // `--nt-zoom` on React Flow's root: the resize grab zones size themselves in screen px with it.
+  const rfStore = useStoreApi()
+  useEffect(() => publishCanvasZoom(rfStore), [rfStore])
+
   // Single "fit everything" path for every fit-view entry point (dock button, the built-in
   // Controls button, the ⌘K palette and the context menu) so they behave identically and there's
   // one place to tune. Solved per click against the CURRENT chrome layout and the CURRENT content
@@ -2114,14 +2125,12 @@ export function Canvas() {
     confirmFlags.current.confirm = !!v
     setConfirmState(v)
   }, [])
-  // "Don't ask again" on an agent-requested destructive confirm. Canvas state rather than a field
-  // on `ConfirmState` so the checkbox reads and writes LIVE (see `ConfirmState.waiveVerb`); reset
-  // by the dispatch every time it raises one of those dialogs, so a tick never carries over to the
-  // next request.
-  const [controlWaive, setControlWaive] = useState(false)
-  /** How far the tick above reaches. `session` is the DEFAULT and the pre-existing behaviour — a
-   *  waiver a dialog grants must stay the bounded one unless the user says otherwise. */
-  const [controlWaiveScope, setControlWaiveScope] = useState<'session' | 'project'>('session')
+  // "Don't ask again" on an agent-requested destructive confirm (@shared/control-confirm
+  // `waiveChoices`). Canvas state rather than a field on `ConfirmState` so the radios read and
+  // write LIVE (see `ConfirmState.waiveVerb`); reset to `ask` by the dispatch every time it raises
+  // one of those dialogs, so a choice never carries over to the next request. `ask` is the DEFAULT
+  // and is not a waiver: an untouched dialog grants nothing.
+  const [controlWaiveChoice, setControlWaiveChoice] = useState<ConfirmWaiveChoice>('ask')
   /**
    * An agent-requested confirm collects itself when its REQUEST has expired.
    *
@@ -4660,6 +4669,8 @@ export function Canvas() {
     setNodes((ns) => (ns.some((n) => n.selected) ? ns.map((n) => ({ ...n, selected: false })) : ns))
   }, [ephSelId, setNodes])
 
+  // Ids mid-resize (a `resizing: true` change seen, its end not yet): see movedGestureEnds.
+  const resizingIdsRef = useRef(new Set<string>())
   const handleNodesChange: typeof onNodesChange = useCallback(
     (changes) => {
       // Ephemeral nodes (subagent / loop) live outside the managed state. Persist their drag
@@ -4719,9 +4730,12 @@ export function Canvas() {
         ? snapResizeChanges(managed, nodesRef.current, snapSettings.gridSize || GRID)
         : managed
       onNodesChange(snapped)
+      // A user drag/resize of a maximized node ends maximize mode where it now stands.
+      const ended = movedGestureEnds(managed, resizingIdsRef.current)
+      if (ended.size) setNodes((ns) => endMaximizeOnUserGeometry(ns, ended))
       if (snapped.some((c) => c.type !== 'select')) markDirty()
     },
-    [onNodesChange, markDirty, ephParentPosition]
+    [onNodesChange, setNodes, markDirty, ephParentPosition]
   )
 
   // Resolve a node's agent id, with a tags fallback for not-yet-migrated legacy nodes and a
@@ -9319,22 +9333,7 @@ export function Canvas() {
 
   const toggleCollapseNodes = useCallback(
     (ids: string[]) => {
-      const set = new Set(ids)
-      setNodes((ns) =>
-        ns.map((n) => {
-          if (!set.has(n.id)) return n
-          const next = !n.data.collapsed
-          const expandedHeight =
-            (n.data.expandedHeight as number) ?? n.measured?.height ?? (n.height as number) ?? 300
-          const height = next ? COLLAPSED_HEIGHT : expandedHeight
-          return {
-            ...n,
-            height,
-            style: { ...n.style, height },
-            data: { ...n.data, collapsed: next, expandedHeight }
-          }
-        })
-      )
+      setNodes((ns) => toggleCollapsed(ns, ids))
       markDirty()
     },
     [setNodes, markDirty]
@@ -10540,7 +10539,11 @@ export function Canvas() {
             }
           ] as MenuItem[])
         : []),
-      ...(isHidden('collapse', hidden)
+      ...(isHidden('collapse', hidden) ||
+      !ids.some((nid) => {
+        const n = nodesRef.current.find((nd) => nd.id === nid)
+        return !!n && canToggleCollapse(n)
+      })
         ? []
         : ([
             {
@@ -13094,7 +13097,9 @@ export function Canvas() {
       // never reaches this process, so the dialog below can only ever show the resolved form
       // (P5). The renderer's job: validate the source live-or-stored, decide the consent branch
       // (planOpenProject — every grant passes a human decision exactly once, spec Q1), raise the
-      // dialog, apply the NON-ACTIVATING registerProject (P6 — no setActive/travel in any
+      // dialog — unless the human already decided for every such call, through the same
+      // "don't ask again" `write`/`close` honour (@shared/control-confirm) — apply the
+      // NON-ACTIVATING registerProject (P6 — no setActive/travel in any
       // branch), and reply exactly once on confirm AND cancel (GC 12). The grant itself is
       // recorded MAIN-side when this reply lands ok && verified (recordOpenProjectGrant) —
       // nothing in this block authorizes anything.
@@ -13119,6 +13124,16 @@ export function Canvas() {
         }
         const opTitle =
           oneLine((opLive?.data.title as string) ?? opStored?.title ?? '') || sourceNodeId
+        // The CALLER's project — the same name and meaning as the dispatch's own `ctlProject`
+        // further down, which this early block runs before. A node on the live canvas belongs to
+        // the active project (React Flow holds only that one); any other caller is found in the
+        // store. It is what this verb's "don't ask again" is keyed on, exactly as for `write` and
+        // `close`: the trust being expressed is "the agents in that repo", and for a create/adopt
+        // there is no target project yet to key on (@shared/control-confirm).
+        const opStore = useProjects.getState()
+        const ctlProject = opLive
+          ? opStore.getProject(opStore.activeProjectId ?? '')
+          : opStore.projects.find((p) => p.nodes.some((n) => n.id === sourceNodeId))
         // A project color is the ACTIVE TAB's TEXT color, so it takes the narrower system subset
         // (see isSystemNodeColor) — and it takes a subset at ALL because this flag reached
         // `registerProject` unvalidated: an agent-supplied string persisted into project.json and
@@ -13133,8 +13148,9 @@ export function Canvas() {
         }
         // Apply one consent decision: register (create/adopt/idempotent hit) without activating,
         // persist, remember the (caller, project) pair for dialog dedupe — authorization stays
-        // main-side — and reply with the id the caller can feed `--project`.
-        const opFinish = (adoptProbed?: Project) => {
+        // main-side — and reply with the id the caller can feed `--project`. Returns the reply's
+        // sentence, so a WAIVED registration can announce exactly what it did.
+        const opFinish = (adoptProbed?: Project): string => {
           const r = useProjects.getState().registerProject({
             resolvedCwd,
             name: args.name,
@@ -13143,7 +13159,9 @@ export function Canvas() {
           })
           recordAttachConsent(sourceNodeId, r.project.id)
           void writeDisk()
-          reply({ ok: true, ...openProjectReply(r.project, r.created, r.adopted) })
+          const done = openProjectReply(r.project, r.created, r.adopted)
+          reply({ ok: true, ...done })
+          return done.message
         }
         // The probe only matters when no project owns this cwd yet (adopt-vs-create copy) — an
         // idempotent hit must not pay a folder read.
@@ -13165,27 +13183,44 @@ export function Canvas() {
           opFinish()
           return
         }
+        // What an answer adopts, decided once so the waived path and the confirmed path register
+        // the SAME thing.
+        const opAdopt =
+          opPlan.confirmKind === 'adopt' && opProbed ? { ...opProbed, closed: false } : undefined
+        // Has the user said "don't ask again" for the agents in the caller's project (or for this
+        // app run, or permanently in Settings)? The SAME shared decision `write`/`close` read. It
+        // skips only the human — main has already gated the caller (verified, local, cwd, grant
+        // cap) and still records the grant from this reply.
+        const opWaiver = controlConfirmDecision(verb, ctlProject?.id)
+        if (opWaiver.via) {
+          // A waived registration still announces itself, naming the waiver that let it through.
+          const opDone = opFinish(opAdopt)
+          setNotice({
+            kind: 'info',
+            text: waivedNotice(`Agent "${opTitle}" ${opDone}`, opWaiver.via, ctlProject?.name)
+          })
+          return
+        }
         // One confirm dialog at a time — the write/close rule, read off the shared set.
         if (isDestructiveVerb(verb) && confirmBusy()) {
           reply({ ok: false, error: 'a confirmation is already pending — try again' })
           return
         }
+        setControlWaiveChoice('ask')
         setConfirm({
           message: opPlan.message,
           confirmLabel: opPlan.confirmLabel,
           requestedBy: opTitle,
-          // NO `waiveVerb`. `open-project` is outside `CONFIRM_WAIVABLE_VERBS` and must stay
-          // outside it: it widens the app's blast radius (a new directory registered as a project,
-          // plus a grant the caller then feeds to `--project`) rather than acting inside it, and it
-          // cannot produce the dialog storm the waiver exists to end — `recordAttachConsent`
-          // already dedupes it per (caller, project). The table refuses it too; this is the belt.
+          // Waivable since the 2026-10 report — see `CONFIRM_WAIVABLE_VERBS` for why the old
+          // "already deduped" reason did not hold (the dedupe is per caller NODE, per app run).
+          waiveVerb: isWaivableVerb(verb) ? verb : undefined,
+          waiveProjectId: ctlProject?.id,
+          waiveProjectName: ctlProject?.name,
           expiresAt: confirmExpiresAt(Date.now()),
           onExpire: () => reply({ ok: false, error: 'expired before the user answered' }),
           onConfirm: () => {
             setConfirm(null)
-            opFinish(
-              opPlan.confirmKind === 'adopt' && opProbed ? { ...opProbed, closed: false } : undefined
-            )
+            opFinish(opAdopt)
           },
           onCancel: () => reply({ ok: false, error: 'denied by user' })
         })
@@ -15815,12 +15850,8 @@ export function Canvas() {
               reply({ ok: false, error: 'a confirmation is already pending — try again' })
               return
             }
-            // Destructive → confirm. Replies on confirm AND cancel. The checkbox starts UNTICKED
-            // and its scope starts at the bounded app-run default, so a dialog that appears under
-            // the user's hands buys exactly what it always bought unless they tick and pick the
-            // project scope themselves (T204 added that scope; it is not the default).
-            setControlWaive(false)
-            setControlWaiveScope('session')
+            // Destructive → confirm. Replies on confirm AND cancel.
+            setControlWaiveChoice('ask')
             setConfirm({
               message: `Agent "${srcTitle}" wants to send to ${args.node}:\n\n${args.text ?? ''}`,
               confirmLabel: 'Send',
@@ -15961,10 +15992,8 @@ export function Canvas() {
               reply({ ok: false, error: 'a confirmation is already pending — try again' })
               return
             }
-            // Destructive → confirm. Replies on confirm AND cancel. Same reset as the write case:
-            // nothing (tick or scope) carries over from the previous dialog.
-            setControlWaive(false)
-            setControlWaiveScope('session')
+            // Destructive → confirm. Replies on confirm AND cancel.
+            setControlWaiveChoice('ask')
             setConfirm({
               message: closeMessage,
               requestedBy: srcTitle,
@@ -19821,46 +19850,38 @@ export function Canvas() {
           // The user did not open this one — an agent did. It appeared under their hands, so it is
           // answered by a click, never by a keystroke aimed somewhere else (components/confirm-key).
           enterConfirms={!confirm.requestedBy}
-          // "Don't ask again" — offered ONLY for a verb the shared table admits, and offered with
-          // a SCOPE, because the app-run-only waiver this used to grant is not what a user who
-          // ticks that box means: it lasts until they quit, and the only durable answer lived in
-          // Settings as a MACHINE-WIDE switch, so the realistic choices were "be asked forever" or
-          // "turn it off everywhere". The narrower durable grant is per project, which is the most
-          // a dialog that appeared under the user's hands may hand out — the machine-wide `always`
-          // stays Settings-only for exactly the reason it always did. Default stays `session`, so
-          // a user who ticks and clicks through gets the old, bounded behaviour.
-          // Built here rather than stored on `ConfirmState` because the checkbox is live state and
+          // "Don't ask again" — offered ONLY for a verb the shared table admits, as three radios
+          // that are visible from the start (@shared/control-confirm `waiveChoices`): ask next time
+          // (selected, and not a waiver), never again for the agents in the CALLER's project
+          // (durable and machine-local, through `waiveControlConfirmForProject`), or never again in
+          // any project until nodeterm quits. It used to be a checkbox whose reaches appeared only
+          // once ticked, defaulting to the app-run one — so the per-project answer read as
+          // missing. The machine-wide `always` stays Settings-only: a dialog that appeared under
+          // the user's hands must not switch a gate off everywhere, permanently, on one stray click.
+          // Built here rather than stored on `ConfirmState` because the choice is live state and
           // that object is a snapshot.
-          option={
+          choice={
             confirm.waiveVerb
               ? {
                   label: "Don't ask again",
-                  checked: controlWaive,
-                  onChange: setControlWaive,
-                  scopes: [
-                    { value: 'session', label: 'While nodeterm is running' },
-                    {
-                      value: 'project',
-                      // The project NAME, not "this project": the call may well be acting on a
-                      // canvas the user is not looking at, so "this" would point at the wrong one.
-                      label: confirm.waiveProjectName
-                        ? `Always in "${confirm.waiveProjectName}"`
-                        : 'Always in this project'
-                    }
-                  ],
-                  scope: controlWaiveScope,
-                  onScopeChange: (v) => setControlWaiveScope(v === 'project' ? 'project' : 'session')
+                  options: waiveChoices({
+                    id: confirm.waiveProjectId,
+                    name: confirm.waiveProjectName
+                  }),
+                  value: controlWaiveChoice,
+                  onChange: (v) =>
+                    setControlWaiveChoice(v === 'project' || v === 'session' ? v : 'ask')
                 }
               : undefined
           }
           onConfirm={() => {
-            // Granted on CONFIRM only. A denial must never widen anything, whatever is ticked.
-            if (confirm.waiveVerb && controlWaive) {
+            // Granted on CONFIRM only. A denial must never widen anything, whatever is selected.
+            if (confirm.waiveVerb && controlWaiveChoice !== 'ask') {
               // The per-project grant can FAIL (no project owns this call), and it must not fail
-              // silently into nothing: fall back to the app-run waiver the user would have got
-              // before, so a tick always buys what the box promised.
+              // silently into nothing: fall back to the app-run waiver, so a choice always buys at
+              // least the bounded thing it asked for.
               const scoped =
-                controlWaiveScope === 'project' &&
+                controlWaiveChoice === 'project' &&
                 waiveControlConfirmForProject(confirm.waiveVerb, confirm.waiveProjectId)
               if (!scoped) useControlConfirm.getState().waiveForSession(confirm.waiveVerb)
               // T204 audit: a PERSISTED human grant is recorded durably, so "auto-approved" and
