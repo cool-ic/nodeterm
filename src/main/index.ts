@@ -80,6 +80,7 @@ import {
   messagingEnabledVia,
   onMessagingAgentEvent,
   setDeliveryQueue,
+  unflushedSenderNotice,
   type AgentMessagingDeps
 } from '../core/agents/agent-messaging'
 import { registerStationNoticeIpc, StationNoticeMonitor } from '../core/agents/station-notice'
@@ -2062,6 +2063,13 @@ app.whenReady().then(async () => {
     openedByOf: (id) => stationRecipient(workspaceStore.persistedCanvases(), id)?.recipientNodeId,
     // A node opened off screen without `--run-now` has no pane yet: queued, not refused.
     heldLaunch: (projectId, id) => workspaceStore.heldLaunch(projectId, id),
+    // T234: the app's own quit window, told to the delivery layer so a pane write that fails inside
+    // it is NOT read as "the target died". The tmux sessions outlive a quit, and the node's unread
+    // state is restored at the next launch — but for as long as this process is tearing down, its
+    // panes are unreachable FOR OUR REASON, and the field incident is exactly that shape: a queued
+    // dispatch refused `targetGone` at 01:09:39, in the same minute as an app restart, and dropped.
+    // `quitting` goes true at the first before-quit and stays true (see its declaration).
+    shellTearingDown: () => quitting,
     customAgents: () => settingsStore.get().customAgents,
     appendBoardLog: (projectId, entry) => appendBoardLogVia(boardLogRouter, projectId, entry)
   }
@@ -2208,8 +2216,19 @@ app.whenReady().then(async () => {
   })
   stationNotices.start()
   // A queued notice's final outcome (flushed or expired) comes back here, so its chip never says
-  // "queued" about a message that has since landed or lapsed.
-  messagingDeps.onQueuedResult = (req, outcome) => stationNotices.onQueuedResult(req, outcome)
+  // "queued" about a message that has since landed or lapsed. T234 adds the SECOND consumer: an
+  // ordinary `send`/`reply` whose queue entry ends without reaching the pane is told to its SENDER
+  // in band (the same reversed-ownership route the expiry dead letter uses below) — until now that
+  // ending reached only the sender's board-log line, which is how a dropped dispatch went unnoticed
+  // for half an hour in the field.
+  messagingDeps.onQueuedResult = (req, outcome) => {
+    stationNotices.onQueuedResult(req, outcome)
+    const notice = unflushedSenderNotice(req, outcome, (id) =>
+      workspaceStore.persistedCanvases().find((c) => c.nodes.some((n) => n.id === id))?.id
+    )
+    if (notice)
+      void deliverFromControl({ verb: STATION_NOTICE_VERB, ...notice }, messagingDeps).catch(() => {})
+  }
   registerStationNoticeIpc(corePlatform, () => stationNotices)
   // Station task outcomes (`report-outcome`, src/core/station-outcome-store.ts): what each station
   // said about its OWN task, read by the renderer's `--after-success` gate. Held here, in main, so a

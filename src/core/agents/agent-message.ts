@@ -332,6 +332,23 @@ export async function awaitReceipt(
   return watchForReceipt(nodeId, subscribe).wait(deadlineMs)
 }
 
+/** What a failed write is read as, once the shell has been asked (see `writeEnvelope`). */
+export type WriteVerdict =
+  /** Confirmed absent (the host's own strict answer). */
+  | 'gone'
+  /** Could not be confirmed: the shell is going away, or the probe could not answer. */
+  | 'held'
+  /** The session is still there and the write still will not go. */
+  | 'live'
+
+export type EnvelopeWrite =
+  | { wrote: true; attempts: number }
+  | { wrote: false; attempts: number; verdict: WriteVerdict; reason: WriteFailureReason }
+
+export const WRITE_RETRY_DELAYS_MS = [2000, 5000, 15000] as const
+
+export const MAX_WRITE_ATTEMPTS = WRITE_RETRY_DELAYS_MS.length + 1
+
 /**
  * T234 — the pane write, and the retry a failed write has always deserved.
  *
@@ -361,22 +378,6 @@ export async function awaitReceipt(
  * the pane is demonstrably not accepting writes, and the alternative — two writers racing the same
  * pane — is what the lock exists to prevent.
  */
-export type WriteVerdict =
-  /** Confirmed absent (the host's own strict answer). */
-  | 'gone'
-  /** Could not be confirmed: the shell is going away, or the probe could not answer. */
-  | 'held'
-  /** The session is still there and the write still will not go. */
-  | 'live'
-
-export type EnvelopeWrite =
-  | { wrote: true; attempts: number }
-  | { wrote: false; attempts: number; verdict: WriteVerdict; reason: WriteFailureReason }
-
-export const WRITE_RETRY_DELAYS_MS = [2000, 5000, 15000] as const
-
-export const MAX_WRITE_ATTEMPTS = WRITE_RETRY_DELAYS_MS.length + 1
-
 export async function writeEnvelope(
   deps: Pick<DeliveryDeps, 'sendEnvelope' | 'liveness' | 'shellTearingDown' | 'wait'>,
   nodeId: string,

@@ -33,10 +33,12 @@ describe('both shells feed the station-failure monitor', () => {
     // …and the pane leg is the messaging service with every gate, not a raw write.
     expect(src).toContain('deliverStationNotice(notice, messagingDeps)')
     // The question row's one fact, and the queued notice's final outcome — both optional-looking
-    // hookups a shell can drop and still compile.
+    // hookups a shell can drop and still compile. The outcome hook has TWO consumers since T234
+    // (the monitor's chip, and the in-band notice an ordinary send gets when its queue entry ends
+    // without the bytes going out), so it is a block now — see agent-messaging-t234-wiring.test.ts.
     expect(src).toContain('pendingQuestionOf: (id) => mirrorEntry(id)?.pendingQuestion?.toolUseId')
-    expect(src).toContain(
-      'messagingDeps.onQueuedResult = (req, outcome) => stationNotices.onQueuedResult(req, outcome)'
+    expect(arrowBody(src, 'messagingDeps.onQueuedResult = (req, outcome) => {')).toContain(
+      'stationNotices.onQueuedResult(req, outcome)'
     )
   })
 
