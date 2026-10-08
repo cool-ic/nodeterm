@@ -417,6 +417,21 @@ export interface AgentStatusStore {
   /** Record a /loop iteration (count++ and append its summary). No-op if not looping. */
   bumpLoop(id: string, message?: string): void
   remove(id: string): void
+  /**
+   * Drop every entry whose node id no longer exists in ANY project canvas — the self-heal for the
+   * unread entries a deleted node leaves behind (T224). `known` is the union of what main's
+   * workspace index holds and what this renderer's own canvas store holds (the not-yet-persisted
+   * window); `undefined` AND an EMPTY set both mean "the project list could not be read" and touch
+   * NOTHING — an empty answer is a failed read far more often than an empty workspace, and pruning
+   * on it would clear the whole table, dropping unread flags for live nodes.
+   *
+   * Deliberately not time-based: unread is not stale-by-age (a closed project's node must keep
+   * counting — its session may still be running), so only PROVEN absence prunes.
+   *
+   * Returns the pruned ids, in `byId` order ([] when nothing was removed), because this drops
+   * PERSISTED state and the caller owes a log trace — never a silent rewrite.
+   */
+  pruneMissingNodes(known: Iterable<string> | undefined): string[]
 }
 
 /** The persisted "last seen" clock (see `AgentNodeStatus.lastSeen`). */
@@ -1197,7 +1212,29 @@ export function createAgentStatusSession(
         // Now, not on the debounce: the deleted node's clock must not outlive it on disk.
         if (s.byId[id].lastSeen) saveClocks(byId)
         return { byId }
+      }),
+
+    pruneMissingNodes: (known) => {
+      // An empty answer is a failed read, not an empty workspace (see the interface comment).
+      const keeper = known === undefined ? undefined : new Set(known)
+      if (!keeper || keeper.size === 0) return []
+      let removed: string[] = []
+      set((s) => {
+        removed = Object.keys(s.byId).filter((id) => !keeper.has(id))
+        if (!removed.length) return s
+        const byId = { ...s.byId }
+        let hadClock = false
+        for (const id of removed) {
+          if (byId[id].lastSeen) hadClock = true
+          delete byId[id]
+        }
+        save(byId)
+        // Same rule as `remove`: a pruned node's clock must not outlive it on disk.
+        if (hadClock) saveClocks(byId)
+        return { byId }
       })
+      return removed
+    }
   }))
 
   function inferInterruptAfterSettle(id: string, settleMs = INTERRUPT_SETTLE_MS): void {
