@@ -348,12 +348,16 @@ function ProviderBlock({ u, mode, hostKey }: { u: ProviderUsage; mode: 'used' | 
  * e.g. "93% 5h · 39% wk · 13% Fable" — the bar tracks whichever limit is closest to biting.
  */
 export function UsageIndicator({
+  rail = false,
   overBoard = false,
   onSetDefaultAccount,
   countAccountSessions,
   onMoveSessions,
   accountMove = null
 }: {
+  /** T226: the canvas rail badge — a 42px circle face showing only the percentage; the full
+   *  pill (and the refresh control) stays in the DOM and CSS reveals it on hover/focus. */
+  rail?: boolean
   overBoard?: boolean
   /** Writes `project.defaultAccountId` + persists (Canvas's own TabBar handler). When absent the
    *  popover is a pure readout, exactly as before issue #142. */
@@ -881,13 +885,20 @@ export function UsageIndicator({
       {/* The SSH pill is visually identical to the local one — same labels, same bar — so the
           title is what answers "whose numbers are these?" without opening the popover. */}
       <button
-        className="usage-pill"
+        className={`usage-pill${rail ? ' usage-pill--rail' : ''}`}
         // Hover already opens it; the click stays for the pointer-less paths (keyboard focus,
         // touch) and as the way to dismiss it without moving the pointer away.
         onClick={() => setOpen((v) => !v)}
         onFocus={openNow}
         title={scope.kind === 'ssh' ? `Agent usage on ${scope.hostKey}` : 'Agent usage'}
       >
+        {/* T226: the circle face. CSS hides it — and reveals the icon/summary — when the badge is
+            hovered or its popover is open, so the rail never shows a pill wider than a button. */}
+        {rail && (
+          <span className="usage-pill__face">
+            {primary ? `${percentNumber(primary.usedPercent, percentMode)}%` : '—'}
+          </span>
+        )}
         <span className="usage-pill__icon">✦</span>
         <span className="usage-pill__summary">{pillBody}</span>
       </button>

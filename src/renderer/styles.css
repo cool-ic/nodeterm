@@ -849,14 +849,13 @@ body,
 }
 
 .dock {
-  /* T223: the dock lives in the right rail now (`.canvas-rail`), stacked above the ambient
-     pills. The card look (background, blur, border) moved to the rail body — the whole rail is
-     ONE fit-view obstacle — so the dock itself is just the button grid: two columns keep the
-     12 controls short enough to clear the minimap on short panes. */
+  /* T226: one single-column track per edge. The card look (background, blur, border) belongs to
+     the rail body — the track is exactly as wide as its buttons — so the dock itself is just the
+     button column: 42px cells, 6px rows. */
   position: static;
   display: grid;
-  grid-template-columns: 38px 38px;
-  gap: 4px;
+  grid-template-columns: 42px;
+  gap: 6px;
   justify-content: center;
   align-items: center;
 }
@@ -866,8 +865,8 @@ body,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 42px;
+  height: 42px;
   background: transparent;
   color: var(--text);
   border: none;
@@ -904,20 +903,17 @@ body,
 }
 
 .dock-sep {
-  /* Horizontal in the vertical rail, and spanning both grid columns. */
-  grid-column: 1 / -1;
+  /* T226: group separators are hairlines with 8px of air on each side, centered in the track. */
   justify-self: center;
-  width: 22px;
+  width: 28px;
   height: 1px;
   background: var(--border);
-  margin: 4px 0;
+  margin: 8px 0;
 }
 
 .dock-zoom-wrap {
   position: relative;
   display: inline-flex;
-  /* The % readout is wider than a 38px grid cell — it spans the rail. */
-  grid-column: 1 / -1;
   justify-content: center;
 }
 
@@ -8251,42 +8247,135 @@ button.group-node__setup:disabled {
    The left offset clears the controls column, which shares this corner: --controls-w plus the 12px
    the other chrome already uses between two adjacent clusters (see .resume-card). */
 .canvas-rail {
-  /* T223: the right rail — the dock and the ambient pills stacked at the right edge, so the
-     fit-view free rectangle reaches the pane bottom (bottom chrome inset ~88px → 12px). The
-     whole body carries `data-canvas-chrome`, making the rail ONE obstacle rect for the solver.
-     The minimap cannot join (it needs React Flow's store context), so it stays its own obstacle
-     at the bottom-right anchor. */
+  /* T226: TWO single-column tracks, one per edge. Left = create + history, right = view + status.
+     Each body is exactly as wide as its 42px buttons plus the card's chrome (56px total), so a
+     badge can never make a card wider than a button. Each body carries `data-canvas-chrome`, so
+     each track is its OWN obstacle rect for the solver. The minimap cannot join (it needs React
+     Flow's store context) and keeps its bottom-right corner. */
   position: absolute;
   top: var(--float-gap);
-  right: var(--float-gap);
-  z-index: 20; /* the dock's old z — above the sidebar (12), below the banners (27) */
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
+  z-index: 20; /* the dock's old z — above the sidebar (12), below the banners (27) */
+}
+
+.canvas-rail--left {
+  left: var(--float-gap);
+}
+
+/* The sessions sidebar owns the left edge while it is open; the track steps right of it. */
+.canvas-root:has(.sessions-sidebar) .canvas-rail--left {
+  left: calc(var(--float-gap) + 300px + var(--float-gap));
+}
+
+.canvas-rail--right {
+  right: var(--float-gap);
 }
 
 .canvas-rail__body {
+  /* 42px button + 2×6px padding + 2×1px border = 56px. The card can never exceed the buttons. */
+  box-sizing: border-box;
+  width: 56px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 7px;
+  gap: 6px;
+  padding: 7px 6px;
   background: rgba(var(--menu-rgb), 0.92);
   backdrop-filter: blur(10px);
   border: 1px solid var(--border);
   border-radius: 16px;
   box-shadow: 0 10px 32px rgba(0, 0, 0, calc(0.5 * var(--shadow-k)));
-  max-height: calc(100% - var(--float-gap) - 170px); /* clear the minimap; scroll on short panes */
+  overflow: visible;
+}
+
+/* The right track stops above the minimap; the left one clears it by itself. Scroll on short
+   panes rather than overlap. */
+.canvas-rail--right .canvas-rail__body {
+  max-height: calc(100% - var(--float-gap) - 170px);
   overflow-y: auto;
   scrollbar-width: none;
 }
 
-.canvas-rail__pills {
+/* T226: the status badges are 42px circles that grow LEFTWARD on hover/focus into the full pill
+   (usage brings its refresh control back with it), so the track stays button-wide at rest. */
+.canvas-rail__badges {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-end;
+  gap: 6px;
+  width: 42px;
+}
+
+.canvas-rail__badges .usage-indicator,
+.canvas-rail__badges .sysres-indicator {
+  width: 42px;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+.canvas-rail__badges .usage-pill,
+.canvas-rail__badges .sysres-pill {
+  box-sizing: border-box;
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  padding: 0;
+  gap: 0;
+  border-radius: 21px;
+  justify-content: center;
+  transition:
+    width 140ms ease,
+    padding 140ms ease,
+    gap 140ms ease;
+}
+
+/* At rest the usage badge is the percentage alone, and the refresh control is out of the way. */
+.canvas-rail__badges .usage-pill__face {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.canvas-rail__badges .usage-pill > .usage-pill__icon,
+.canvas-rail__badges .usage-pill > .usage-pill__summary,
+.canvas-rail__badges .usage-refresh {
+  display: none;
+}
+
+/* Expanded: the full pill and the refresh control. `:focus-within` covers keyboard and the
+   click-open path (the popover lives inside the indicator, so it keeps the pill open too). */
+.canvas-rail__badges .usage-indicator:hover .usage-pill,
+.canvas-rail__badges .usage-indicator:focus-within .usage-pill,
+.canvas-rail__badges .usage-indicator:has(.usage-popover) .usage-pill,
+.canvas-rail__badges .sysres-indicator:hover .sysres-pill,
+.canvas-rail__badges .sysres-indicator:focus-within .sysres-pill,
+.canvas-rail__badges .sysres-indicator:has(.sessmem-panel) .sysres-pill {
+  width: auto;
+  min-width: 42px;
+  max-width: none;
+  padding: 0 10px;
+  gap: 6px;
+}
+
+.canvas-rail__badges .usage-indicator:hover .usage-pill__face,
+.canvas-rail__badges .usage-indicator:focus-within .usage-pill__face,
+.canvas-rail__badges .usage-indicator:has(.usage-popover) .usage-pill__face {
+  display: none;
+}
+
+.canvas-rail__badges .usage-indicator:hover .usage-pill > .usage-pill__icon,
+.canvas-rail__badges .usage-indicator:hover .usage-pill > .usage-pill__summary,
+.canvas-rail__badges .usage-indicator:focus-within .usage-pill > .usage-pill__icon,
+.canvas-rail__badges .usage-indicator:focus-within .usage-pill > .usage-pill__summary,
+.canvas-rail__badges .usage-indicator:has(.usage-popover) .usage-pill > .usage-pill__icon,
+.canvas-rail__badges .usage-indicator:has(.usage-popover) .usage-pill > .usage-pill__summary,
+.canvas-rail__badges .usage-indicator:hover .usage-refresh,
+.canvas-rail__badges .usage-indicator:focus-within .usage-refresh,
+.canvas-rail__badges .usage-indicator:has(.usage-popover) .usage-refresh {
+  display: inline-flex;
 }
 
 .canvas-rail__toggle {
@@ -8307,18 +8396,32 @@ button.group-node__setup:disabled {
   color: var(--text);
 }
 
-/* Collapsed: rail contents, the minimap and the top-right cluster all hide, and the toggle
-   becomes a slim tab flush with the window edge — 14px wide, inside fit-view's 12px edge inset
-   and carrying no chrome opt-in, so a collapsed canvas measures ZERO obstacles. */
+/* Collapsed: both tracks' contents, the minimap, the top-right cluster and the flow controls all
+   hide, and each edge keeps a slim tab flush with the window edge — 14px wide, inside fit-view's
+   12px edge inset and carrying no chrome opt-in, so a collapsed canvas measures ZERO obstacles. */
 .canvas-root[data-rail-collapsed] .canvas-rail {
   top: 50%;
-  right: 0;
   transform: translateY(-50%);
+}
+
+.canvas-root[data-rail-collapsed] .canvas-rail--left {
+  left: 0;
+}
+
+.canvas-root[data-rail-collapsed] .canvas-rail--right {
+  right: 0;
 }
 
 .canvas-root[data-rail-collapsed] .canvas-rail__toggle {
   width: 14px;
   height: 56px;
+}
+
+.canvas-root[data-rail-collapsed] .canvas-rail--left .canvas-rail__toggle {
+  border-radius: 0 8px 8px 0;
+}
+
+.canvas-root[data-rail-collapsed] .canvas-rail--right .canvas-rail__toggle {
   border-radius: 8px 0 0 8px;
 }
 

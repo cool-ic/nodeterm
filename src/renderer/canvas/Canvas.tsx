@@ -19322,19 +19322,18 @@ export function Canvas() {
         </ReactFlow>
         </SessionProvider>
 
-        {/* T223: the right rail — the dock and the ambient pills leave the bottom band for the
-            right edge, so the fit-view free rectangle reaches the pane bottom (bottom chrome
-            inset ~88px → 12px). MUST stay OUTSIDE <ReactFlow>, for the same stacking-context
-            reason as before: the library's wrapper carries inline `position: relative; z-index: 0`
-            (one stacking context painted at 0), and the pills' popovers must rise above the
-            sessions sidebar (z 12). Neither the dock nor the pills uses React Flow hooks.
-            `.canvas-rail__body` carries `data-canvas-chrome`, so the whole rail is ONE obstacle
-            rect for the solver. The minimap cannot join — it needs React Flow's store context —
-            and stays its own obstacle at the bottom-right anchor.
-            Collapse (per-machine, `lib/railCollapse`, default expanded) hides the rail, the
-            minimap and the top-right cluster: the toggle tab is 14px wide, flush with the edge
-            and carrying no chrome opt-in, so a collapsed canvas measures ZERO obstacles. */}
-        <div className="canvas-rail">
+        {/* T226: TWO single-column tracks, one per edge. Left = create + history, right = view +
+            status; each track's card is 56px wide (42px buttons + 2×7px padding), and the status
+            badges are 42px circles so nothing is ever wider than a button. MUST stay OUTSIDE
+            <ReactFlow> (the library's wrapper is one z-0 stacking context; the pills' popovers must
+            rise above the sessions sidebar). Each body carries `data-canvas-chrome`, so each track
+            is its OWN obstacle rect for the solver. The minimap cannot join (it needs React Flow's
+            store context) and keeps its bottom-right corner.
+            Collapse (per-machine, `lib/railCollapse`, default expanded) hides both tracks with one
+            switch: each edge keeps a ≤14px tab, flush and carrying no chrome opt-in, so a collapsed
+            canvas measures ZERO obstacles. The left track steps right when the sessions sidebar is
+            open (CSS `:has(.sessions-sidebar)`). */}
+        <div className="canvas-rail canvas-rail--left">
           <button
             type="button"
             className="canvas-rail__toggle nodrag nopan"
@@ -19345,10 +19344,11 @@ export function Canvas() {
               writeRailCollapsed(!railCollapsed)
             }}
           >
-            {railCollapsed ? <IconChevronLeft /> : <IconChevronRight />}
+            {railCollapsed ? <IconChevronRight /> : <IconChevronLeft />}
           </button>
           <div className="canvas-rail__body" data-canvas-chrome>
             <Dock
+              group="create"
               dirty={dirty}
               zoomPct={zoomPct}
               canUndo={pastRef.current.length > 0}
@@ -19400,11 +19400,79 @@ export function Canvas() {
               onDictate={toggleDictation}
               dictateActive={dictationOpen}
             />
+          </div>
+        </div>
 
-            {/* `travelToNode`, not `focusNodeById`: the panel resolves sessions in CLOSED projects
-                too (their tmux sessions keep running), and reaching one means reopening its tab
-                first — the same path a notification click and a peer jump take. */}
-            <div className="canvas-rail__pills">
+        <div className="canvas-rail canvas-rail--right">
+          <button
+            type="button"
+            className="canvas-rail__toggle nodrag nopan"
+            aria-label={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
+            title={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
+            onClick={() => {
+              setRailCollapsed(!railCollapsed)
+              writeRailCollapsed(!railCollapsed)
+            }}
+          >
+            {railCollapsed ? <IconChevronLeft /> : <IconChevronRight />}
+          </button>
+          <div className="canvas-rail__body" data-canvas-chrome>
+            <Dock
+              group="view"
+              dirty={dirty}
+              zoomPct={zoomPct}
+              canUndo={pastRef.current.length > 0}
+              canRedo={futureRef.current.length > 0}
+              canGoBack={
+                !!stepBreadcrumb(navRef.current, 'back', (id) =>
+                  nodesRef.current.some((n) => n.id === id)
+                )
+              }
+              canGoForward={
+                !!stepBreadcrumb(navRef.current, 'forward', (id) =>
+                  nodesRef.current.some((n) => n.id === id)
+                )
+              }
+              onUndo={undo}
+              onRedo={redo}
+              onGoBack={goBack}
+              onGoForward={goForward}
+              onAddTerminal={addTerminal}
+              onAddSticky={addSticky}
+              onSpawnTeam={() => setSpawnTeamDialog({})}
+              onAddDino={addDino}
+              onAddTrigger={addTrigger}
+              onAddFiles={() => addFiles()}
+              onAddRun={() => void addRun()}
+              onAddAgent={(aid, accountId) => addAgentNode(aid, undefined, undefined, accountId)}
+              onOpenFile={() => void openFileDialog()}
+              onAddRemote={() => openRemotePicker({ x: window.innerWidth / 2, y: window.innerHeight / 2 })}
+              onConnectRemote={() => void connectRemote()}
+              onAddBrowser={() => addBrowser()}
+              onAddWeb={() => void addWebView()}
+              onNewFile={() => void newProjectFile()}
+              onAddWorktree={() => openWorktreeDialog(null)}
+              onSave={persist}
+              onFitView={fitAll}
+              onSaveLayout={() => void saveCanvasLayout()}
+              onRestoreLayout={restoreCanvasLayout}
+              onUpdateLayout={updateCanvasLayout}
+              onRenameLayout={(layout) => void renameCanvasLayout(layout)}
+              onDeleteLayout={deleteCanvasLayout}
+              onZoomIn={() => zoomIn({ duration: ZOOM_STEP_DURATION_MS })}
+              onZoomOut={() => zoomOut({ duration: ZOOM_STEP_DURATION_MS })}
+              onZoomTo={zoomToPct}
+              onDictate={toggleDictation}
+              dictateActive={dictationOpen}
+            />
+
+            {/* T226: the ambient badges, squeezed to 42px circles that expand LEFTWARD on hover or
+                focus into the full pill (usage brings its refresh control with it), so the track
+                stays exactly as wide as its buttons. */}
+            <div className="canvas-rail__badges">
+              {/* `travelToNode`, not `focusNodeById`: the panel resolves sessions in CLOSED
+                  projects too (their tmux sessions keep running), and reaching one means reopening
+                  its tab first — the same path a notification click and a peer jump take. */}
               <SystemResourcePill
                 overBoard={kanbanOpen}
                 onGoToNode={travelToNode}
@@ -19417,6 +19485,7 @@ export function Canvas() {
                   the popover row is a second, better-placed entrance to the same action (issue
                   #142). */}
               <UsageIndicator
+                rail
                 overBoard={kanbanOpen}
                 onSetDefaultAccount={setProjectDefaultAccount}
                 countAccountSessions={countAccountSessions}
@@ -19426,7 +19495,6 @@ export function Canvas() {
             </div>
           </div>
         </div>
-
         {/* Canvas-mounted, deliberately NOT in the .top-banners column: this is about THIS canvas,
             not an app-wide message. Opening a row records a new breadcrumb through goToNode — which
             is correct, it is a deliberate landing like any other. */}

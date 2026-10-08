@@ -16,7 +16,10 @@ import { Tooltip } from './Tooltip'
 
 const isMac = /Mac/i.test(navigator.platform || navigator.userAgent)
 
+/** T226: which single-column track this dock renders — the left one (create + history) or the
+ *  right one (view + status). Each instance owns only its own menus' open state. */
 interface DockProps {
+  group: 'create' | 'view'
   dirty: boolean
   zoomPct: number
   canUndo: boolean
@@ -70,6 +73,7 @@ interface DockProps {
  * All canvas actions live here so the canvas itself stays clean.
  */
 export function Dock({
+  group,
   dirty,
   zoomPct,
   canUndo,
@@ -346,6 +350,8 @@ export function Dock({
           </div>
         )}
 
+        {group === 'create' && (
+          <>
         <Tooltip label="Add node" placement="left">
           <button
             className={`dock-btn dock-add${menuOpen ? ' active' : ''}`}
@@ -372,6 +378,9 @@ export function Dock({
             <RedoIcon />
           </button>
         </Tooltip>
+
+        <span className="dock-sep" />
+
         <Tooltip label={commandTooltip('Go back', 'canvas.goBack')} placement="left">
           <button className="dock-btn" aria-label="Go back" disabled={!canGoBack} onClick={onGoBack}>
             <ArrowLeftIcon />
@@ -396,11 +405,70 @@ export function Dock({
             <span className={`dock-dirty${dirty ? ' dirty' : ''}`} />
           </button>
         </Tooltip>
+          </>
+        )}
+
+        {/* T226: two single-column tracks. The LEFT one (create + history) ends at Save; the
+            RIGHT one (view + status) runs Fit → zoom → layouts → dictate, and the status badges
+            follow it in Canvas's rail body. */}
+        {group === 'view' && (
+          <>
         <Tooltip label="Fit view" placement="left">
           <button className="dock-btn" aria-label="Fit view" onClick={onFitView}>
             <FrameIcon />
           </button>
         </Tooltip>
+        <Tooltip label="Zoom out" placement="left">
+          <button className="dock-btn" aria-label="Zoom out" onClick={onZoomOut}>
+            <MinusIcon />
+          </button>
+        </Tooltip>
+        <div className="dock-zoom-wrap">
+          {zoomMenuOpen && (
+            <div className="dock-menu dock-zoom-menu">
+              {ZOOM_PRESETS.map((pct) => (
+                <button
+                  key={pct}
+                  className={pct === activePreset ? 'is-current' : undefined}
+                  onClick={pickZoom(() => onZoomTo(pct))}
+                >
+                  <span className="dock-menu__check">{pct === activePreset ? <CheckIcon /> : null}</span>
+                  <span>{pct}%</span>
+                  {pct === 100 && <span className="dock-menu__chord">{isMac ? '⌘0' : 'Ctrl+0'}</span>}
+                </button>
+              ))}
+              <span className="dock-menu__rule" />
+              <button onClick={pickZoom(onFitView)}>
+                <span className="dock-menu__check" />
+                <span>Zoom to fit</span>
+                <span className="dock-menu__chord">⇧1</span>
+              </button>
+            </div>
+          )}
+          <Tooltip label="Zoom presets" placement="left">
+            <button
+              className={`dock-zoom${zoomMenuOpen ? ' active' : ''}`}
+              aria-label="Zoom presets"
+              aria-haspopup="menu"
+              aria-expanded={zoomMenuOpen}
+              onClick={() => {
+                setMenuOpen(false)
+                setLayoutMenuOpen(false)
+                setZoomMenuOpen((v) => !v)
+              }}
+            >
+              {zoomPct}%
+            </button>
+          </Tooltip>
+        </div>
+        <Tooltip label="Zoom in" placement="left">
+          <button className="dock-btn" aria-label="Zoom in" onClick={onZoomIn}>
+            <PlusSmallIcon />
+          </button>
+        </Tooltip>
+
+        <span className="dock-sep" />
+
         {/* An arrangement is view state, not a node you add, so it sits in the view cluster rather
             than behind the "+". */}
         <div className="dock-layouts-wrap">
@@ -519,57 +587,9 @@ export function Dock({
             <MicIcon />
           </button>
         </Tooltip>
-
         <span className="dock-sep" />
-
-        <Tooltip label="Zoom out" placement="left">
-          <button className="dock-btn" aria-label="Zoom out" onClick={onZoomOut}>
-            <MinusIcon />
-          </button>
-        </Tooltip>
-        <div className="dock-zoom-wrap">
-          {zoomMenuOpen && (
-            <div className="dock-menu dock-zoom-menu">
-              {ZOOM_PRESETS.map((pct) => (
-                <button
-                  key={pct}
-                  className={pct === activePreset ? 'is-current' : undefined}
-                  onClick={pickZoom(() => onZoomTo(pct))}
-                >
-                  <span className="dock-menu__check">{pct === activePreset ? <CheckIcon /> : null}</span>
-                  <span>{pct}%</span>
-                  {pct === 100 && <span className="dock-menu__chord">{isMac ? '⌘0' : 'Ctrl+0'}</span>}
-                </button>
-              ))}
-              <span className="dock-menu__rule" />
-              <button onClick={pickZoom(onFitView)}>
-                <span className="dock-menu__check" />
-                <span>Zoom to fit</span>
-                <span className="dock-menu__chord">⇧1</span>
-              </button>
-            </div>
-          )}
-          <Tooltip label="Zoom presets" placement="left">
-            <button
-              className={`dock-zoom${zoomMenuOpen ? ' active' : ''}`}
-              aria-label="Zoom presets"
-              aria-haspopup="menu"
-              aria-expanded={zoomMenuOpen}
-              onClick={() => {
-                setMenuOpen(false)
-                setLayoutMenuOpen(false)
-                setZoomMenuOpen((v) => !v)
-              }}
-            >
-              {zoomPct}%
-            </button>
-          </Tooltip>
-        </div>
-        <Tooltip label="Zoom in" placement="left">
-          <button className="dock-btn" aria-label="Zoom in" onClick={onZoomIn}>
-            <PlusSmallIcon />
-          </button>
-        </Tooltip>
+          </>
+        )}
       </div>
     </>
   )
