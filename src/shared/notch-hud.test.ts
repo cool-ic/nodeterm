@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  NOTCH_ALIGNS,
+  NOTCH_ALIGN_DEFAULT,
   NOTCH_OFFSET_MAX,
   NOTCH_OFFSET_MIN,
   NOTCH_WIDTH_DEFAULT,
@@ -14,22 +16,32 @@ import {
 // there, and none may reach the window as anything but a value the layout can draw.
 
 describe('sanitizeNotchAlign', () => {
-  it('passes the three known sides through', () => {
-    expect(sanitizeNotchAlign('left')).toBe('left')
-    expect(sanitizeNotchAlign('center')).toBe('center')
-    expect(sanitizeNotchAlign('right')).toBe('right')
+  it('passes every side in the shared vocabulary through, the dock included', () => {
+    // T227: this used to be three assertions naming left/center/right. Derived from `NOTCH_ALIGNS`
+    // now, so a side added to the vocabulary is covered here without editing this list — the point
+    // of the change being that the SET is main's, not this test's.
+    for (const align of NOTCH_ALIGNS) expect(sanitizeNotchAlign(align)).toBe(align)
+    expect(sanitizeNotchAlign('bottom-right')).toBe('bottom-right')
   })
 
   it.each([
     ['a typo', 'centre'],
     ['a case mismatch', 'Left'],
     ['a future value', 'top'],
+    // The dock's own name with a case or spelling slip is still not a side: it must not half-work.
+    ['a mis-cased dock', 'Bottom-Right'],
+    ['a snake-cased dock', 'bottom_right'],
     ['a number', 1],
     ['null', null],
     ['undefined', undefined],
     ['an object with a matching key', { left: true }]
-  ])('falls back to center for %s', (_label, v) => {
-    expect(sanitizeNotchAlign(v)).toBe('center')
+  ])('falls back to the DEFAULT for %s', (_label, v) => {
+    // T227 changed what the default IS (upstream `center`, this fork `bottom-right`), and this
+    // assertion is deliberately written against the constant rather than the literal: the rule
+    // under test is "an unknown value means the default", not "an unknown value means center". A
+    // corrupt settings.json now lands the pill out of the way instead of in the notch strip.
+    expect(NOTCH_ALIGN_DEFAULT).toBe('bottom-right')
+    expect(sanitizeNotchAlign(v)).toBe(NOTCH_ALIGN_DEFAULT)
   })
 })
 

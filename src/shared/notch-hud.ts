@@ -9,10 +9,28 @@
 // trusts the TypeScript type: `sanitize*` re-validates at runtime and an unrecognised value falls
 // back to the default, never to a guess.
 
-/** Which side of the primary display the capsule sits on. `center` is the historical layout. */
-export type NotchAlign = 'left' | 'center' | 'right'
-export const NOTCH_ALIGNS: readonly NotchAlign[] = ['left', 'center', 'right']
-export const NOTCH_ALIGN_DEFAULT: NotchAlign = 'center'
+/**
+ * Which side of the primary display the capsule sits on.
+ *
+ * `left` / `center` / `right` are upstream's: a full-width strip at the very top of the display, the
+ * capsule fused to the notch (`center`) or a floating pill at that edge. `bottom-right` (T227) is a
+ * different SHAPE, not a fourth corner of the same strip — a standalone floating pill in the WORK
+ * AREA's bottom-right corner, no notch, never fused (see `hudGeometry` / `hudPlacement`).
+ */
+export type NotchAlign = 'left' | 'center' | 'right' | 'bottom-right'
+/** Every side, in the order the Settings control draws them. */
+export const NOTCH_ALIGNS: readonly NotchAlign[] = ['left', 'center', 'right', 'bottom-right']
+/**
+ * UPSTREAM'S DEFAULT IS `'center'` — the capsule fused to the physical notch, which is what a
+ * notched MacBook expects and what the docs describe.
+ *
+ * THIS FORK SHIPS `'bottom-right'`. That is a deliberate local product decision (employer,
+ * 2026-10-08): the pill sitting at the top of the screen was in the way, and the bottom-right corner
+ * is out of the way and next to where the pointer already lives. It is a DEFAULT only — every side
+ * above is still reachable in Settings, and an install whose settings.json already names a side
+ * keeps it (the settings merge only fills absent keys).
+ */
+export const NOTCH_ALIGN_DEFAULT: NotchAlign = 'bottom-right'
 
 /**
  * Assumed physical notch WIDTH (px). Electron exposes no `auxiliaryTopLeftArea`, so we assume a
@@ -43,8 +61,10 @@ export function sanitizeNotchWidth(px: unknown): number {
     : NOTCH_WIDTH_DEFAULT
 }
 
-/** An unknown alignment string (typo, a future value on an older build) draws the historical
- *  centered layout — never a pill on a side nobody asked for. */
+/** An unknown alignment string (typo, a future value on an older build) draws the DEFAULT layout —
+ *  never a pill on a side nobody asked for. Since T227 that default is `bottom-right` (see
+ *  `NOTCH_ALIGN_DEFAULT`), so a corrupt/absent value lands the pill out of the way rather than in
+ *  the middle of the notch strip. */
 export function sanitizeNotchAlign(v: unknown): NotchAlign {
   return typeof v === 'string' && (NOTCH_ALIGNS as readonly string[]).includes(v) ? (v as NotchAlign) : NOTCH_ALIGN_DEFAULT
 }

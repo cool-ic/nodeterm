@@ -27,7 +27,7 @@ import type { ProjectKanbanGitHub } from './github-issues'
 import type { KanbanPullAutoMove, KanbanPullLinks } from './kanban-pull-links'
 import type { BoardDispatch } from './board-dispatch'
 import type { CodexAccount } from './codex-account'
-import type { NotchAlign } from './notch-hud'
+import { NOTCH_ALIGN_DEFAULT, type NotchAlign } from './notch-hud'
 import type { ProjectIcon, ProjectIconPickResult } from './project-icon'
 import type { AlertSoundKind, AlertSoundSaveResult, CustomAlertSounds } from './alert-sound'
 import type { CanvasLayout, LayoutViewports } from './canvas-layout'
@@ -2265,13 +2265,18 @@ export interface Settings {
    *  `auxiliaryTopLeftArea`), so the capsule has to assume one — this is the knob that makes it sit
    *  flush on YOUR Mac. Bigger = the capsule sits further left. */
   notchWidth: number
-  /** Which side of the primary display the capsule sits on. `center` (default) hugs the physical
-   *  notch; `left` / `right` draw a floating pill at that edge. Re-validated at use
-   *  (`sanitizeNotchAlign`, shared/notch-hud.ts): an unknown string means `center`. */
+  /** Which side of the primary display the capsule sits on: `left` / `center` / `right` are the
+   *  upstream top-of-screen layouts (`center` hugs the physical notch, the other two are a pill at
+   *  that edge); `bottom-right` (T227) is a floating pill docked in the WORK AREA's bottom-right
+   *  corner, never fused. Re-validated at use (`sanitizeNotchAlign`, shared/notch-hud.ts); an
+   *  unknown string means the DEFAULT side — `bottom-right` in this fork, upstream's `center`. */
   notchAlign: NotchAlign
   /** Vertical offset of the capsule from its resting place, px, positive = DOWN. Up is bounded by
    *  the display's top edge (the fused notch capsule is already there, so it only moves down —
-   *  and moving it detaches it into a pill). Clamped to NOTCH_OFFSET_MIN/MAX; non-finite → 0. */
+   *  and moving it detaches it into a pill). Clamped to NOTCH_OFFSET_MIN/MAX; non-finite → 0.
+   *
+   *  T227: IGNORED by the `bottom-right` dock, whose resting place the layout pins to
+   *  `HUD_EDGE_MARGIN` from the work area's bottom edge (and whose window does not grow for it). */
   notchOffsetY: number
   /** Expand the notch panel on hover (after a short dwell). Off = click the capsule to expand. */
   notchHoverExpand: boolean
@@ -2472,7 +2477,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // macOS Notch HUD default ON (guarded to darwin at runtime; a no-op elsewhere).
   notchHud: true,
   notchWidth: 168,
-  notchAlign: 'center',
+  // T227: this fork defaults the capsule to the bottom-right dock (upstream: 'center'). A DEFAULT
+  // only — see NOTCH_ALIGN_DEFAULT, and the settings merge fills absent keys, so an install that
+  // already names a side keeps it.
+  notchAlign: NOTCH_ALIGN_DEFAULT,
   notchOffsetY: 0,
   notchHoverExpand: true,
   // model: '' = the explicit "no dictation" state (SPEECH_MODEL_NONE, issue #143). Dictation is
