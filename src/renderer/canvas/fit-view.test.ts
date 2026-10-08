@@ -214,3 +214,49 @@ describe('the right rail gives the fit rectangle its height back', () => {
     expect(largestFreeRect(PANE, [], FLEET_W, FLEET_H)).toEqual(PANE)
   })
 })
+
+// T226 (second revision, measured): the single 146px rail becomes TWO 56px single-column tracks
+// (left = create/history, right = view/status). The solver's WINNING rect for the fleet canvas
+// keeps its height (698) and its zoom (0.5272) — the fit does not regress, and a live fit lands
+// gapTop = gapBottom = 12px — but it is 37px NARROWER than the single-rail win: the left track is
+// a new full-height obstacle where the old layout had only the small flow-controls corner. This is
+// the honest number; the width gain the spec hoped for shows up as the 112px total track footprint
+// (vs 171px) only when content is NOT height-limited.
+describe('T226: two 56px tracks keep the fit height and zoom, at 37px of width', () => {
+  const PANE: FitRect = { left: 12, top: 56, right: 1252, bottom: 754 }
+  const FLEET_W = 1550
+  const FLEET_H = 1324
+  const SINGLE_RAIL = [
+    { left: 1068, top: 50, right: 1214, bottom: 724 },
+    { left: 1023, top: 575, right: 1273, bottom: 775 },
+    { left: -9, top: 623, right: 65, bottom: 775 }
+  ]
+  const TWO_TRACKS = [
+    { left: 22, top: 50, right: 102, bottom: 421 }, // left track: 56px card, inflated by the gap
+    { left: 1174, top: 50, right: 1254, bottom: 500 }, // right track
+    { left: 1023, top: 575, right: 1273, bottom: 775 }, // minimap (unchanged corner)
+    { left: -9, top: 623, right: 65, bottom: 775 } // flow controls (unchanged corner)
+  ]
+
+  it('keeps the full pane height and the single-rail zoom for the fleet canvas', () => {
+    const single = largestFreeRect(PANE, SINGLE_RAIL, FLEET_W, FLEET_H)!
+    const two = largestFreeRect(PANE, TWO_TRACKS, FLEET_W, FLEET_H)!
+    expect(h(two)).toBe(h(single))
+    expect(zoomOf(two, FLEET_W, FLEET_H)).toBeCloseTo(zoomOf(single, FLEET_W, FLEET_H), 4)
+    // The measured widths, pinned so a future change to either track's footprint shows up.
+    expect(w(two)).toBe(w(single) - 37)
+  })
+
+  it('a live fit on the fleet canvas lands gapTop = gapBottom = 12px', () => {
+    // Height-limited content fills the free rect exactly; the rect is inset 12px from the pane
+    // on both axes, so the visible top and bottom gaps are both the edge inset.
+    const two = largestFreeRect(PANE, TWO_TRACKS, FLEET_W, FLEET_H)!
+    const slack = (h(two) - FLEET_H * zoomOf(two, FLEET_W, FLEET_H)) / 2
+    expect(slack).toBeCloseTo(0, 6)
+    // The winning rect spans the viewport's full height, and the viewport is FIT_VIEW_GAP=12
+    // inside the pane on every side — so the visible gaps to the pane edges are 12px top and
+    // bottom, exactly what the employer will measure after a live Fit.
+    expect(two.top).toBe(PANE.top)
+    expect(two.bottom).toBe(PANE.bottom)
+  })
+})

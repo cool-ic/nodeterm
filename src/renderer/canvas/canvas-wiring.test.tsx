@@ -55,10 +55,26 @@ describe('the canvas rail is fit-view chrome', () => {
     expect(chromeObstacles(VIEWPORT)).toEqual([])
   })
 
-  it('the production rail opts into fit-view obstacles as ONE rect', () => {
-    // T223: the rail body wrapper (dock + pills inside it) carries the attribute, so the solver
-    // sees a single rect instead of one per control.
-    expect(CANVAS_SRC).toContain('<div className="canvas-rail__body" data-canvas-chrome>')
+  it('both tracks opt into fit-view obstacles, each as ONE rect', () => {
+    // T226: one body per edge, each carrying the attribute, so the solver sees one rect per track
+    // instead of one per control.
+    expect(CANVAS_SRC.match(/<div className="canvas-rail__body" data-canvas-chrome>/g)).toHaveLength(2)
+    expect(CANVAS_SRC).toContain('canvas-rail canvas-rail--left')
+    expect(CANVAS_SRC).toContain('canvas-rail canvas-rail--right')
+  })
+
+  it('a track is never wider than its buttons, and a badge never wider than 42px', () => {
+    // T226 hard constraint (the employer measures this live): 42px button + 2×6px padding + 2×1px
+    // border = 56px per track; the badges are 42px circles. The regression this pins is the T223
+    // shape: a card stretched to 171px by a self-sizing pill, with the button grid floating in
+    // the middle of the空白.
+    const body = STYLES_SRC.slice(STYLES_SRC.indexOf('.canvas-rail__body {'))
+    expect(body).toMatch(/box-sizing: border-box;\s*width: 56px;/)
+    expect(STYLES_SRC).toMatch(/\.dock-btn \{[^}]*width: 42px;[^}]*height: 42px;/)
+    expect(STYLES_SRC).toMatch(/\.canvas-rail__badges \{[^}]*width: 42px;/)
+    expect(STYLES_SRC).toMatch(/\.canvas-rail__badges \.usage-pill,[\s\S]{0,200}?width: 42px;/)
+    // One column: the 2-column grid is what made the 12 controls 443px tall beside a wide card.
+    expect(STYLES_SRC).toMatch(/\.dock \{[^}]*grid-template-columns: 42px;/)
   })
 
   it('the collapsed rail hides every bottom/top obstacle the rail owns', () => {
@@ -68,6 +84,10 @@ describe('the canvas rail is fit-view chrome', () => {
     // styles.css — which is why the two halves are pinned against different sources.
     expect(CANVAS_SRC).toContain('data-rail-collapsed={railCollapsed || undefined}')
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.canvas-rail__body/)
+    // T226: BOTH edges keep a tab; each is 14px and flush with its edge.
+    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\] \.canvas-rail--left \{[\s\S]*?left: 0;/)
+    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\] \.canvas-rail--right \{[\s\S]*?right: 0;/)
+    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\] \.canvas-rail__toggle \{[^}]*width: 14px;/)
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.minimap-dock/)
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.minimap-restore/)
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.controls-cluster/)
