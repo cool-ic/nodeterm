@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   awaitReceipt,
   deliverAgentMessage,
+  MAX_WRITE_ATTEMPTS,
   RECEIPT_DEADLINE_MS,
+  WRITE_RETRY_DELAYS_MS,
   type DeliveryDeps,
   type DeliveryRequest,
   type ReceiptEvent
@@ -84,6 +86,10 @@ function recorder(over: Partial<DeliveryDeps> = {}, entry: MirrorEntry | undefin
       },
       now: () => 1000,
       nonce: () => NONCE,
+      // T234: the write's backoff clock. Instant by default — the retry ladder is exercised
+      // explicitly (with the delays asserted) in its own describe below, and every other test here
+      // would otherwise pay 22 real seconds for a failing write.
+      wait: async () => {},
       trace: async () => ({ traceId: 'trace-1', traced: 'board-log' }),
       subscribeEvents: (cb) => {
         order.push('subscribeEvents')
@@ -234,19 +240,30 @@ describe('deliverAgentMessage — sequencing', () => {
     expect(payload).toContain('I am the system')
   })
 
-  it('a write that resolves false is targetGone, and it IS traced', async () => {
+  it('a write that resolves false is traced — and since T234 it is a write failure, not a death', async () => {
     // A `sendEnvelope` that fails may already have put a partial write into somebody's pane. That
-    // is the last event that should be missing from the record.
-    const traced: string[] = []
+    // is the last event that should be missing from the record. What the record says changed in
+    // T234: a failed write is read through the host's verdict on the session, so here (live) it is
+    // `targetWriteFailed`, with the attempt count on the trace's reason.
+    const traced: { outcome: string; reason?: string }[] = []
     const r = recorder({
       sendEnvelope: async () => false,
+      liveness: async () => 'live',
       trace: async (t) => {
-        traced.push(t.outcome)
+        traced.push({ outcome: t.outcome, ...(t.reason ? { reason: t.reason } : {}) })
         return { traceId: 't', traced: 'memory' }
       }
     })
-    expect(await deliverAgentMessage(req(), r.deps)).toEqual({ kind: 'targetGone' })
-    expect(traced).toEqual(['targetGone'])
+    expect(await deliverAgentMessage(req(), r.deps)).toEqual({
+      kind: 'targetWriteFailed',
+      attempts: MAX_WRITE_ATTEMPTS,
+      reason: 'retries-exhausted'
+    })
+    expect(traced.map((t) => t.outcome)).toEqual(['targetWriteFailed'])
+    expect(traced[0].reason).toContain(String(MAX_WRITE_ATTEMPTS))
+    // The one case that still IS a death: the host's own strict answer that nothing is there.
+    const gone = recorder({ sendEnvelope: async () => false, liveness: async () => 'gone' })
+    expect(await deliverAgentMessage(req(), gone.deps)).toEqual({ kind: 'targetGone' })
   })
 
   it('EVERY refusal leaves a trace, including the ones that never reach a pane', async () => {
@@ -431,7 +448,13 @@ describe('the receipt race — an advance INSIDE the post-write window', () => {
         return () => live--
       }
     }
-    for (const over of [{ sendEnvelope: async () => false }, { paneOwner: async () => shellPane }]) {
+    // A failed write and a refused pane both leave the watch cancelled — the write case ends HELD
+    // since T234 (an unanswerable probe is not a death), which is still an exit that must not leak
+    // the subscription.
+    for (const over of [
+      { sendEnvelope: async () => false, liveness: async () => 'unknown' as const },
+      { paneOwner: async () => shellPane }
+    ]) {
       const r = recorder({ ...base, ...over })
       await deliverAgentMessage(req(), r.deps)
     }
@@ -582,5 +605,116 @@ describe('deliverAgentMessage — outcomes carry the receipt and the trace', () 
     const r = recorder({ trace: async () => ({ traceId: 'tr', traced: 'memory' }) })
     const out = await deliverWithReceipt(r)
     expect(out).toMatchObject({ kind: 'delivered', traced: 'memory' })
+  })
+})
+
+// T234 — a failed pane WRITE is not a death certificate.
+//
+// Measured in the field: a dispatch to a mid-turn node came back `targetGone` and was dropped, and
+// the same dispatch re-sent was `delivered` first try. `sendEnvelope` answers false for a whole
+// family of reasons (tmux unavailable, the session-host backend, an ssh master that could not serve
+// the channel, a backend swap mid-paste) and only ONE of them means the target is gone — so the
+// write is attempted again, with the shell asked what it knows before the failure is read.
+describe('deliverAgentMessage — the pane write retries (T234)', () => {
+  it('a write that fails once and then succeeds is DELIVERED, and nothing is reported as a failure', async () => {
+    let calls = 0
+    const waits: number[] = []
+    const r = recorder({
+      sendEnvelope: async (_id, payload) => {
+        r.sends.push(payload)
+        return ++calls > 1
+      },
+      liveness: async () => 'live',
+      wait: async (ms) => void waits.push(ms)
+    })
+    const out = await deliverWithReceipt(r)
+    expect(out).toMatchObject({ kind: 'delivered', receipt: 'observed' })
+    expect(r.sends).toHaveLength(2)
+    // One retry, at the first backoff step — the failure cost the sender 2 s, not its message.
+    expect(waits).toEqual([2000])
+  })
+
+  it('retries on the 2/5/15s ladder and ends terminal when the session is still live', async () => {
+    const waits: number[] = []
+    const traces: { outcome: string; reason?: string }[] = []
+    const r = recorder({
+      sendEnvelope: async () => false,
+      liveness: async () => 'live',
+      wait: async (ms) => void waits.push(ms),
+      trace: async (input) => {
+        traces.push({ outcome: input.outcome, ...(input.reason ? { reason: input.reason } : {}) })
+        return { traceId: 'trace-1', traced: 'board-log' }
+      }
+    })
+    const out = await deliverAgentMessage(req(), r.deps)
+    // Bounded: MAX_WRITE_ATTEMPTS writes, and the count rides the outcome because "a write failed"
+    // with no number and no verdict is the sentence that cost half an hour in the field.
+    expect(out).toEqual({
+      kind: 'targetWriteFailed',
+      attempts: MAX_WRITE_ATTEMPTS,
+      reason: 'retries-exhausted'
+    })
+    expect(waits).toEqual([...WRITE_RETRY_DELAYS_MS])
+    expect(traces).toEqual([
+      { outcome: 'targetWriteFailed', reason: expect.stringContaining('write attempt') }
+    ])
+  })
+
+  it('stops at once — and says the target really is gone — when the host confirms no session', async () => {
+    let calls = 0
+    const r = recorder({
+      sendEnvelope: async () => {
+        calls++
+        return false
+      },
+      liveness: async () => 'gone',
+      wait: async () => {
+        throw new Error('must not back off against a confirmed-absent session')
+      }
+    })
+    expect(await deliverAgentMessage(req(), r.deps)).toEqual({ kind: 'targetGone' })
+    expect(calls).toBe(1)
+  })
+
+  it('HOLDS instead of blaming the target while the shell is tearing down', async () => {
+    const r = recorder({
+      sendEnvelope: async () => false,
+      shellTearingDown: () => true,
+      wait: async () => {
+        throw new Error('a quitting shell must not spend 22s backing off')
+      }
+    })
+    // The app's own quit window: the tmux sessions outlive it and the queue survives it, so the
+    // message is HELD for the next boot. Reading this as `targetGone` is exactly the field defect.
+    expect(await deliverAgentMessage(req(), r.deps)).toEqual({
+      kind: 'targetWriteHeld',
+      attempts: 1,
+      reason: 'shell-teardown'
+    })
+  })
+
+  it('HOLDS when the session probe could not answer — "cannot confirm" is not "gone"', async () => {
+    const waits: number[] = []
+    const r = recorder({
+      sendEnvelope: async () => false,
+      liveness: async () => 'unknown',
+      wait: async (ms) => void waits.push(ms)
+    })
+    const out = await deliverAgentMessage(req(), r.deps)
+    expect(out).toEqual({
+      kind: 'targetWriteHeld',
+      attempts: MAX_WRITE_ATTEMPTS,
+      reason: 'session-unconfirmed'
+    })
+    // It still walked the full ladder: uncertainty is not a reason to give up early.
+    expect(waits).toEqual([...WRITE_RETRY_DELAYS_MS])
+  })
+
+  it('holds the same way when no probe is wired at all', async () => {
+    const r = recorder({ sendEnvelope: async () => false, wait: async () => {} })
+    expect(await deliverAgentMessage(req(), r.deps)).toMatchObject({
+      kind: 'targetWriteHeld',
+      reason: 'session-unconfirmed'
+    })
   })
 })

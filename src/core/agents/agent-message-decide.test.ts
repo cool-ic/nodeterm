@@ -386,7 +386,8 @@ describe('RETRYABLE', () => {
   it('answers for every outcome kind the union declares', () => {
     // Runtime half. The compile-time half is below and is enforced by `npm run typecheck`.
     const kinds = Object.keys(RETRYABLE) as AgentMessageOutcomeKind[]
-    expect(kinds.length).toBe(18)
+    // 18 + T234's two write outcomes (`targetWriteFailed`, `targetWriteHeld`).
+    expect(kinds.length).toBe(20)
     for (const k of kinds) expect(typeof RETRYABLE[k]).toBe('boolean')
   })
 
@@ -409,5 +410,10 @@ describe('RETRYABLE', () => {
     expect(RETRYABLE.targetBusy).toBe(true)
     expect(RETRYABLE.targetNotIdleUnknown).toBe(true)
     expect(RETRYABLE.rateLimited).toBe(true)
+    // T234: the two write outcomes. Both are retryable for the SENDER — the field incident's own
+    // evidence is that a retry delivered what the first write could not — while the QUEUE treats
+    // only the held one as a wait (see `REQUEUE_ON` in delivery-queue.ts).
+    expect(RETRYABLE.targetWriteFailed).toBe(true)
+    expect(RETRYABLE.targetWriteHeld).toBe(true)
   })
 })

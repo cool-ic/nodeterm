@@ -93,8 +93,45 @@ export type AgentMessageOutcome =
   | { kind: 'targetNotAgentPane'; observed: string }
   | { kind: 'targetNotPasteAware' }
   | { kind: 'targetGone' }
+  /**
+   * T234 — the pane WRITE never went out, after the delivery's bounded retry, while the host still
+   * sees the target's session (`SessionLiveness === 'live'`). Terminal and loud: the target is
+   * there and the bytes still will not go, which is a real fault to report rather than a death to
+   * assert. `attempts` is how many writes were tried; `reason` is the last failure, in words
+   * (`WRITE_FAILURE_TEXT`), so the trace, the receipt and the sender's in-band notice agree.
+   *
+   * Before T234 a single `!wrote` was refused as `targetGone`, and the queue dropped the message in
+   * silence — the T233 dispatch died that way, on a write that a plain retry delivered.
+   */
+  | { kind: 'targetWriteFailed'; attempts: number; reason: WriteFailureReason }
+  /**
+   * T234 — the pane write did not go out and the target may NOT be called dead: the shell is
+   * tearing down (an app quit — the pane is unreachable because WE are going away), or the session
+   * probe could not answer (T207b's third state). HELD, never dropped: the queue keeps the entry
+   * (TTL/liveness rules unchanged) and a first attempt parks it there instead of refusing.
+   */
+  | { kind: 'targetWriteHeld'; attempts: number; reason: WriteFailureReason }
   | { kind: 'targetNotStarted' } // launch held, never spawned yet — queued when a queue is wired. Retryable.
   | { kind: 'notPermitted'; reason: NotPermittedReason }
+
+/** Why a pane write ended without the bytes going out. The words live in ONE table
+ *  (`WRITE_FAILURE_TEXT`) so the receipt, the durable trace line and the sender's in-band notice
+ *  cannot drift into three different claims about the same failure. */
+export type WriteFailureReason =
+  /** Every bounded attempt reported failure, and the host says the session is still there. */
+  | 'retries-exhausted'
+  /** The shell was shutting down (an app quit) while the write ran. NOT a statement about the
+   *  target: the pane is unreachable because this process is going away. */
+  | 'shell-teardown'
+  /** The session probe could not say whether the target is still there. NOT a death (T207b). */
+  | 'session-unconfirmed'
+
+export const WRITE_FAILURE_TEXT: Record<WriteFailureReason, string> = {
+  'retries-exhausted':
+    'the pane write reported failure on every attempt, and the target’s session is still live',
+  'shell-teardown': 'nodeterm was shutting down, so the pane could not be written',
+  'session-unconfirmed': 'nodeterm could not confirm whether the target’s session is still there'
+}
 
 export type AgentMessageOutcomeKind = AgentMessageOutcome['kind']
 
@@ -127,6 +164,12 @@ export const RETRYABLE: Record<AgentMessageOutcomeKind, boolean> = {
   targetNotAgentPane: false,
   targetNotPasteAware: false,
   targetGone: false,
+  // T234. Both are retryable for the SENDER (a retry is exactly what delivered the T233 dispatch
+  // after the first write failed). The queue reads this table for its own requeue rule and
+  // DELIBERATELY subtracts `targetWriteFailed` there: a write failure that burned every bounded
+  // attempt is a terminal verdict, not a "come back at the next idle".
+  targetWriteFailed: true,
+  targetWriteHeld: true,
   targetNotStarted: true,
   notPermitted: false
 }

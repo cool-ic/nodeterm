@@ -8,12 +8,15 @@ import { PANE_PROBE_TIMEOUT_MS, probeWithin } from './pane-probe'
 import {
   decideDelivery,
   decidePreProbe,
+  WRITE_FAILURE_TEXT,
   type AgentMessageOutcome,
   type DeliveryFacts,
   type NotPermittedReason,
   type ReceiptSignal,
-  type TraceKind
+  type TraceKind,
+  type WriteFailureReason
 } from './agent-message-decide'
+import type { SessionLiveness } from '../../shared/agents/agent-messaging'
 import type { DeliveryTraceInput } from './agent-message-trace'
 
 /**
@@ -135,6 +138,26 @@ export interface DeliveryDeps {
    * receipt watch's honest `stalled` outcome.
    */
   sendEnvelope(nodeId: string, envelope: string, expected?: PaneOwner): Promise<boolean>
+  /**
+   * T234 — the three-state session probe, asked only after a pane WRITE reported failure. A write
+   * that did not go out is not evidence of anything about the target by itself (the incident that
+   * produced this dep: a dispatch refused as a death, on a write a plain retry delivered), so the
+   * retry loop asks the host instead of guessing. Optional; absent ⇒ `'unknown'`, which never reads
+   * as a death.
+   */
+  liveness?(nodeId: string): Promise<SessionLiveness>
+  /**
+   * T234 — is the SHELL tearing down (an app quit in progress)? A write during teardown fails for a
+   * reason that says nothing about the target: the pane is unreachable because this process is
+   * going away. Such a failure is HELD for the next boot instead of being read as `targetGone`.
+   * Optional; absent ⇒ false.
+   */
+  shellTearingDown?(): boolean
+  /**
+   * T234 — the backoff clock between write attempts. Injected so the suite does not wait 22 real
+   * seconds; production's default is a real `setTimeout`.
+   */
+  wait?(ms: number): Promise<void>
   /** The target's status mirror entry — gate 2's whole input. */
   mirrorEntry(nodeId: string): MirrorEntry | undefined
   /** `nodeTokenFilePresent(nodeId)`. */
@@ -310,6 +333,104 @@ export async function awaitReceipt(
 }
 
 /**
+ * T234 — the pane write, and the retry a failed write has always deserved.
+ *
+ * `sendEnvelope` answers `false` for a whole family of reasons (tmux unavailable, the session-host
+ * backend, an ssh master that could not serve the channel, a backend swap mid-paste) and only ONE
+ * of them is "the target is gone". The old code folded every one into `targetGone` — a death
+ * certificate written from a failed write. Measured in the field (T234): a dispatch to a mid-turn
+ * node was refused `targetGone` and dropped in silence; the same dispatch, re-sent, was `delivered`
+ * on the first try.
+ *
+ * So: attempt, and on failure ask the SHELL what it knows before deciding what the failure means.
+ *  - the shell is tearing down (app quit) → hold it; the pane is unreachable because WE are leaving;
+ *  - the session is confirmed gone → `targetGone`, unchanged, and the retry stops;
+ *  - anything else (live, or a probe that could not answer) → retry, bounded by
+ *    `WRITE_RETRY_DELAYS_MS` (2 s / 5 s / 15 s).
+ *
+ * The probe is asked once per failed attempt (at most `MAX_WRITE_ATTEMPTS` times) and never in a
+ * loop of its own: the SSH cost note on `probeWithin` above is about exactly this shape, and the
+ * bound here is what keeps it honest. The verdict returned at exhaustion is the one from the LAST
+ * attempt, so the sender is told about the failure that actually ended the delivery.
+ *
+ * Returns nothing but facts — which attempt count, and one verdict — so the caller (and its own
+ * unit test) can read the policy without re-deriving it.
+ *
+ * COST, stated: this runs inside the delivery's per-target lock, so a target whose pane refuses
+ * writes serializes other deliveries to it for up to 22 s. That is bounded, it only happens while
+ * the pane is demonstrably not accepting writes, and the alternative — two writers racing the same
+ * pane — is what the lock exists to prevent.
+ */
+export type WriteVerdict =
+  /** Confirmed absent (the host's own strict answer). */
+  | 'gone'
+  /** Could not be confirmed: the shell is going away, or the probe could not answer. */
+  | 'held'
+  /** The session is still there and the write still will not go. */
+  | 'live'
+
+export type EnvelopeWrite =
+  | { wrote: true; attempts: number }
+  | { wrote: false; attempts: number; verdict: WriteVerdict; reason: WriteFailureReason }
+
+export const WRITE_RETRY_DELAYS_MS = [2000, 5000, 15000] as const
+
+export const MAX_WRITE_ATTEMPTS = WRITE_RETRY_DELAYS_MS.length + 1
+
+export async function writeEnvelope(
+  deps: Pick<DeliveryDeps, 'sendEnvelope' | 'liveness' | 'shellTearingDown' | 'wait'>,
+  nodeId: string,
+  envelope: string,
+  owner?: PaneOwner
+): Promise<EnvelopeWrite> {
+  const wait = deps.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  for (let attempt = 1; ; attempt++) {
+    if (await deps.sendEnvelope(nodeId, envelope, owner)) return { wrote: true, attempts: attempt }
+    // The bytes did not go out. `shellTearingDown` first: it is a local flag, and it is the one
+    // answer that is certainly not about the target.
+    if (deps.shellTearingDown?.() === true)
+      return { wrote: false, attempts: attempt, verdict: 'held', reason: 'shell-teardown' }
+    const liveness = await probeLiveness(deps, nodeId)
+    if (liveness === 'gone')
+      return { wrote: false, attempts: attempt, verdict: 'gone', reason: 'retries-exhausted' }
+    const delay = WRITE_RETRY_DELAYS_MS[attempt - 1]
+    if (delay === undefined)
+      return liveness === 'live'
+        ? { wrote: false, attempts: attempt, verdict: 'live', reason: 'retries-exhausted' }
+        : { wrote: false, attempts: attempt, verdict: 'held', reason: 'session-unconfirmed' }
+    // The retry is a fact the operator needs to be able to see afterwards: a delivery that took
+    // 22 s to land looks identical to a slow target otherwise.
+    console.warn(
+      `[agent-message] pane write to ${nodeId} failed (attempt ${attempt}/${MAX_WRITE_ATTEMPTS}); ` +
+        `retrying in ${delay}ms`
+    )
+    await wait(delay)
+  }
+}
+
+/** The reason a refusal carries onto its durable line. The write failures (T234) name the host's
+ *  verdict AND how many writes were attempted — the two facts the field incident lacked. */
+function refusalReason(o: AgentMessageOutcome): string | undefined {
+  if (o.kind === 'notPermitted') return o.reason
+  if (o.kind === 'targetWriteFailed' || o.kind === 'targetWriteHeld')
+    return `${WRITE_FAILURE_TEXT[o.reason]} (${o.attempts} write attempt${o.attempts === 1 ? '' : 's'})`
+  return undefined
+}
+
+/** The three-state probe, with the two failures that are NOT a verdict folded into `'unknown'`. */
+async function probeLiveness(
+  deps: Pick<DeliveryDeps, 'liveness'>,
+  nodeId: string
+): Promise<SessionLiveness> {
+  if (!deps.liveness) return 'unknown'
+  try {
+    return await deps.liveness(nodeId)
+  } catch {
+    return 'unknown'
+  }
+}
+
+/**
  * Deliver one message into one target node's pane.
  *
  * The whole run is inside the lock — not just the write. `guardConcurrentRestart`'s own comment is
@@ -352,7 +473,7 @@ export async function deliverAgentMessage(
       bodyChars
     })
   const refuse = async (o: AgentMessageOutcome): Promise<AgentMessageOutcome> => {
-    await trace(o.kind, undefined, o.kind === 'notPermitted' ? o.reason : undefined)
+    await trace(o.kind, undefined, refusalReason(o))
     return o
   }
 
@@ -466,13 +587,28 @@ export async function deliverAgentMessage(
     // subscription opened after that probe would miss it and report `stalled` for a message that
     // demonstrably landed. See `watchForReceipt`: that miss is what makes an LLM send it twice.
     const watch = watchForReceipt(req.targetNodeId, deps.subscribeEvents)
-    const wrote = await deps.sendEnvelope(req.targetNodeId, payload, owner)
-    // The pane went away between the gate and the write. Not a failure of ours and not retryable:
-    // the node is gone. It IS traced: a `sendEnvelope` that fails after a partial write has left
-    // bytes in somebody's pane, and that must not be the one event with no record.
-    if (!wrote) {
+    const attempt = await writeEnvelope(deps, req.targetNodeId, payload, owner)
+    // T234: a write that did not go out is NOT a death certificate (see `writeEnvelope`). What it
+    // means is the host's verdict, and only ONE of the three is a death: a confirmed-absent
+    // session. A shell in teardown, or a probe that could not answer, is a HOLD — the queue keeps
+    // the message for the next flush or the next boot, and the sender is told the truth instead of
+    // a death that never happened. Exhausted retries against a LIVE session are terminal and loud.
+    if (!attempt.wrote) {
       watch.cancel()
-      return refuse({ kind: 'targetGone' })
+      // The trace has to carry the attempts: a durable line that says only "targetGone" is what
+      // made the field incident take half an hour to find. The reason rides `WRITE_FAILURE_TEXT`.
+      if (attempt.verdict === 'gone') return refuse({ kind: 'targetGone' })
+      if (attempt.verdict === 'held')
+        return refuse({
+          kind: 'targetWriteHeld',
+          attempts: attempt.attempts,
+          reason: attempt.reason
+        })
+      return refuse({
+        kind: 'targetWriteFailed',
+        attempts: attempt.attempts,
+        reason: attempt.reason
+      })
     }
 
     // G3, post-write. rev. 2's gate 3 was check-then-act — a TOCTOU where the body lands in a
