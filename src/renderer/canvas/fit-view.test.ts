@@ -232,8 +232,10 @@ describe('T226: two 56px tracks keep the fit height and zoom, at 37px of width',
     { left: -9, top: 623, right: 65, bottom: 775 }
   ]
   const TWO_TRACKS = [
-    { left: 22, top: 50, right: 102, bottom: 421 }, // left track: 56px card, inflated by the gap
-    { left: 1174, top: 50, right: 1254, bottom: 500 }, // right track
+    // T230: the tracks sit below the two top clusters (34px + 8px below the cluster band) and the
+    // toggles hug the cards' OUTER sides, so each card is 56px starting 50px in from its edge.
+    { left: 38, top: 92, right: 118, bottom: 451 }, // left card (toggle hugs its left)
+    { left: 1146, top: 92, right: 1226, bottom: 530 }, // right card (toggle hugs its right)
     { left: 1023, top: 575, right: 1273, bottom: 775 }, // minimap (unchanged corner)
     { left: -9, top: 623, right: 65, bottom: 775 } // flow controls (unchanged corner)
   ]
@@ -244,7 +246,9 @@ describe('T226: two 56px tracks keep the fit height and zoom, at 37px of width',
     expect(h(two)).toBe(h(single))
     expect(zoomOf(two, FLEET_W, FLEET_H)).toBeCloseTo(zoomOf(single, FLEET_W, FLEET_H), 4)
     // The measured widths, pinned so a future change to either track's footprint shows up.
-    expect(w(two)).toBe(w(single) - 37)
+    // T230: lowering the tracks does not move this number's height side; the outer toggles cost
+    // 16px of width (905 vs 921) against the single-rail baseline (958).
+    expect(w(two)).toBe(w(single) - 53)
   })
 
   it('a live fit on the fleet canvas lands gapTop = gapBottom = 12px', () => {
