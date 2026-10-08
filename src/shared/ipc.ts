@@ -181,6 +181,19 @@ export const IPC = {
    *  renderer clears unread WITHOUT re-acking (external clear — see agentStatus.clearUnread's
    *  `external` opt). See core/ack-sweep.ts. */
   agentUnreadClear: 'agent:unread-clear',
+  /** Renderer → main: the ids of every node ANY project canvas holds — open, recently closed and
+   *  SSH alike. The answer to the Dock badge's liveness question (T224): the renderer's unread
+   *  table survives restarts (localStorage), while a node can be deleted while the app is down or
+   *  by a path that never reached the renderer's `remove` (an unmount is not an end — issue #402),
+   *  and by design only SELECTING a node clears unread — so an entry for a node no project holds
+   *  pins the badge forever. Resolves `string[]`, or `null` when the project list cannot be read
+   *  (an unloaded index, one unreadable local ref, a never-cached SSH project): `null` means KEEP
+   *  EVERY ENTRY — "cannot tell" is not "gone", and an empty answer would clear the whole table. */
+  agentKnownNodeIds: 'agent:known-node-ids',
+  /** main → renderer: the same payload as `agentKnownNodeIds`, pushed after every workspace
+   *  load/save (and every external project.json change) so an entry whose node was deleted out
+   *  from under the running app heals without a restart. Never pushed when the set is unknown. */
+  agentKnownNodeIdsChanged: 'agent:known-node-ids-changed',
   /** Renderer → main/server: a node's Eco hibernation flag changed (the renderer owns the flag —
    *  `agentStatus.setHibernated` — and main only mirrors it, like `terminalFocused`). Arg:
    *  `{ nodeId: string, on: boolean }`. Fire-and-forget cast; feeds the agent-status mirror so the

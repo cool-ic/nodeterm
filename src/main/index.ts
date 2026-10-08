@@ -606,6 +606,23 @@ const remoteWorkspaceIO = makeRemoteWorkspaceIO(
   (projectId) => workspaceStore.markUnmirrored(projectId)
 )
 const workspaceStore = new WorkspaceStore(remoteWorkspaceIO)
+/**
+ * T224: hand the renderer the node-id union its Dock-badge liveness check reads (the channels and
+ * the full why are documented at `IPC.agentKnownNodeIds`). Pushed after every workspace load/save —
+ * the renderer's own saves included, which is what heals a node deleted out from under a RUNNING app
+ * — and never pushed when the set is unknown: an absent answer must read as "keep every unread
+ * entry", so an unreadable local ref or a never-cached SSH project turns pruning off rather than
+ * clearing the table. `sendToMain` is a no-op before the window exists (the renderer's own boot
+ * query covers that window), so this needs no readiness gate of its own.
+ */
+function pushKnownNodeIds(): void {
+  try {
+    const known = workspaceStore.knownNodeIds()
+    if (known) sendToMain(IPC.agentKnownNodeIdsChanged, [...known])
+  } catch {
+    /* an answer we could not produce is not an empty project list — send nothing */
+  }
+}
 // Watch each local ref's project.json for outside edits (git pull, a teammate's commit).
 // Self-writes match the store's last-written cache and are ignored. Re-synced after every
 // store load/save via onPersist; disposed on quit next to ptyManager.killAll().
@@ -623,6 +640,8 @@ workspaceStore.onPersist = () => {
   refreshNodeTokens()
   // A node the store now provably holds nowhere (a delete, the canvas authority's op) ends its links.
   watchLinks?.onWorkspaceChanged()
+  // …and the renderer's unread table learns the same fact (T224).
+  pushKnownNodeIds()
 }
 // "Which host owns this node?", answered WITHOUT a live session — the persisted index, not the
 // in-memory `Session`. A delete arrives precisely when there may be nothing attached (an app
@@ -1742,6 +1761,20 @@ app.whenReady().then(async () => {
   ipcMain.on(IPC.appSetBadge, (_e, count: number) => {
     if (process.platform !== 'darwin' || !app.dock) return
     app.dock.setBadge(count > 0 ? String(count) : '')
+  })
+
+  // The badge's liveness answer (T224, see IPC.agentKnownNodeIds): every node id any project
+  // canvas holds, or `null` when that set cannot be read. The renderer keeps every unread entry on
+  // `null` — it prunes only ids this proves no project holds, and a badge pinned by an entry for a
+  // node that no longer exists anywhere (the employer's stuck "3") is the defect this answers.
+  ipcMain.handle(IPC.agentKnownNodeIds, (): string[] | null => {
+    try {
+      const known = workspaceStore.knownNodeIds()
+      return known ? [...known] : null
+    } catch {
+      // Same contract as `undefined`: an answer we could not produce is not "no nodes exist".
+      return null
+    }
   })
 
   // Show an OS notification — but only when the window is in the background. Clicking it

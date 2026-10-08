@@ -4399,6 +4399,20 @@ export interface NodeTerminalApi {
    *  `clearUnread(id, { external: true })`, so it does not loop back into `ackDone`). Arg is the
    *  node id. Returns unsubscribe. See core/ack-sweep.ts. */
   onUnreadClear(listener: (nodeId: string) => void): () => void
+  /** Every node id ANY project canvas holds — open, recently closed and SSH alike — or `null` when
+   *  that set cannot be known (an unloaded workspace index, one unreadable local ref, a never-cached
+   *  SSH project). The Dock badge's liveness question (T224): the unread table outlives restarts,
+   *  while a node can be deleted while the app is down or by a path that never reached the
+   *  renderer's `remove`, and only SELECTING a node ever clears unread — so an entry for a node no
+   *  project holds pins the badge forever. `null` means KEEP EVERY ENTRY: an answer that could not
+   *  be produced is not evidence a node is gone, and treating an empty set as availability would
+   *  clear the whole table. Desktop main only; a Server Edition tab leaves it undefined (same
+   *  reading as `null`), and a relay tab resolves the LOCAL index, which is the store it prunes. */
+  knownNodeIds?(): Promise<string[] | null>
+  /** Fires with the same payload after every workspace load/save — the self-heal's second leg, so
+   *  a node deleted out from under the running app heals without a restart. Never fires for an
+   *  unknown set. Returns unsubscribe. */
+  onKnownNodeIds?(listener: (ids: string[]) => void): () => void
   /** Fires on each normalized agent hook event (working/done/waiting/subagent/…). Returns unsubscribe. */
   onAgentStatus(listener: (e: NormalizedAgentEvent) => void): () => void
   /** Report a node's Eco hibernation flag to the core (the renderer owns the flag; the core only

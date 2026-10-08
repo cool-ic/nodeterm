@@ -880,6 +880,16 @@ const api: NodeTerminalApi = {
     ipcRenderer.on(IPC.agentUnreadClear, handler)
     return () => ipcRenderer.removeListener(IPC.agentUnreadClear, handler)
   },
+  // The Dock badge's liveness answer (T224): every node id any project canvas holds, or `null` when
+  // the project list cannot be read — the renderer keeps every unread entry then, and prunes only
+  // ids this list proves no project holds. The push leg carries the same payload after each
+  // workspace load/save; it never fires for an unknown set, so absence stays "keep everything".
+  knownNodeIds: () => ipcRenderer.invoke(IPC.agentKnownNodeIds) as Promise<string[] | null>,
+  onKnownNodeIds: (listener) => {
+    const handler = (_e: unknown, ids: string[]) => listener(ids)
+    ipcRenderer.on(IPC.agentKnownNodeIdsChanged, handler)
+    return () => ipcRenderer.removeListener(IPC.agentKnownNodeIdsChanged, handler)
+  },
   onAgentStatus: (listener) => subscribeAgentReplay((cb) => {
     const handler = (_e: unknown, payload: Parameters<typeof listener>[0]) => cb(payload)
     ipcRenderer.on(IPC.agentStatus, handler)
