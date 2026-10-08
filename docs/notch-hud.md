@@ -2,7 +2,9 @@
 
 Agent-notch's UX, native to nodeterm: a transparent always-on-top strip along the top edge that
 shows **walking agent mascots beside the MacBook notch** while agents work, and expands on click
-into a **mini session panel**. macOS-only, desktop-only. Fed by nodeterm's own hook-based
+into a **mini session panel** — or, in this fork's default `bottom-right` dock (T227), a standalone
+floating capsule in the bottom-right corner of the work area. macOS-only, desktop-only. Fed by
+nodeterm's own hook-based
 agent-status (precise working/done — no ~30 s afterglow), reusing nodeterm's existing mascot art.
 Owner decisions: hook-fed; its own mini panel with a "Go" button that opens the node in nodeterm;
 **default ON** (guarded to darwin; toggleable in Settings).
@@ -17,10 +19,12 @@ alwaysOnTop:true, focusable:false, skipTaskbar:true}` + `setAlwaysOnTop(true,'sc
 
 - **Geometry** is the pure `hudGeometry` (`notch-hud-geometry.ts`, unit-tested); the controller
   only feeds it `screen.getPrimaryDisplay()` — the PRIMARY display's LIVE bounds on every call,
-  never a cached rectangle. The window spans the full top edge (`bounds`,
+  never a cached rectangle. In the top-strip shapes the window spans the full top edge (`bounds`,
   `y = bounds.y`), sized to `bar + HUD_WINDOW_HEIGHT` (+ a positive vertical offset, so a lowered
   panel is not clipped) so the EXPANDED box clears the top strip in
-  either layout; we never resize the frame except for that offset (`setTunables` → `reposition`).
+  either layout; the `bottom-right` dock instead shrinks the window to a small box in the corner of
+  the WORK AREA (`workArea.right/bottom`, so it clears the Dock and the menu bar — see the dock
+  below). We never resize the frame except for that offset (`setTunables` → `reposition`).
   Main sends the renderer everything it needs to draw the
   capsule: `bar` (= `workArea.y - bounds.y`, floor `NOTCH_BAR_FLOOR` 24 — the fused top zone
   height), `width`, `notchWidth` (`settings.notchWidth` clamped to `NOTCH_WIDTH_MIN/MAX` 100–320,
@@ -39,8 +43,9 @@ alwaysOnTop:true, focusable:false, skipTaskbar:true}` + `setAlwaysOnTop(true,'sc
   notches exist only on built-in panels, so it stops an external at a low resolution from clearing
   the ratio on its own.
 - **Placement** is the pure `hudPlacement` (same file, unit-tested), fed the geometry plus the
-  user's two placement settings — `settings.notchAlign` (`left | center | right`, default
-  `center`) and `settings.notchOffsetY` (px, positive = DOWN, default 0) — and it answers with
+  user's two placement settings — `settings.notchAlign` (`left | center | right | bottom-right`,
+  default `bottom-right` in this fork; upstream ships `center`) and `settings.notchOffsetY`
+  (px, positive = DOWN, default 0) — and it answers with
   everything the renderer positions by: `fused`, `anchor`, `capsuleX`, `capsuleTop`, `panelLeft`,
   `panelWidth` (pushed as CSS variables + root classes; the renderer decides nothing itself).
   **`hasNotch` still decides the SHAPE, and the table says what each combination draws:**
@@ -51,8 +56,44 @@ alwaysOnTop:true, focusable:false, skipTaskbar:true}` + `setAlwaysOnTop(true,'sc
   | notch | center | > 0 | a **pill** hanging centred BELOW the notch (a detached surface with square top corners is the "black box below the menu bar" field bug, so it rounds) |
   | notch | left / right | any | a **pill** at that edge (`HUD_EDGE_MARGIN` 12 from it), below the menu-bar strip ± offset |
   | no notch | any | any | a **pill** on that side, below the strip ± offset — the old notchless fallback, now movable |
+  | either | bottom-right | ignored | a **standalone pill docked in the work area's bottom-right corner** — its own SHAPE, not a fourth side of the top strip: the window shrinks to a small box in the corner and the capsule never fuses |
 
-  Rules the placement keeps: **(1)** a pill's top is `bar + PILL_TOP_GAP + offset`, clamped at
+  The top three rows are upstream's and their behaviour is unchanged; the dock (T227) is a
+  different shape with its own geometry, described next.
+
+- **The dock (`bottom-right`, T227)**. The employer wanted the mascot capsule out of the top
+  centre and into the bottom-right corner. Two things make that a new shape rather than an
+  alignment of the old one:
+
+  - **The WINDOW is a small box in the corner of the WORK AREA, not a full-width strip.**
+    `hudGeometry` returns `width = min(HUD_DOCK_WINDOW_WIDTH 424, workArea.width)`,
+    `height = min(HUD_DOCK_WINDOW_HEIGHT 460, workArea.height)`, at
+    `x = workArea.right - width`, `y = workArea.bottom - height`. **`workArea` and not `bounds`
+    is load-bearing**: `bounds` is the whole panel including the menu bar and the Dock, so a
+    `bounds`-anchored corner would put the capsule UNDER the Dock and off the usable screen on
+    every Mac that has one. A short work area gives up height first (the panel then scrolls), the
+    width is the dock's own and does not grow to the screen. The geometry still reports
+    `bar` / `hasNotch` / `notchWidth` (harmless, unused here) and adds `docked: true`.
+  - **The capsule hangs by its BOTTOM edge** (`--capsule-bottom` = `HUD_EDGE_MARGIN` 12, with
+    `top: auto`), so the panel — whose height is driven by `max-height` — grows UPWARD as it
+    opens instead of pushing content off the bottom of the screen, and it is anchored
+    `HUD_EDGE_MARGIN` from the work area's right edge with the SAME margin as its left inset
+    (`panelLeft = capsuleX - panelWidth`), so the panel grows LEFT and keeps equal side margins.
+    `--dock-expanded-max-h` = `height - HUD_EDGE_MARGIN - HUD_DOCK_TOP_GAP (12)` bounds that
+    growth: a work area too short to hold the full panel SHORTENS it (which then scrolls) rather
+    than letting it overflow the work area at the top.
+  - **`fused` is always `false`**, `anchor` reports `'right'`, and `notchOffsetY` is **ignored** —
+    the spec pins the docked capsule to `HUD_EDGE_MARGIN` from the work area's bottom edge, and
+    the "Vertical position" slider says so (see Settings). An unknown string still sanitizes to
+    the DEFAULT (`bottom-right` here, `center` upstream).
+  - **Known cost, not fixed here**: this fork also draws its minimap-restore widget in the
+    bottom-right corner of the workspace (≈1672,904), so the two can visually overlap. T227 does
+    not add any avoidance; they are independent surfaces and the dock is transparent apart from
+    the capsule and an open panel.
+
+  Rules the placement keeps — **(1)** and **(2)** are the TOP-STRIP shapes (the dock positions
+  itself from the work area's corner instead, see above): **(1)** a top-strip pill's top is
+  `bar + PILL_TOP_GAP + offset`, clamped at
   **0** — there is nothing above the display's top edge, which is why the Settings copy says "up
   stops at the top edge" instead of implying the capsule can leave the screen, and why `-48`
   (`NOTCH_OFFSET_MIN`) is enough travel: it reaches the edge from every real menu bar. **(2)** the
@@ -66,7 +107,8 @@ alwaysOnTop:true, focusable:false, skipTaskbar:true}` + `setAlwaysOnTop(true,'sc
   has no notch to cover, and the padding would be a dead black tail (which the notchless pill
   drew before this landed) or, at an edge, a black bar over the menu-bar items.
   **(5)** a hand-edited settings.json is hostile input: both values are re-validated at the point
-  of use (`sanitizeNotchAlign` → `center` for an unknown string; `sanitizeNotchOffsetY` → 0 for a
+  of use (`sanitizeNotchAlign` → the DEFAULT side (`bottom-right` in this fork, `center` upstream)
+  for an unknown string; `sanitizeNotchOffsetY` → 0 for a
   non-number, the nearest bound for out-of-range — the same rule as `sanitizeNotchWidth`), and the
   Settings section reads them through the same sanitizers so a control never binds to a value it
   cannot draw. All three live in `src/shared/notch-hud.ts`, which is also where the slider bounds
@@ -191,14 +233,16 @@ the transparent rest of the window stays click-through. Hidden entirely when idl
   `IPC.hudDismiss` → `model.dismiss(nodeId)`. It latches the state the row was hidden AT
   (`dismissedAt`), so a session hung in `working` (agent died mid-turn) stays hidden while any
   genuine state change brings the row back. HUD-local only — the node/terminal is untouched.
-- **Pill** (`fused === false` from `hudPlacement` — a notchless display, a left/right side, or a
-  centred capsule lowered off the notch): the `.pill` root class (renamed from `.notchless`,
-  because the shape is no longer only about the display) draws the capsule as a **standalone
-  floating pill** — all-corner `--pill-radius`, since there is no notch to fuse with. Collapsed
-  height = `--pill-height`; the mascots center in the pill (no `--bar` padding to clear).
+- **Pill** (`fused === false` from `hudPlacement` — a notchless display, a left/right side, a
+  centred capsule lowered off the notch, or the `bottom-right` dock): the `.pill` root class
+  (renamed from `.notchless`, because the shape is no longer only about the display) draws the
+  capsule as a **standalone floating pill** — all-corner `--pill-radius`, since there is no notch
+  to fuse with. Collapsed height = `--pill-height`; the mascots center in the pill (no `--bar`
+  padding to clear). The dock adds its own `.dock-bottom-right` class on top (bottom anchoring +
+  the bounded panel, see above); the three top-strip pills are unchanged.
 
-  **The pill rests BELOW the top strip** (`--capsule-top` = `bar + PILL_TOP_GAP + offset`, clamped
-  ≥ 0), and that is load-bearing rather than cosmetic. The window's top edge is the display's, so
+  **A top-strip pill rests BELOW the top strip** (`--capsule-top` = `bar + PILL_TOP_GAP + offset`,
+  clamped ≥ 0), and that is load-bearing rather than cosmetic. The window's top edge is the display's, so
   the first `--bar` px are the menu-bar / notch strip; a pill placed there is centred on exactly
   the coordinates a notch occupies, which made every notch MISdetection invisible instead of merely
   wrong — the visible half of issue #508. Clearing the strip means the fallback layout stays safe
@@ -214,17 +258,26 @@ vertical-offset clamp), `NOTCH_BAR_RATIO` (0.03, notch-detection threshold as a 
 display height), `NOTCH_BAR_FLOOR` (24), `HUD_WINDOW_HEIGHT` (460, added ON TOP of `bar`),
 `HUD_PANEL_WIDTH` (400, pushed as `--panel-width` — main reasons with it for `panelLeft`, so the
 CSS must not carry its own number), `PILL_TOP_GAP` (6), `HUD_EDGE_MARGIN` (12),
+`HUD_DOCK_WINDOW_WIDTH` (424 = `HUD_PANEL_WIDTH` + two margins — the docked window's width, so the
+open panel is flush with equal side insets) and `HUD_DOCK_WINDOW_HEIGHT` (460, its own height, NOT
+added on top of `bar`) with `HUD_DOCK_TOP_GAP` (12, the headroom the docked panel leaves at the top
+of the work area) for the `bottom-right` dock,
 `--capsule-drop` (0 — the bulge was dropped; kept only for the expand math),
 `--capsule-radius` (16), `--panel-max-h` (420), `--capsule-dur` (0.22s)/`--capsule-ease`,
+`--capsule-bottom` and `--dock-expanded-max-h` (pushed by main only while docked — the capsule's
+distance from the docked window's bottom edge and the panel's height ceiling),
 and the pill's `--pill-radius` (18) / `--pill-height` (30).
 
 ## Settings + lifecycle
 
 **Settings → Interface → Notch** (`NotchSection.tsx`, macOS-only: `nav.ts` marks the section
 `macOnly` and `visibleSettingsGroups(isMac)` drops it elsewhere) owns all five knobs:
-`notchHud` (default **true**), `notchAlign` (default `center` — Left / Center / Right segmented
-pill), `notchOffsetY` (default 0 — the "Vertical position" slider, signed readout, whose copy
-says up stops at the screen edge and that lowering the fused capsule detaches it into a pill),
+`notchHud` (default **true**), `notchAlign` (default **`bottom-right`** in this fork, upstream
+`center` — a Left / Center / Right / 右下角 segmented pill built straight off `NOTCH_ALIGNS`, so a
+new side shows up in the control without a second list to edit; the dock's label is the Chinese
+「右下角」 because that is what the owner called the corner), `notchOffsetY` (default 0 — the
+"Vertical position" slider, signed readout, whose copy says up stops at the screen edge, that
+lowering the fused capsule detaches it into a pill, and that the 右下角 dock does not move for it),
 `notchWidth` (default 168 — the assumed notch width, i.e. the flush-alignment knob, clamped to
 `NOTCH_WIDTH_MIN/MAX` in main; only the fused shape uses it) and `notchHoverExpand`
 (default true; off = click-only, the renderer reads it from the `hoverExpand` push field).

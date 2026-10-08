@@ -5,6 +5,7 @@ import { FieldRow } from '../FieldRow'
 import { Switch } from '@renderer/ui/Switch'
 import { SegmentedPill } from '@renderer/ui/SegmentedPill'
 import {
+  NOTCH_ALIGNS,
   NOTCH_OFFSET_MAX,
   NOTCH_OFFSET_MIN,
   NOTCH_WIDTH_MAX,
@@ -25,7 +26,27 @@ const ROWS = {
   },
   side: {
     title: 'Capsule side',
-    keywords: ['notch', 'side', 'left', 'right', 'center', 'centre', 'align', 'position', 'place', 'corner', 'capsule']
+    // T227: the bottom-right dock is what most people will be looking for here — it is this fork's
+    // DEFAULT and the reason the control exists at all.
+    keywords: [
+      'notch',
+      'side',
+      'left',
+      'right',
+      'center',
+      'centre',
+      'align',
+      'position',
+      'place',
+      'corner',
+      'capsule',
+      'bottom',
+      'bottom-right',
+      '右下',
+      '右下角',
+      '角落',
+      '角'
+    ]
   },
   offset: {
     title: 'Vertical position',
@@ -37,6 +58,28 @@ const ROWS = {
   }
 }
 const ENTRIES = Object.values(ROWS)
+
+/**
+ * The side control's labels, one per side in the shared vocabulary.
+ *
+ * `Record<NotchAlign, string>` on purpose: adding a side to `NOTCH_ALIGNS` without a label here is a
+ * COMPILE error, so the control can never silently omit a layout main accepts. The three upstream
+ * sides keep their English labels; the dock (T227) is `右下角` because that is what the person
+ * asking for it calls it.
+ */
+const SIDE_LABELS: Record<NotchAlign, string> = {
+  left: 'Left',
+  center: 'Center',
+  right: 'Right',
+  'bottom-right': '右下角'
+}
+
+/** The options, DERIVED from `NOTCH_ALIGNS` (T227) rather than hand-listed: the order and the set on
+ *  screen are main's own, so a side added upstream appears here the day it is added. Exported so the
+ *  test can assert that without rendering the section. */
+export const NOTCH_SIDE_OPTIONS: readonly { value: NotchAlign; label: string }[] = NOTCH_ALIGNS.map(
+  (value) => ({ value, label: SIDE_LABELS[value] })
+)
 
 /** "+12 px" / "−8 px" / "0 px" — a signed readout so the direction is legible at a glance. */
 function offsetLabel(px: number): string {
@@ -99,15 +142,11 @@ export function NotchSection({ isActive }: { isActive: boolean }): React.JSX.Ele
         <SearchableRow {...ROWS.side}>
           <FieldRow
             label="Capsule side"
-            description="Center hugs the notch (on a screen without one, a floating pill in the middle). Left and Right draw a floating pill at that edge of the screen, just below the menu bar."
+            description="右下角 docks the capsule in the bottom-right corner of the screen's work area — out of the way of the menu bar and the Dock. Center hugs the notch (on a screen without one, a floating pill in the middle). Left and Right draw a floating pill at that edge of the screen, just below the menu bar."
             control={
               <SegmentedPill<NotchAlign>
                 value={notchAlign}
-                options={[
-                  { value: 'left', label: 'Left' },
-                  { value: 'center', label: 'Center' },
-                  { value: 'right', label: 'Right' }
-                ]}
+                options={[...NOTCH_SIDE_OPTIONS]}
                 onChange={(v) => update({ notchAlign: v })}
                 ariaLabel="Notch capsule side"
               />
@@ -118,7 +157,7 @@ export function NotchSection({ isActive }: { isActive: boolean }): React.JSX.Ele
         <SearchableRow {...ROWS.offset}>
           <FieldRow
             label="Vertical position"
-            description="Nudges the capsule down (positive) or up (negative) from where it normally sits. Up stops at the top edge of the screen — and the capsule fused to the notch is already there, so it can only move down, which turns it into a floating pill under the notch."
+            description="Nudges the capsule down (positive) or up (negative) from where it normally sits. Up stops at the top edge of the screen — and the capsule fused to the notch is already there, so it can only move down, which turns it into a floating pill under the notch. Does not move the 右下角 corner dock, whose place is pinned to the corner."
             control={
               <div className="flex items-center gap-3">
                 <input
