@@ -68,8 +68,25 @@ describe('the trigger table — closed, and an unknown never triggers', () => {
     expect(stationFailure({ dropped: false, state: 'done' }, { now: T0 })).toBeNull()
   })
 
-  it('the table is exactly three reasons', () => {
-    expect(STATION_TRIGGERS.map((r) => r.reason)).toEqual(['dropped', 'turn-errored', 'question-unanswered'])
+  it('the table is exactly four reasons, and the rate limit outranks the generic error', () => {
+    // T228 inserted `rate-limited` BEFORE `turn-errored`: a rate limit always implies the errored
+    // turn (the reading is only taken on one), and the actionable fact for the orchestrator is
+    // "wait", not "retry". Order asserted, not just membership.
+    expect(STATION_TRIGGERS.map((r) => r.reason)).toEqual([
+      'dropped',
+      'rate-limited',
+      'turn-errored',
+      'question-unanswered'
+    ])
+    expect(
+      stationFailure({ state: 'done', lastTurnErrored: true, rateLimited: { retryAfterMs: 5000 } }, { now: T0 })
+    ).toBe('rate-limited')
+    // …and with no reading, the same errored turn is exactly what it always was.
+    expect(stationFailure({ state: 'done', lastTurnErrored: true }, { now: T0 })).toBe('turn-errored')
+    // A reading on a station that is NOT done-and-errored matches nothing: it cannot reach the row.
+    expect(
+      stationFailure({ state: 'working', lastTurnErrored: true, rateLimited: { retryAfterMs: 5000 } }, { now: T0 })
+    ).toBeNull()
   })
 })
 
@@ -79,12 +96,30 @@ describe('the notice body — app-authored, fixed format', () => {
       const body = stationNoticeBody({ id: 'term-abc', title: 'Build UI' }, row.reason)
       expect(body).toContain('station: term-abc "Build UI"')
       expect(body).toContain(`reason: ${row.label}.`)
-      expect(body).toContain(`- ${row.option}: ${row.retry.replace(/<station>/g, 'term-abc')}`)
+      // `<retry>` is the one placeholder a NOTICE fills and the chip/help text cannot: without a
+      // cooldown reading it degrades to a phrase, never to a leftover token.
+      const retry = row.retry.replace(/<station>/g, 'term-abc').replace(/<retry>/g, 'the wait the provider named')
+      expect(body).toContain(`- ${row.option}: ${retry}`)
       for (const [name, text] of STATION_NOTICE_COMMON_OPTIONS)
         expect(body).toContain(`- ${name}: ${text.replace(/<station>/g, 'term-abc')}`)
       expect(body).toContain('You are told ONCE')
       expect(body).not.toContain('<station>')
+      expect(body).not.toContain('<retry>')
     }
+  })
+
+  it('T228 — a rate-limit notice reads BOTH the reason and the time to wait', () => {
+    const body = stationNoticeBody({ id: 'term-abc', title: 'Worker' }, 'rate-limited', {
+      retryAfterMs: 120_000
+    })
+    expect(body).toContain('reason: its provider is rate limiting it')
+    // The reason line names the cooldown...
+    expect(body).toContain('it cannot run a turn for about 120s')
+    // ...and the retry option names it too.
+    expect(body).toContain('wait the cooldown out (≈120s)')
+    expect(body).not.toContain('<retry>')
+    // Never the pane's words: the notice quotes no station output, ever.
+    expect(body).not.toContain('TooManyRequests')
   })
 
   it('a hostile title cannot add a line, a control byte or a quote-break', () => {

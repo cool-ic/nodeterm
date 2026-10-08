@@ -64,6 +64,7 @@ import {
   type StationFailureReason,
   type StationNoticePane,
   type StationNoticeView,
+  type StationObservation,
   type StationRecipient
 } from '../../shared/station-notice'
 import { STATION_NOTICE_VERB } from '../../shared/agents/agent-messaging'
@@ -99,6 +100,12 @@ export interface StationNoticeDeps {
    *  (`mirrorEntry(id)?.pendingQuestion?.toolUseId`), or undefined. Required: a shell that left it
    *  out would compile and never report a waiting station. */
   pendingQuestionOf(nodeId: string): string | undefined
+  /**
+   * T228 — the node's standing rate-limit reading (`mirrorEntry(id)?.rateLimited`): when it was
+   * taken and how long the provider said to wait. Optional, and an unwired probe reports NO rate
+   * limit — the pre-T228 behaviour, where such a turn is reported as a generic `turn-errored`.
+   */
+  rateLimitOf?(nodeId: string): { retryAfterMs: number; at: number } | undefined
   /** The canvas leg's durable line, on the recipient's card. `false` = no reachable log. */
   appendBoardLog(projectId: string, entry: BoardLogEntry): Promise<boolean>
   /** The pane leg: `deliverStationNotice` over the shell's messaging deps. Absent ⇒ canvas only. */
@@ -140,6 +147,9 @@ interface Episode {
   resolveUntil: number
   pane?: StationNoticePane
   paneDetail?: string
+  /** T228: the cooldown the notice was raised with, so the body names the wait the orchestrator is
+   *  being asked to serve (`stationNoticeBody`'s only extra fact). */
+  retryAfterMs?: number
   /** The one extra attempt each of these gets has been spent. */
   rateRetried?: boolean
   expiryRetried?: boolean
@@ -355,11 +365,19 @@ export class StationNoticeMonitor {
     // unrelated hook traffic and drops it on the answer, an interrupt or a session boundary.
     if (t.question && this.deps.pendingQuestionOf(stationNodeId) !== t.question.id)
       t.question = undefined
-    const obs = {
+    const obs: StationObservation = {
       state: t.state,
       lastTurnErrored: t.errored,
       dropped: t.dropped,
       questionSince: t.question?.since
+    }
+    // T228: the standing rate-limit reading, as the cooldown STILL TO RUN at this moment. The
+    // reading itself is not cleared when it lapses (it still describes the turn that ended), so the
+    // deadline is judged here — a lapsed one must not raise the actionable row.
+    const reading = this.deps.rateLimitOf?.(stationNodeId)
+    if (reading) {
+      const left = reading.at + reading.retryAfterMs - now
+      if (left > 0) obs.rateLimited = { retryAfterMs: left }
     }
     // The table is asked twice at most: first without the recipient (DROPPED and ERRORED do not
     // depend on it — and resolving a recipient reads the persisted canvases, so a station that
@@ -382,7 +400,12 @@ export class StationNoticeMonitor {
       })
     }
     if (!reason) return
-    const ep: Episode = { reason, at: now, resolveUntil: now + STATION_RECIPIENT_GRACE_MS }
+    const ep: Episode = {
+      reason,
+      at: now,
+      resolveUntil: now + STATION_RECIPIENT_GRACE_MS,
+      ...(obs.rateLimited ? { retryAfterMs: obs.rateLimited.retryAfterMs } : {})
+    }
     t.episode = ep
     t.turnSinceNotice = false
     if (recipient) this.tell(stationNodeId, ep, recipient)
@@ -421,7 +444,11 @@ export class StationNoticeMonitor {
     const deliver = this.deps.deliver
     const recipient = ep.recipient
     if (!deliver || !recipient) return
-    const body = stationNoticeBody({ id: stationNodeId, title: recipient.stationTitle }, ep.reason)
+    const body = stationNoticeBody(
+      { id: stationNodeId, title: recipient.stationTitle },
+      ep.reason,
+      ep.retryAfterMs !== undefined ? { retryAfterMs: ep.retryAfterMs } : undefined
+    )
     void deliver({ stationNodeId, recipientNodeId: recipient.recipientNodeId, body })
       .then(
         (o) => o,

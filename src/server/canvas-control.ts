@@ -266,6 +266,9 @@ export async function initServerCanvasControl(
         factory.openerOf(stationNodeId)
       ),
     pendingQuestionOf: (nodeId) => mirrorEntry(nodeId)?.pendingQuestion?.toolUseId,
+    // T228: same reading the desktop hands over — the Server Edition's mirror takes it in its own
+    // boot path (pty-manager is shell-agnostic), so the actionable row exists on both shells.
+    rateLimitOf: (nodeId) => mirrorEntry(nodeId)?.rateLimited,
     appendBoardLog: (projectId, entry) => deps.boardLog.append(projectId, entry),
     deliver: (notice) => deliverStationNotice(notice, messaging),
     publish: (views) => platform().broadcast(IPC.stationNoticeChanged, views),

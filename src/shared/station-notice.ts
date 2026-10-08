@@ -29,7 +29,7 @@ import { isSafeNodeId } from './safe-id'
 import type { StationOutcome } from './station-outcome'
 
 /** The closed set of reasons. A reason that is not in this union cannot produce a notice. */
-export type StationFailureReason = 'turn-errored' | 'dropped' | 'question-unanswered'
+export type StationFailureReason = 'turn-errored' | 'rate-limited' | 'dropped' | 'question-unanswered'
 
 /**
  * How long a station's QUESTION must stay unanswered — measured from the moment it was asked —
@@ -72,6 +72,17 @@ export interface StationObservation {
    *  Cleared by the station's next genuine new turn — the renderer's `lastTurnError`, recomputed
    *  from the same event stream. */
   lastTurnErrored?: boolean
+  /**
+   * T228 — the station's provider is RATE LIMITING it, with the cooldown still to run (read off its
+   * pane by the shell when the turn died, and carried on the status mirror).
+   *
+   * A more SPECIFIC fact than `lastTurnErrored` and it implies it: the reading is only ever taken on
+   * an errored turn end. It has its own row because the action differs in a way the orchestrator
+   * must not have to infer — "an API/model error" invites an immediate retry, and against a
+   * cooldown that retry dies the same way, which is exactly the behaviour this ticket exists to
+   * stop. `undefined` = no reading, or one whose cooldown has already run out.
+   */
+  rateLimited?: { retryAfterMs: number }
   /** The DROPPED verdict: the CLI left the pane and nothing accounted for it (the renderer's
    *  pane measurement, `terminal/agent-liveness.ts`). */
   dropped?: boolean
@@ -97,6 +108,15 @@ export interface StationTrigger {
   /** That first option's text. Not common, because what it means depends on why the station
    *  stopped. `<station>` is replaced by the station's id. */
   retry: string
+  /**
+   * T228 — an EXTRA clause on the reason line, rendered only when the cooldown's length is known.
+   *
+   * The plain `label` stays time-free because the two other surfaces that read it have no reading
+   * to fill a time from: the chip tooltip (`stationNoticeTooltip`) and the CLI help text generated
+   * from this table (`canvas-control-core.ts`). A placeholder left in either would be worse than a
+   * missing number.
+   */
+  cooldown?: (retryAfterMs: number) => string
   /** The row's condition. Reads only facts that are present; an unknown never satisfies it. */
   fires(obs: StationObservation, ctx: StationFailureContext): boolean
 }
@@ -132,6 +152,22 @@ export const STATION_TRIGGERS: readonly StationTrigger[] = [
       obs.state !== 'working' &&
       obs.state !== 'blocked' &&
       obs.state !== 'waiting'
+  },
+  {
+    reason: 'rate-limited',
+    label:
+      'its provider is rate limiting it and its last turn was cut off before it produced anything',
+    option: 'retry',
+    retry:
+      'wait the cooldown out (<retry>), then `send --node <station> --text "…"`. The limit is on ' +
+      'the provider’s side, not a fault in your order — re-sending now only opens another turn ' +
+      'that dies the same way.',
+    cooldown: (ms) =>
+      `it cannot run a turn for about ${Math.ceil(ms / 1000)}s`,
+    // A rate limit implies the errored turn — the reading is only ever taken on one. Checked FIRST
+    // so an orchestrator is told the actionable fact (wait) rather than the generic one (retry).
+    fires: (obs) =>
+      obs.state === 'done' && obs.lastTurnErrored === true && obs.rateLimited !== undefined
   },
   {
     reason: 'turn-errored',
@@ -196,16 +232,27 @@ export function stationNoticeTitle(raw: unknown): string {
  */
 export function stationNoticeBody(
   station: { id: string; title?: unknown },
-  reason: StationFailureReason
+  reason: StationFailureReason,
+  /**
+   * T228 — how long the station's provider will keep refusing it, when that is known. The ONLY
+   * fact a notice takes beyond its fixed text: with it the reason line names the wait ("it cannot
+   * run a turn for about 120s") and the retry option can name it too; without it the notice is the
+   * pre-T228 text, which is what the chip tooltip and every non-rate-limit reason still say.
+   */
+  opts?: { retryAfterMs?: number }
 ): string {
   const row = stationTrigger(reason)
   if (!row) throw new Error(`unknown station failure reason: ${reason}`)
   const id = isSafeNodeId(station.id) ? station.id : '(unknown id)'
-  const fill = (s: string): string => s.replace(/<station>/g, id)
+  const retryAfterMs =
+    typeof opts?.retryAfterMs === 'number' && opts.retryAfterMs > 0 ? opts.retryAfterMs : undefined
+  const wait = retryAfterMs === undefined ? 'the wait the provider named' : `≈${Math.ceil(retryAfterMs / 1000)}s`
+  const fill = (s: string): string => s.replace(/<station>/g, id).replace(/<retry>/g, wait)
+  const cooldown = retryAfterMs !== undefined ? row.cooldown?.(retryAfterMs) : undefined
   return [
     'nodeterm station notice: a station you opened has stopped.',
     `station: ${id} "${stationNoticeTitle(station.title)}"`,
-    `reason: ${row.label}.`,
+    `reason: ${row.label}${cooldown ? ` — ${cooldown}` : ''}.`,
     'You are told ONCE: nothing more will be said about this station until it completes a turn',
     'successfully. Decide now:',
     `- ${row.option}: ${fill(row.retry)}`,
