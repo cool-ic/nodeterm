@@ -263,7 +263,11 @@ class NotchHudController {
       // `internal` is what keeps an external monitor at a low resolution from reading as notched.
       internal: d.internal === true,
       notchWidth: sanitizeNotchWidth(this.tunables.notchWidth),
-      offsetY: this.placementSettings().offsetY
+      offsetY: this.placementSettings().offsetY,
+      // T227: the side, because `bottom-right` is a different WINDOW (a small box in the work area's
+      // corner) rather than a different place inside the full-width top strip. Sanitized here like
+      // every other hand-editable setting — `hudGeometry` is pure and takes what it is given.
+      align: this.placementSettings().align
     })
   }
 
@@ -369,6 +373,7 @@ class NotchHudController {
     // claimed for a window that cannot paint over the notch.
     const p = hudPlacement({
       width: g.width,
+      height: g.height,
       bar: g.bar,
       notchWidth: g.notchWidth,
       notchCenterX: g.notchCenterX,
@@ -388,7 +393,12 @@ class NotchHudController {
       capsuleX: p.capsuleX,
       capsuleTop: p.capsuleTop,
       panelLeft: p.panelLeft,
-      panelWidth: p.panelWidth
+      panelWidth: p.panelWidth,
+      // T227: the docked layout's own numbers — absent for every other side, so the renderer's
+      // top-anchored rules are untouched by the field's presence.
+      docked: p.docked === true,
+      ...(p.capsuleBottom !== undefined ? { capsuleBottom: p.capsuleBottom } : {}),
+      ...(p.expandedMaxHeight !== undefined ? { expandedMaxHeight: p.expandedMaxHeight } : {})
     })
   }
 }

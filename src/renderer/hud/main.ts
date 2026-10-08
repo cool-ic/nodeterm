@@ -50,6 +50,11 @@ interface HudPush {
   capsuleTop: number
   panelLeft: number
   panelWidth: number
+  /** T227 — docked in the work area's bottom-right corner: the capsule hangs by its BOTTOM edge
+   *  (`capsuleBottom`) and the panel grows upward, bounded by `expandedMaxHeight`. */
+  docked?: boolean
+  capsuleBottom?: number
+  expandedMaxHeight?: number
 }
 interface HudApi {
   onRows(cb: (push: HudPush) => void): () => void
@@ -479,12 +484,17 @@ function applyPlacement(push: HudPush): void {
   // `notchless` class because the shape is no longer only about the display — a notched Mac with
   // the capsule on the left, or lowered off the notch, is a pill too.
   cls.toggle('pill', !fused)
+  // T227: the docked layout is a `pill` PLUS bottom anchoring — its own class, because it changes
+  // which edge the capsule is positioned by (`bottom`, not `top`) and how the panel grows.
+  cls.toggle('dock-bottom-right', push.docked === true)
   const anchor = push.anchor === 'left' || push.anchor === 'right' ? push.anchor : 'center'
   cls.toggle('anchor-left', anchor === 'left')
   cls.toggle('anchor-center', anchor === 'center')
   cls.toggle('anchor-right', anchor === 'right')
   if (typeof push.capsuleX === 'number') rs.setProperty('--capsule-x', `${push.capsuleX}px`)
   if (typeof push.capsuleTop === 'number') rs.setProperty('--capsule-top', `${push.capsuleTop}px`)
+  if (typeof push.capsuleBottom === 'number') rs.setProperty('--capsule-bottom', `${push.capsuleBottom}px`)
+  if (typeof push.expandedMaxHeight === 'number') rs.setProperty('--dock-expanded-max-h', `${push.expandedMaxHeight}px`)
   if (typeof push.panelLeft === 'number') rs.setProperty('--panel-left', `${push.panelLeft}px`)
   if (typeof push.panelWidth === 'number') rs.setProperty('--panel-width', `${push.panelWidth}px`)
 }

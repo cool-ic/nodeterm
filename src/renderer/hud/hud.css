@@ -152,6 +152,36 @@ body {
   border-radius: var(--pill-radius);
 }
 
+/* --- T227: the bottom-right dock -------------------------------------------------------------
+   `notchAlign: 'bottom-right'` — a standalone pill in the WORK AREA's bottom-right corner (main's
+   `hudGeometry` puts the window there itself, so this file never needs the display's coordinates).
+
+   Two things change versus every other pill, and they are the whole of the layout:
+
+   1. WHICH EDGE POSITIONS IT. `top: var(--capsule-top)` (the strip layout) becomes `bottom:
+      var(--capsule-bottom)` — the capsule hangs from the corner instead of the menu bar, and because
+      the same element grows into the panel, that ONE swap is what makes the panel grow UPWARD as
+      its `max-height` rises. Its right edge is still `--capsule-x` (main reports `anchor: right`),
+      so the collapsed pill sits `HUD_EDGE_MARGIN` from the work area's right and bottom edges.
+
+   2. HOW TALL IT MAY GROW. `--dock-expanded-max-h` is main's `expandedMaxHeight` = the window's
+      height minus the edge margin and the top gap. The window is inside the work area, so bounding
+      the growth here is what keeps the panel off the screen edge in a short work area: the panel is
+      SHORTENED and scrolls, never clipped by (or pushed out of) the window. The panel's own
+      max-height follows the same number, or its rows would be cut off by the capsule's
+      `overflow: hidden` with no way to scroll to them. */
+.dock-bottom-right .hud-capsule {
+  top: auto;
+  bottom: var(--capsule-bottom, 12px);
+}
+.dock-bottom-right .hud-capsule.expanded {
+  max-height: var(--dock-expanded-max-h, 436px);
+}
+.dock-bottom-right .hud-panel {
+  padding-top: 8px; /* no notch / menu-bar strip to clear */
+  max-height: calc(var(--dock-expanded-max-h, 436px) - 18px);
+}
+
 /* --- Collapsed indicator: the mascots, LEFT and vertically CENTRED in the notch strip ---
    The capsule is exactly bar-tall, so the mascots sit centred on the bar's midline, left-packed,
    inside black that extends the notch — the notch reads as wider, never taller.
