@@ -19,13 +19,10 @@ export const CANVAS_CHROME_SELECTOR = [
   '.dock',
   '.minimap',
   '.react-flow__controls',
-  // The bottom-left pill cluster (usage + system resources) opts in via `data-canvas-chrome` on its
-  // wrapper, so the two pills are ONE obstacle rect instead of two overlapping inflated ones. The
-  // wrapper's border box is exactly their union (they are its only, in-flow, children), and an
-  // empty cluster measures 0 and is dropped by the size filter below.
-  '.controls-cluster',
+  // T235: the two top clusters (`.sessions-icon-cluster`, `.controls-cluster`) are gone — their
+  // buttons live inside the rail cards, which are `data-canvas-chrome` elements. Naming the dead
+  // selectors here would reserve a rect that no longer exists.
   '.sessions-sidebar',
-  '.sessions-icon-cluster',
   '.top-banners',
   '.presence-prompt',
   '.dictation',
