@@ -16755,6 +16755,60 @@ export function Canvas() {
     []
   )
 
+  // T224 — the Dock badge's self-heal. An unread entry is cleared ONLY by selecting its node, and
+  // the table outlives restarts (localStorage `nodeterm.agentStatus`), so an entry left behind by a
+  // node that no project canvas holds any more shows a badge forever and can never be cleared by
+  // any gesture (the employer's stuck "3"). Main answers with the union of every project canvas's
+  // node ids and re-pushes it after every workspace save, so the same heal runs without a restart.
+  //
+  // The union is main's cross-project index — open, recently closed and SSH canvases alike —
+  // because a CLOSED project's node must keep counting (its session may still be running), and
+  // `null` (the index not loaded, one unreadable local ref, a never-cached SSH project) means KEEP
+  // EVERYTHING: an answer that could not be produced is not evidence a node is gone.
+  //
+  // What this renderer holds is unioned IN as evidence of existence, never used as the criterion:
+  // `useProjects` covers every project this window has loaded (closed ones included), and the
+  // mounted canvas covers the window between a node's birth and the next workspace write. Judging
+  // by the CURRENT canvas alone is exactly what a closed project's nodes must survive.
+  //
+  // Pinned to `window.nodeTerminal`, not the canvas's session `api`: the union describes THIS
+  // machine's workspace index and the table pruned is the local one (`useAgentStatus`), so this
+  // must not follow a relay binding. An api without the verb (Server Edition) leaves everything
+  // alone — the same fail-safe as `null`.
+  useEffect(() => {
+    const wire = window.nodeTerminal
+    if (!wire?.knownNodeIds) return
+    const prune = (knownIds: string[] | null): void => {
+      if (!knownIds) return
+      const known = new Set(knownIds)
+      for (const p of useProjects.getState().projects) for (const n of p.nodes) known.add(n.id)
+      for (const n of nodesRef.current) known.add(n.id)
+      const removed = useAgentStatus.getState().pruneMissingNodes(known)
+      // This drops PERSISTED state, so it is never silent: main mirrors renderer consoles into the
+      // debug log ring, where the line is visible under the `agentStatus` tag.
+      if (removed.length)
+        console.warn(
+          `[agentStatus] pruned ${removed.length} unread entries of nodes no project holds: ${removed.join(', ')}`
+        )
+    }
+    let live = true
+    void wire
+      .knownNodeIds()
+      .then((ids) => {
+        if (live) prune(ids)
+      })
+      .catch(() =>
+        // Visible, not silent: the self-heal could not run, so entries an earlier run left behind
+        // are still standing.
+        console.warn('[agentStatus] could not read the project node list; unread entries kept')
+      )
+    const off = wire.onKnownNodeIds?.(prune)
+    return () => {
+      live = false
+      off?.()
+    }
+  }, [nodesRef])
+
   // Agent lifecycle, reported by each agent's own hooks via the main-process hook server
   // (`main/agents/hook-server.ts`) and mapped to the shared 4-state model by the per-agent
   // normalizers (`shared/agents/normalize.ts`): working / waiting / blocked / done. On a turn
