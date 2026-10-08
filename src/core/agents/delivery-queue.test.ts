@@ -9,6 +9,7 @@ import {
   type CancelTimer
 } from './delivery-queue'
 import type { AgentMessageOutcome } from './agent-message-decide'
+import { RETRYABLE } from './agent-message-decide'
 
 /**
  * The bounded per-target queue, every rule driven with a fake clock, a fake scheduler and a
@@ -291,4 +292,41 @@ describe('DeliveryQueue', () => {
     expect(DELIVERY_QUEUE_TTL_MS).toBeGreaterThan(0)
     expect(Number.isFinite(DELIVERY_QUEUE_TTL_MS)).toBe(true)
   })
+  // T234 — a flush that did not reach the pane. Which of the two write outcomes it is decides
+  // whether the entry survives, and that split is the whole ticket: a write that burned its bounded
+  // retries against a live session is terminal (and the sender is told), while a write that failed
+  // because the shell was quitting, or because the probe could not answer, is a HOLD.
+  it('a held write keeps the entry queued and drains no further', async () => {
+    const h = harness()
+    h.setOutcome({ kind: 'targetWriteHeld', attempts: 4, reason: 'shell-teardown' })
+    const q = new DeliveryQueue(h.deps)
+    await q.enqueue(req())
+    await q.onTargetIdle('dst')
+    expect(q.depth('dst')).toBe(1)
+    // Held is not an ending: no `onFlushed`, so no sender notice and no chip settling.
+    expect(h.flushed).toEqual([])
+    expect(h.expired).toEqual([])
+  })
+
+  it('an exhausted write against a live session IS terminal, and reaches the sender', async () => {
+    const h = harness()
+    h.setOutcome({ kind: 'targetWriteFailed', attempts: 4, reason: 'retries-exhausted' })
+    const q = new DeliveryQueue(h.deps)
+    await q.enqueue(req())
+    await q.onTargetIdle('dst')
+    expect(q.depth('dst')).toBe(0)
+    expect(h.flushed).toHaveLength(1)
+    expect(h.flushed[0].outcome).toEqual({
+      kind: 'targetWriteFailed',
+      attempts: 4,
+      reason: 'retries-exhausted'
+    })
+  })
+
+  it('an ordinary send that expires is still reported retryable — the T207 behavior is unchanged', () => {
+    // The regression nail: `expired` stays retryable for the sender, so the receipt and the notice
+    // keep telling it to try once more. T234 added outcomes; it did not reclassify any.
+    expect(RETRYABLE.expired).toBe(true)
+  })
+
 })

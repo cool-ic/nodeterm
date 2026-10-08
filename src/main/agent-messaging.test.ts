@@ -14,10 +14,13 @@ import {
   renderMessageOutcome,
   onMessagingAgentEvent,
   createDeliveryQueue,
+  NOTICE_EXCERPT_MAX,
+  unflushedSenderNotice,
   type AgentMessagingDeps
 } from '../core/agents/agent-messaging'
 import type { BoardLogEntry } from '../shared/types'
 import { RETRYABLE, type AgentMessageOutcome } from '../core/agents/agent-message-decide'
+import { MAX_WRITE_ATTEMPTS } from '../core/agents/agent-message'
 import { resetMessageFlow, FANOUT_PER_TURN } from '../core/agents/agent-message-flow'
 import { NOTIFY_BODY, STATION_NOTICE_VERB } from '../shared/agents/agent-messaging'
 import { resetAgentMessageTraceForTests } from '../core/agents/agent-message-trace'
@@ -284,6 +287,10 @@ describe('renderMessageOutcome', () => {
       { kind: 'targetNotPasteAware' },
       { kind: 'targetGone' },
       { kind: 'targetNotStarted' },
+      // T234's two write outcomes. `targetWriteHeld` is retryable-for-the-sender (the message is
+      // still held, not lost), so the loop below demands the retry wording for it too.
+      { kind: 'targetWriteFailed', attempts: 4, reason: 'retries-exhausted' },
+      { kind: 'targetWriteHeld', attempts: 1, reason: 'shell-teardown' },
       { kind: 'notPermitted', reason: 'switch-off' }
     ]
     for (const o of samples) {
@@ -834,5 +841,191 @@ describe('the opener’s send WAKES its unconfirmed station (T190)', () => {
     const { outcome } = await deliverFromControl(req(), deps)
     expect(outcome).toEqual({ kind: 'targetBusy', state: 'working' })
     expect(deps.rec.sent).toEqual([])
+  })
+})
+
+// ── T234: a failed pane write is not a death, and a dropped message tells its sender ────────────
+//
+// The field incident: a dispatch was queued for a mid-turn node, the target then went idle, the
+// flush's write failed (in the same minute as an app restart), the message was refused `targetGone`
+// and dropped — and the sender had no in-band hint at all, finding it half an hour later in the
+// board log. These tests drive the whole service for the three behaviors that fixes.
+describe('T234 — a failed pane write', () => {
+  /** The service's own deps with a REAL queue (the production factory), so the split between the
+   *  two write outcomes is exercised through the wiring the shells actually build. */
+  function wired(over: Partial<AgentMessagingDeps> = {}): AgentMessagingDeps {
+    const deps = fakeDeps({ wait: async () => {}, ...over })
+    deps.queue = createDeliveryQueue(deps, { schedule: () => () => {} })
+    return deps
+  }
+
+  const busy = (): MirrorEntry => ({
+    state: 'working',
+    updatedAt: 1,
+    stateVerified: true,
+    clientRevision: MANAGED_SCRIPT_REVISION
+  })
+
+  it('a write that fails once and then succeeds is DELIVERED — no notice, no queue entry', async () => {
+    let calls = 0
+    const noticed: AgentMessageOutcome[] = []
+    const deps = wired({
+      sendEnvelope: async (id, payload) => {
+        // Two writes: the delivery retried the first failure, and there is no third.
+        calls++
+        return calls > 1
+      },
+      onQueuedResult: (_req, o) => noticed.push(o)
+    })
+    const { outcome, reply } = await deliverFromControl(req(), deps)
+    expect(outcome.kind).toBe('delivered')
+    expect(reply.ok).toBe(true)
+    expect(calls).toBe(2)
+    // Nothing to tell the sender: no `onQueuedResult`, and nothing parked in the queue.
+    expect(noticed).toEqual([])
+    expect(deps.queue!.depth('b1')).toBe(0)
+  })
+
+  it('a write that never goes out against a LIVE session is terminal, and the sender is told in band', async () => {
+    let entry = busy()
+    const noticed: AgentMessageOutcome[] = []
+    const deps = wired({
+      sendEnvelope: async () => false,
+      hasLiveSession: () => 'live',
+      mirrorEntry: () => entry,
+      onQueuedResult: (_req, o) => noticed.push(o)
+    })
+    // Queued first (the target is mid-turn), then the target goes idle and the flush writes.
+    const first = await deliverFromControl(req(), deps)
+    expect(first.outcome.kind).toBe('queued')
+    entry = { ...idle }
+    await deps.queue!.onTargetIdle('b1')
+    expect(deps.queue!.depth('b1')).toBe(0)
+    // The terminal outcome carries the attempt count and the verdict — the two facts the field
+    // incident lacked ("targetGone" with no number and no reason).
+    expect(noticed).toEqual([
+      { kind: 'targetWriteFailed', attempts: MAX_WRITE_ATTEMPTS, reason: 'retries-exhausted' }
+    ])
+  })
+
+  it('a write failure during the quit window HOLDS the message instead of blaming the target', async () => {
+    let entry = busy()
+    const noticed: AgentMessageOutcome[] = []
+    const deps = wired({
+      sendEnvelope: async () => false,
+      shellTearingDown: () => true,
+      mirrorEntry: () => entry,
+      onQueuedResult: (_req, o) => noticed.push(o)
+    })
+    const first = await deliverFromControl(req(), deps)
+    expect(first.outcome.kind).toBe('queued')
+    entry = { ...idle }
+    await deps.queue!.onTargetIdle('b1')
+    // Held: the entry survives for the next boot, and nothing was reported as an ending.
+    expect(deps.queue!.depth('b1')).toBe(1)
+    expect(noticed).toEqual([])
+  })
+
+  it('a held write on a FIRST attempt parks the message instead of refusing it', async () => {
+    const deps = wired({ sendEnvelope: async () => false, shellTearingDown: () => true })
+    const { outcome, reply } = await deliverFromControl(req(), deps)
+    expect(outcome).toMatchObject({ kind: 'queued' })
+    expect(reply.ok).toBe(true)
+    expect(outcome.kind === 'queued' && outcome.queuedBecause).toMatch(/shutting down/)
+    expect(deps.queue!.depth('b1')).toBe(1)
+  })
+})
+
+describe('T234 — unflushedSenderNotice', () => {
+  const projectOf = (id: string): string | undefined =>
+    id === 'a1' || id === 'b1' ? 'p1' : id === 'c2' ? 'p2' : undefined
+  const body = (o: Parameters<typeof unflushedSenderNotice>[1]): string =>
+    unflushedSenderNotice(req(), o, projectOf)?.body ?? ''
+
+  it('is null for an ending that owes no notice', () => {
+    const delivered: AgentMessageOutcome = {
+      kind: 'delivered',
+      traceId: 't',
+      traced: 'memory',
+      receipt: 'observed',
+      signal: 'newTurn'
+    }
+    // A flush that LANDED lost nothing; `expired` has its own in-band leg (the dead letter); a
+    // station notice's chip is the monitor's; a board comment's source is a person, not a node.
+    expect(unflushedSenderNotice(req(), delivered, projectOf)).toBeNull()
+    expect(unflushedSenderNotice(req(), { kind: 'expired', traceId: 't', queuedForMs: 1 }, projectOf)).toBeNull()
+    expect(
+      unflushedSenderNotice(req({ verb: STATION_NOTICE_VERB }), { kind: 'targetGone' }, projectOf)
+    ).toBeNull()
+    expect(
+      unflushedSenderNotice(
+        req({ sourceNodeId: 'board-comment:c1' }),
+        { kind: 'targetGone' },
+        projectOf
+      )
+    ).toBeNull()
+  })
+
+  it('says what was not delivered, why, and quotes the message back', () => {
+    const notice = unflushedSenderNotice(
+      req({ body: 'please\nrebase   the\nbranch' }),
+      { kind: 'targetWriteFailed', attempts: 4, reason: 'retries-exhausted' },
+      projectOf
+    )
+    expect(notice).not.toBeNull()
+    // The reversed route, same as the expiry dead letter: from the unreachable target, to the sender.
+    expect(notice!.sourceNodeId).toBe('b1')
+    expect(notice!.targetNodeId).toBe('a1')
+    expect(notice!.projectId).toBe('p1')
+    expect(notice!.body).toContain('not-delivered')
+    expect(notice!.body).toContain('send to b1')
+    expect(notice!.body).toContain('targetWriteFailed')
+    expect(notice!.body).toContain('4 write attempts')
+    expect(notice!.body).toContain('dropped from the queue')
+    // The excerpt is one line, so it cannot fake a frame line or a second sentence.
+    expect(notice!.body).toContain('"please rebase the branch"')
+  })
+
+  it('caps the excerpt and names the reason for a refusal the world changed under', () => {
+    const long = 'x'.repeat(NOTICE_EXCERPT_MAX + 50)
+    const notice = unflushedSenderNotice(
+      req({ body: long }),
+      { kind: 'notPermitted', reason: 'switch-off' },
+      projectOf
+    )
+    expect(notice!.body).toContain('x'.repeat(NOTICE_EXCERPT_MAX) + '…')
+    expect(notice!.body).not.toContain('x'.repeat(NOTICE_EXCERPT_MAX + 1))
+    expect(notice!.body).toMatch(/switched off|Settings → Agents/)
+  })
+
+  it('the notice it builds is a DELIVERABLE station notice — the reversed route accepts it', async () => {
+    // The whole point of the new leg: the sender gets an actual message, not a shape that looks
+    // right. Driving it through the service proves the reversed route (from the unreachable target,
+    // to the sender) passes scope, ownership, the switch and the pane gate — the same route the
+    // expiry dead letter rides.
+    const notice = unflushedSenderNotice(
+      req({ body: 'rebase the branch' }),
+      { kind: 'targetWriteFailed', attempts: MAX_WRITE_ATTEMPTS, reason: 'retries-exhausted' },
+      projectOf
+    )
+    expect(notice).not.toBeNull()
+    const deps = fakeDeps({
+      // The notice's TARGET is the sender (a1), so the receipt must come from a1 — the default
+      // harness confirms b1, which is the notice's SOURCE here.
+      subscribeReceipts: (cb) => {
+        const t = setTimeout(() => cb({ nodeId: 'a1', newTurn: true, verified: true }), 5)
+        return () => clearTimeout(t)
+      }
+    })
+    const { outcome } = await deliverFromControl(
+      { verb: STATION_NOTICE_VERB, ...notice! } as never,
+      deps
+    )
+    expect(outcome.kind).toBe('delivered')
+    expect(deps.rec.sent).toHaveLength(1)
+    expect(deps.rec.sent[0].nodeId).toBe('a1') // the SENDER's pane, not the target's
+    expect(deps.rec.sent[0].payload).toContain('from: nodeterm station notice')
+    expect(deps.rec.sent[0].payload).toContain('not-delivered')
+    expect(deps.rec.sent[0].payload).toContain('rebase the branch')
   })
 })

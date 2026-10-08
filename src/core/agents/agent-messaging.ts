@@ -38,6 +38,7 @@ import {
 } from './agent-message'
 import {
   RETRYABLE,
+  WRITE_FAILURE_TEXT,
   type AgentMessageOutcome,
   type NotPermittedReason
 } from './agent-message-decide'
@@ -68,6 +69,7 @@ import {
 } from './delivery-queue'
 import type { DurableFactFile } from '../durable-state'
 import { randomUUID } from 'crypto'
+import { isSafeNodeId } from '../../shared/safe-id'
 import { nodeTokenFilePresent } from './node-token-files'
 import { mirrorEntry as coreMirrorEntry, type MirrorEntry } from '../agent-status-mirror'
 import {
@@ -181,6 +183,19 @@ export interface AgentMessagingDeps {
    * Optional; absent ⇒ such a target is refused `unproven-target-owner` as before.
    */
   heldLaunch?(projectId: string, nodeId: string): boolean
+  /**
+   * T234: is this shell SHUTTING DOWN right now (a quit in progress)? A pane write that fails then
+   * says nothing about the target — the pane is unreachable because this process is going away —
+   * so the delivery holds the queued message for the next boot instead of reporting a death.
+   * Desktop wires its `quitting` flag; absent ⇒ false (today's behavior).
+   */
+  shellTearingDown?(): boolean
+  /**
+   * T234: the backoff clock between the bounded write retries (2 s / 5 s / 15 s). Injected exactly
+   * like the queue's `schedule`, so the suite drives a 22-second worst case instantly; production
+   * leaves it out and gets a real `setTimeout`.
+   */
+  wait?(ms: number): Promise<void>
   /**
    * Optional shell-specific creator gate. Server Edition supplies its process-local caller→target
    * proof so message delivery cannot type into a session the caller did not spawn. Desktop omits
@@ -706,6 +721,29 @@ export function renderMessageOutcome(o: AgentMessageOutcome): AgentMessageReply 
         error: `targetGone: no live session exists for the target node. ${advice}`,
         result: o
       }
+    // T234 — the two ways a pane write ends without the bytes going out. `attempts` and the reason
+    // ride the receipt (and the trace) because "a write failed" with no count and no verdict is
+    // exactly the sentence that cost half an hour of log-reading in the field.
+    case 'targetWriteFailed':
+      return {
+        ok: false,
+        error:
+          `targetWriteFailed: the pane write did not go out after ${o.attempts} attempt` +
+          `${o.attempts === 1 ? '' : 's'} — ${WRITE_FAILURE_TEXT[o.reason]}. Nothing was typed ` +
+          `into its pane. ${advice}${trace}`,
+        result: o
+      }
+    case 'targetWriteHeld':
+      return {
+        ok: false,
+        error:
+          `targetWriteHeld: the pane write did not go out (${o.attempts} attempt` +
+          `${o.attempts === 1 ? '' : 's'}) and the target cannot be called dead — ` +
+          `${WRITE_FAILURE_TEXT[o.reason]}. The message is HELD (the queue keeps it for the ` +
+          `target's next idle; a first attempt parks it there), and nothing was typed into its ` +
+          `pane. ${advice}${trace}`,
+        result: o
+      }
     case 'targetNotStarted':
       return {
         ok: false,
@@ -877,6 +915,14 @@ export async function runDelivery(
     // visible. Measure per CLI before relying on this any further.
     bracketPasteRequested: (id) => deps.envelopePasteReady?.(id) ?? Promise.resolve(true),
     sendEnvelope: (id, envelope, expected) => deps.sendEnvelope(id, envelope, expected),
+    // T234: the two facts a failed pane write needs to be read honestly — the host's three-state
+    // verdict on the session, and whether THIS process is the reason the pane is unreachable (an
+    // app quit in progress). Without them the write failure has one reading only, and that reading
+    // was `targetGone` — a death certificate issued from a failed write. `wait` rides along so the
+    // suite can drive the 2/5/15 s backoff without waiting it out.
+    liveness: (id) => Promise.resolve(deps.hasLiveSession(id)),
+    shellTearingDown: () => deps.shellTearingDown?.() === true,
+    ...(deps.wait ? { wait: (ms: number) => deps.wait!(ms) } : {}),
     mirrorEntry: (id) => (deps.mirrorEntry ?? coreMirrorEntry)(id),
     tokenFilePresent: (id) => nodeTokenFilePresent(id),
     lock: (id, fn) => withNodeLock(id, fn),
@@ -968,7 +1014,12 @@ const QUEUE_ON_BUSY: ReadonlySet<AgentMessageOutcome['kind']> = new Set([
   // Its session has a node identity but has not posted a verified status yet — in practice a CLI
   // started a moment ago (`--run-now`, `run`) that has not sent its first hook. A retry cannot
   // help until it does, and its first verified `done` is exactly what flushes the queue.
-  'targetStatusStale'
+  'targetStatusStale',
+  // T234: the write itself failed and the target may not be called dead (the shell was tearing
+  // down, or the session probe could not answer). Not a refusal: the message is held and the queue
+  // re-runs the whole delivery at the next idle — or restores it on the next boot, which is what
+  // the T233 dispatch needed and did not get.
+  'targetWriteHeld'
 ])
 
 /** How long a message to a target that has not STARTED waits (`targetNotStarted`). The start
@@ -1077,8 +1128,86 @@ function queuedBecauseText(o: AgentMessageOutcome): string {
       return `the pair window is still open (${o.retryAfterMs}ms left)`
     case 'targetNotAgentPane':
       return 'the node is hibernated — its pane is on a shell, and it was woken for this message'
+    case 'targetWriteHeld':
+      return `${WRITE_FAILURE_TEXT[o.reason]} (${o.attempts} write attempt${o.attempts === 1 ? '' : 's'})`
     default:
       return `the target is not ready (${o.kind})`
+  }
+}
+
+/**
+ * T234 (③) — THE IN-BAND LEG OF A QUEUED MESSAGE'S TERMINAL END.
+ *
+ * Until now a flush that ended without reaching the pane was told to the sender's board log and
+ * nowhere else: `onQueuedResult` had exactly ONE consumer (the station-notice monitor), which
+ * returns immediately for any other verb. So an ordinary `send` could be dropped from the queue and
+ * the node that sent it would never hear — in the field, the orchestrator's own words were "I had
+ * no in-band hint at all; I found the drop half an hour later reading the board log".
+ *
+ * The words live HERE, beside the receipt and the trace, so the three surfaces cannot drift into
+ * three claims about one ending. `expired` is deliberately not this function's business: it has its
+ * own in-band leg (`onExpiredInBand`, the dead letter) and two notices for one ending is worse than
+ * one.
+ *
+ * Returns null when no notice is owed: a flush that LANDED (nothing was lost), a station notice
+ * (its monitor draws a chip for it), or a board comment (its source is a person, not a node — the
+ * board row is where it is read).
+ */
+export function unflushedSenderNotice(
+  req: QueuedDeliveryRequest,
+  outcome: AgentMessageOutcome,
+  projectIdOf: (nodeId: string) => string | undefined
+): { sourceNodeId: string; targetNodeId: string; body: string; projectId?: string } | null {
+  if (req.verb === STATION_NOTICE_VERB) return null
+  if (outcome.kind === 'expired') return null
+  if (WROTE.has(outcome.kind)) return null
+  if (!isSafeNodeId(req.sourceNodeId)) return null
+  const projectId = projectIdOf(req.sourceNodeId)
+  const trimmed = req.body.trim().replace(/\s+/g, ' ')
+  const excerpt = trimmed.slice(0, NOTICE_EXCERPT_MAX)
+  return {
+    // The notice comes FROM the target and goes TO the sender — the same reversed route the expiry
+    // dead letter rides (T185/T198): the message that could not reach the target is the one
+    // delivering the news, so the sender can read it where it would have read a reply.
+    sourceNodeId: req.targetNodeId,
+    targetNodeId: req.sourceNodeId,
+    body:
+      `nodeterm not-delivered: your queued ${String(req.verb)} to ${req.targetNodeId} ended as ` +
+      `${outcome.kind} — ${terminalEndReason(outcome)}. It was dropped from the queue; nothing was ` +
+      `typed into its pane. Re-send it once the cause is fixed.` +
+      (excerpt ? ` Original text: "${excerpt}${trimmed.length > NOTICE_EXCERPT_MAX ? '…' : ''}"` : ''),
+    ...(projectId ? { projectId } : {})
+  }
+}
+
+/** How much of the sender's own message the notice quotes back, so it can tell WHICH message was
+ *  lost when it has several in flight. */
+export const NOTICE_EXCERPT_MAX = 120
+
+/** Why a terminal flush ending happened, in the sender's terms. Exhaustive over the kinds that can
+ *  actually reach `onFlushed` — everything the queue re-queues (`REQUEUE_ON`) and everything that
+ *  wrote is filtered out before this is called; the default names the kind rather than going silent. */
+function terminalEndReason(o: AgentMessageOutcome): string {
+  switch (o.kind) {
+    case 'targetWriteFailed':
+      return (
+        `${WRITE_FAILURE_TEXT[o.reason]} after ${o.attempts} write attempt` +
+        `${o.attempts === 1 ? '' : 's'}`
+      )
+    case 'notPermitted':
+      return NOT_PERMITTED_TEXT[o.reason]
+    case 'targetGone':
+      return 'no live session exists for the target node'
+    case 'targetNotAgentPane':
+      return `the pane was no longer running its agent (observed: ${o.observed})`
+    case 'targetStatusUnverified':
+      return o.note
+    case 'targetHookScriptStale':
+      return o.note
+    case 'targetNotPasteAware':
+      return 'the pane cannot take a multi-line message'
+    default:
+      return `the delivery was refused (${o.kind})`
   }
 }
 

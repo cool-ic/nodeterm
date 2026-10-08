@@ -242,6 +242,16 @@ const OUTCOME_TEXT: Record<string, BoardCommentOutcomeView> = {
   },
   targetGone: { tone: 'error', text: 'not delivered — the session is not running' },
   targetNotStarted: { tone: 'error', text: 'not delivered — the session has not started yet' },
+  // T234: the write itself did not go out. The row must not read as a death (the held case may be
+  // this app quitting) and must not read as a delivery (nothing was typed).
+  targetWriteFailed: {
+    tone: 'error',
+    text: 'not delivered — the write into the session failed, repeatedly'
+  },
+  targetWriteHeld: {
+    tone: 'pending',
+    text: 'not delivered yet — the write failed and the session could not be confirmed; still held'
+  },
   notPermitted: { tone: 'error', text: 'not delivered — not permitted' }
 }
 

@@ -366,10 +366,16 @@ export function restoredBindingVerdict(
  *  retryable outcomes (`rateLimited`, `targetBusy`, `targetNotIdleUnknown`, `targetStatusStale`) all
  *  wait for the NEXT idle, and a new retryable outcome added upstream is handled here the moment it
  *  exists rather than silently dropped. `rateLimited` waiting for the next idle (not re-flushing on a
- *  timer) is what keeps the queue from spinning against the very limiter that refused it. */
+ *  timer) is what keeps the queue from spinning against the very limiter that refused it.
+ *
+ *  T234 subtracts one more, and the subtraction is the point of the ticket: `targetWriteFailed` is a
+ *  write that burned its bounded retries against a session the host still sees, so it is TERMINAL —
+ *  keeping it would re-run those retries at every idle event and report nothing. `targetWriteHeld`
+ *  is its opposite and IS here: the write failed for a reason that says nothing about the target
+ *  (the shell was quitting, or the probe could not answer), so the entry waits and survives. */
 const REQUEUE_ON: ReadonlySet<AgentMessageOutcome['kind']> = new Set(
   (Object.keys(RETRYABLE) as AgentMessageOutcome['kind'][]).filter(
-    (k) => RETRYABLE[k] && k !== 'queueFull' && k !== 'expired'
+    (k) => RETRYABLE[k] && k !== 'queueFull' && k !== 'expired' && k !== 'targetWriteFailed'
   )
 )
 
