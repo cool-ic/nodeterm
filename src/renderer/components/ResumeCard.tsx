@@ -51,9 +51,9 @@ export function ResumeCard({ project, nodes, onOpen }: ResumeCardProps): JSX.Ele
   if (dismissed || rows.length === 0) return null
 
   return (
-    // `data-canvas-chrome` is fitView's obstacle-avoidance opt-in (same attribute .canvas-pills
-    // carries): the card occupies screen space over the canvas, so a fit must not park a node
-    // underneath it.
+    // `data-canvas-chrome` is fitView's obstacle-avoidance opt-in (the same attribute the canvas
+    // rail's body carries): the card occupies screen space over the canvas, so a fit must not park
+    // a node underneath it.
     <div className="resume-card" data-canvas-chrome>
       <div className="resume-card__header">
         <span className="resume-card__title">Resume where you left off</span>
