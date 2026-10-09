@@ -8999,8 +8999,25 @@ button.group-node__setup:disabled {
    an accident. Wider, because a row carries a title, a project, a command and a number. */
 .sessmem-panel {
   position: absolute;
-  bottom: 34px;
-  left: 0;
+  /* T255: opens LEFTWARD from the badge circle, the way the usage panel one row below it does
+     (`.usage-popover`). It anchored on `left: 0` — the 42px circle's left edge — and grew rightward:
+     measured live at (1657,214) 380×454 in a 1728-wide window, its right edge landed at 2037, i.e.
+     **309px past the window**, with only the 71px inside the frame painted at all.
+     `right: calc(100% + 17px)`: 17 = the rail card's own 7px inset (1px border + 6px padding, the
+     circle sits that far inside the card) PLUS the 10px edge gap the rail's overlays keep, exactly
+     as `.usage-popover` spells it. `.usage-popover` needs 28px more on top of that because its row
+     has a refresh control that overflows the fixed circle on hover; THIS row has no second child
+     (`SystemResourcePill` renders the button alone), so the circle never drifts and the plain 17px
+     is the right number. The panel's right edge is then always `viewportWidth - 88`, inside the
+     T223 bound (`innerWidth - 22`) at every window width.
+     `bottom: 34 → 48` is the same era fix as that panel's: 34 was 26 (the pill T226 replaced) + 8,
+     so it left the panel's bottom edge 8px BELOW a 42px pill's top edge. 42 + 6 = 48 hangs it 6px
+     above the pill — the relationship `.usage-popover` keeps, so the corner's two panels match.
+     (The glass override at `:root[data-nt-glass='on']` is `54px + 8px` for the taller pill there;
+     62 > 48, so it still clears.) */
+  bottom: 48px;
+  right: calc(100% + 17px);
+  left: auto;
   width: 380px;
   padding: 12px 14px;
   border-radius: 12px;
