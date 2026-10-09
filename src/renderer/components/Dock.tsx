@@ -64,6 +64,9 @@ interface DockProps {
   onZoomOut: () => void
   /** Jump to an exact zoom (a preset percentage), holding the screen centre still. */
   onZoomTo: (pct: number) => void
+  /** T241: the camera lock — the one survivor of the old bottom-left Controls column. */
+  canvasLocked: boolean
+  onToggleCanvasLock: () => void
   onDictate: () => void
   dictateActive: boolean
 }
@@ -109,6 +112,8 @@ export function Dock({
   onZoomIn,
   onZoomOut,
   onZoomTo,
+  canvasLocked,
+  onToggleCanvasLock,
   onDictate,
   dictateActive
 }: DockProps) {
@@ -471,6 +476,24 @@ export function Dock({
           </button>
         </Tooltip>
 
+        {/* T241: the camera lock is the only survivor of the old bottom-left Controls column.
+            It is a MODE toggle, not a camera move — it changes what the three above are allowed
+            to do — so it keeps a hairline of its own above and below rather than reading as a
+            fourth zoom action. Same aria-label contract the Controls button had. */}
+        <span className="dock-sep" />
+        <Tooltip
+          label={canvasLocked ? 'Unlock view (pan/zoom)' : 'Lock view (pan/zoom); nodes stay movable'}
+          placement={tip}
+        >
+          <button
+            className={`dock-btn canvas-lock-btn${canvasLocked ? ' locked' : ''}`}
+            aria-label={canvasLocked ? 'Unlock view' : 'Lock view'}
+            onClick={onToggleCanvasLock}
+          >
+            {canvasLocked ? <LockIcon /> : <UnlockIcon />}
+          </button>
+        </Tooltip>
+
         <span className="dock-sep" />
 
         {/* An arrangement is view state, not a node you add, so it sits in the view cluster rather
@@ -670,6 +693,24 @@ function FrameIcon() {
   return (
     <svg {...S}>
       <path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" />
+    </svg>
+  )
+}
+/* T241: the padlock geometry is icons.tsx's IconLock/IconUnlock re-cut to the dock's own 18px
+   `S` set — a 16px glyph would be the odd one out in a column of 18px neighbours. */
+function LockIcon() {
+  return (
+    <svg {...S}>
+      <rect x="4.5" y="10.5" width="15" height="10.5" rx="2.5" />
+      <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
+    </svg>
+  )
+}
+function UnlockIcon() {
+  return (
+    <svg {...S}>
+      <rect x="4.5" y="10.5" width="15" height="10.5" rx="2.5" />
+      <path d="M8 10.5V7a4 4 0 0 1 7.7-1.5" />
     </svg>
   )
 }

@@ -25,8 +25,6 @@ import {
   applyEdgeChanges,
   Background,
   BackgroundVariant,
-  ControlButton,
-  Controls,
   MarkerType,
   ReactFlow,
   SelectionMode,
@@ -151,12 +149,9 @@ import {
   IconGroup,
   IconJump,
   IconKanban,
-  IconLock,
-  IconMinus,
   IconNote,
   IconPhone,
   IconPlay,
-  IconPlus,
   IconPower,
   IconProject,
   IconRemote,
@@ -167,8 +162,7 @@ import {
   IconSwitch,
   IconTerminal,
   IconTrash,
-  IconUngroup,
-  IconUnlock
+  IconUngroup
 } from '../components/icons'
 import type { SettingsSectionId } from '../components/settings/nav'
 import { projectSectionId } from '../components/settings/project-settings-targets'
@@ -1406,13 +1400,14 @@ export function Canvas() {
     return () => clearTimeout(t)
   }, [notice])
   const [zoomPct, setZoomPct] = useState(100)
-  // Canvas lock (bottom-left Controls): freezes the CAMERA against gestures, namely pan (drag +
+  // Canvas lock (right-rail dock, T241 — formerly the bottom-left Controls column): freezes the
+  // CAMERA against gestures, namely pan (drag +
   // scroll) and zoom (pinch / Cmd+wheel / double-click). Nodes stay draggable and connectable:
   // the point is "stop the map sliding", not "freeze the work". One camera move still gets
   // through, because `autoPanOnNodeDrag` / `autoPanOnConnect` are never passed and so keep React
   // Flow's `true` default: dragging a node or a connection to the viewport edge scrolls the
   // canvas after it.
-  // Deliberate button clicks (Controls +/−/fit, dock zoom, ⌘K fit) still work, matching React
+  // Deliberate button clicks (dock zoom, ⌘K fit) still work, matching React
   // Flow's own lock convention. Transient unless `settings.rememberCanvasLock` says otherwise: a
   // lock that survives restart reads as "the app is frozen" to whoever opens it next, so it stays
   // opt-in, and an untouched install opens unlocked exactly as it always has.
@@ -1977,8 +1972,8 @@ export function Canvas() {
   const rfStore = useStoreApi()
   useEffect(() => publishCanvasZoom(rfStore), [rfStore])
 
-  // Single "fit everything" path for every fit-view entry point (dock button, the built-in
-  // Controls button, the ⌘K palette and the context menu) so they behave identically and there's
+  // Single "fit everything" path for every fit-view entry point (dock button, the ⌘K palette and
+  // the context menu) so they behave identically and there's
   // one place to tune. Solved per click against the CURRENT chrome layout and the CURRENT content
   // shape, so hiding the minimap or fitting a narrow column reclaims that space instead of paying
   // a fixed toll for panels the content never reaches.
@@ -18887,39 +18882,11 @@ export function Canvas() {
               mounted in the experimental 'shared' renderer mode; nothing about it exists for the
               default modes. */}
           {glyphLayerActive && <SharedGlyphLayer />}
-          {/* The library's own zoom/fit glyphs are swapped for the shared icon set so this cluster
-              matches every other floating control; the actions behind them are unchanged. The
-              tooltips open to the RIGHT rather than upward like the dock's: this is a vertical
-              stack, so an upward bubble covers the button above the one being pointed at. */}
-          <Controls showZoom={false} showFitView={false} showInteractive={false} position="bottom-left">
-            <Tooltip label="Zoom in" placement="right">
-              <ControlButton aria-label="Zoom in" onClick={() => zoomIn({ duration: ZOOM_STEP_DURATION_MS })}>
-                <IconPlus />
-              </ControlButton>
-            </Tooltip>
-            <Tooltip label="Zoom out" placement="right">
-              <ControlButton aria-label="Zoom out" onClick={() => zoomOut({ duration: ZOOM_STEP_DURATION_MS })}>
-                <IconMinus />
-              </ControlButton>
-            </Tooltip>
-            <Tooltip label="Fit view" placement="right">
-              <ControlButton aria-label="Fit view" onClick={fitAll}>
-                <IconFit />
-              </ControlButton>
-            </Tooltip>
-            <Tooltip
-              label={canvasLocked ? 'Unlock view (pan/zoom)' : 'Lock view (pan/zoom); nodes stay movable'}
-              placement="right"
-            >
-              <ControlButton
-                className={`canvas-lock-btn${canvasLocked ? ' locked' : ''}`}
-                aria-label={canvasLocked ? 'Unlock view' : 'Lock view'}
-                onClick={() => setCanvasLocked((v) => !v)}
-              >
-                {canvasLocked ? <IconLock /> : <IconUnlock />}
-              </ControlButton>
-            </Tooltip>
-          </Controls>
+          {/* T241: the old bottom-left React Flow controls column is gone. Three of its four
+              buttons (Zoom in / Zoom out / Fit view) were a second copy of the right rail's dock
+              zoom group, and the fourth — the camera lock — moved INTO that group (Dock.tsx),
+              where it is the same .dock-btn family as its neighbours. Nothing mounts the
+              library's controls panel any more. */}
           {/* Peer cursors live INSIDE <ReactFlow>: PresenceLayer uses ViewportPortal +
               useReactFlow, which throw outside the provider — and cursors are flow coordinates. */}
           <PresenceLayer />
@@ -19033,6 +19000,10 @@ export function Canvas() {
               onZoomIn={() => zoomIn({ duration: ZOOM_STEP_DURATION_MS })}
               onZoomOut={() => zoomOut({ duration: ZOOM_STEP_DURATION_MS })}
               onZoomTo={zoomToPct}
+              // The create dock never renders the lock (it is a view-group row), but the props
+              // are part of DockProps so a rename fails typecheck at both call sites.
+              canvasLocked={canvasLocked}
+              onToggleCanvasLock={() => setCanvasLocked((v) => !v)}
               onDictate={toggleDictation}
               dictateActive={dictationOpen}
             />
@@ -19102,6 +19073,8 @@ export function Canvas() {
               onZoomIn={() => zoomIn({ duration: ZOOM_STEP_DURATION_MS })}
               onZoomOut={() => zoomOut({ duration: ZOOM_STEP_DURATION_MS })}
               onZoomTo={zoomToPct}
+              canvasLocked={canvasLocked}
+              onToggleCanvasLock={() => setCanvasLocked((v) => !v)}
               onDictate={toggleDictation}
               dictateActive={dictationOpen}
             />
