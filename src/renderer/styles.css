@@ -841,6 +841,11 @@ body,
 
 /* ---- Bottom-center dock ---- */
 .dock-backdrop {
+  /* T249: a portal to `document.body` (Dock.tsx). It used to render inside the rail card's body,
+     and that body has `backdrop-filter` — which makes it the containing block for FIXED
+     descendants — so `inset: 0` resolved to the card instead of the window (measured: 54×628) and
+     clicking outside a menu hit the canvas instead of closing it. In `document.body` no ancestor
+     carries a filter/transform, so this is the viewport again. */
   position: fixed;
   inset: 0;
   z-index: 19;
@@ -949,8 +954,8 @@ body,
 
 /* Zoom presets, anchored to the readout instead of the dock's left edge like the add-menu. */
 .dock-zoom-menu {
-  left: 50%;
-  transform: translateX(-50%);
+  /* T249: no centering transform — a 168px menu centered on a button at the card's edge ran 56px
+     past the window; it opens away from the edge like every other rail menu now. */
   min-width: 168px;
 }
 
@@ -1008,12 +1013,23 @@ body,
 
 /* Add-node menu above the dock */
 .dock-menu {
-  position: absolute;
-  /* T226/T229: menus open AWAY from the window edge. The base rule (and `.canvas-rail--right`)
-     opens LEFTWARD from the right rail; the left rail overrides to the RIGHT. One anchor per rail,
-     so a menu can never be steered by a per-button flag. */
+  /* T249: FIXED, because the menu is a portal to `document.body` (`DockMenu` in Dock.tsx) — see
+     `railMenuPlacement` there. A menu is anchored to a button that lives inside the rail card's
+     SCROLL container (`.canvas-rail__body`'s `overflow-y: auto`, T235's cap on a short pane), and a
+     scroll container clips what it holds: measured on the packaged build, the Add-node menu had a
+     correct rect (87,51 190×574) and ZERO painted pixels — its centre hit-tested as the canvas —
+     and so did the usage panel. Rendering into `document.body` with viewport coordinates puts every
+     rail menu outside every clip, and the numbers (which edge is anchored, and the vertical
+     clamp) come from the trigger's own rect, so a menu still follows its button when the column
+     scrolls under it. `top`/`left`/`right` are set inline from those numbers; `position: fixed`
+     here is what makes them viewport coordinates. */
+  position: fixed;
   top: 0;
-  right: calc(100% + 10px);
+  left: auto;
+  right: auto;
+  /* Above `.dock-backdrop` (19) so a click on the menu reaches the menu, below the kanban board
+     (25), which is meant to cover the rail. */
+  z-index: 21;
   min-width: 190px;
   display: flex;
   flex-direction: column;
@@ -1063,8 +1079,7 @@ body,
 }
 
 .dock-layouts-menu {
-  left: 50%;
-  transform: translateX(-50%);
+  /* T249: same as the zoom presets — opens away from the edge from its own button. */
   min-width: 260px;
   max-width: 340px;
 }
@@ -8244,6 +8259,11 @@ button.group-node__setup:disabled {
   display: flex;
   flex-direction: column;
   width: 56px;
+  /* T247: the foot the badge cluster occupies. It is a SIBLING of this card body (see
+     `.canvas-rail__badges`), so its space has to be reserved here or the card would shrink by the
+     cluster's height — 42 + 6 + 42 = 90 — and the cluster's own pinned position (the card's bottom,
+     minus its chrome) would move with it. Read by `.canvas-rail__body`'s bottom padding. */
+  --rail-badges-h: 90px;
   /* T235: cap the rail here (this % resolves against .flow-wrap's definite height) and let the
      body scroll inside it, so a tall column never overflows a short pane. */
   max-height: calc(100% - 2 * var(--float-gap));
@@ -8260,12 +8280,10 @@ button.group-node__setup:disabled {
   max-height: calc(100% - var(--float-gap) - 170px);
 }
 
-/* T229: the left rail's menus open RIGHTWARD from the track's right edge (right: 22 + 56 + 10),
-   so a 190px menu lands inside the window instead of leaving the screen edge. */
-.canvas-rail--left .dock-menu {
-  left: calc(100% + 10px);
-  right: auto;
-}
+/* T229/T249: WHICH WAY a rail menu opens is decided in ONE place — `railMenuPlacement` in
+   Dock.tsx, from the rail the trigger sits in (left rail → rightward, right rail → leftward). The
+   CSS no longer anchors the menus at all: they are portaled to `document.body` and positioned from
+   the trigger's rect (see `.dock-menu`), which is also why there is no per-rail override left. */
 
 .canvas-rail__body {
   /* 42px button + 2×6px padding + 2×1px border = 56px. The card can never exceed the buttons. */
@@ -8276,6 +8294,10 @@ button.group-node__setup:disabled {
   align-items: center;
   gap: 6px;
   padding: 7px 6px;
+  /* T247: the slot the badge cluster used to fill as a flex child here — its own flex gap (6px) plus
+     its height, on top of this box's bottom padding — so the card keeps exactly the height, and the
+     cluster exactly the position, it had while it lived inside this scroller. */
+  padding-bottom: calc(7px + 6px + var(--rail-badges-h));
   background: rgba(var(--menu-rgb), 0.92);
   backdrop-filter: blur(10px);
   border: 1px solid var(--border);
@@ -8302,13 +8324,30 @@ button.group-node__setup:disabled {
 }
 
 /* T226: the status badges are 42px circles that grow LEFTWARD on hover/focus into the full pill
-   (usage brings its refresh control back with it), so the track stays button-wide at rest. */
+   (usage brings its refresh control back with it), so the track stays button-wide at rest.
+   T247: OUT OF THE SCROLLER, pinned to the card's foot. This cluster is a child of `.canvas-rail`
+   (a sibling of `.canvas-rail__body`), NOT of the body — that is the whole reason the pill's hover
+   expansion and both panels are visible at all. The body scrolls (T235), and a scroll container
+   clips everything inside it: measured on the packaged build, the hovered pill was sliced off at
+   the card's inner edge (22px of its 28px expansion gone) and the usage panel was invisible end to
+   end. `right`/`bottom` reproduce the pixels the cluster had inside the body — the card's own
+   chrome is its 1px border + 7px vertical / 6px horizontal padding, so 8 / 7 — and the body keeps a
+   matching slot free at its foot (`padding-bottom`, see `.canvas-rail__body`), so the card's shape
+   does not change. */
 .canvas-rail__badges {
+  position: absolute;
+  right: 7px;
+  bottom: 8px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  justify-content: flex-end;
   gap: 6px;
   width: 42px;
+  /* Both slots, whether or not a pill is present: the card reserves this much foot for the cluster
+     (`--rail-badges-h`, read by `.canvas-rail__body`'s padding), and a pill can be absent entirely
+     for a user with no agent subscription. */
+  height: var(--rail-badges-h);
 }
 
 .canvas-rail__badges .usage-indicator,
@@ -8451,6 +8490,9 @@ button.group-node__setup:disabled {
 }
 
 .canvas-root[data-rail-collapsed] .canvas-rail__body > :not(.canvas-rail__toggle),
+/* T247: the badge cluster is a SIBLING of the body now (see `.canvas-rail__badges`), so the rule
+   above no longer reaches it — a collapsed rail would leave the two pills floating over the tab. */
+.canvas-root[data-rail-collapsed] .canvas-rail__badges,
 .canvas-root[data-rail-collapsed] .minimap-dock,
 .canvas-root[data-rail-collapsed] .minimap-restore {
   display: none;
@@ -8554,8 +8596,11 @@ button.group-node__setup:disabled {
 
 /* ---- Claude usage indicator (in the bottom-left cluster) ---- */
 .usage-indicator {
-  /* Positioned — so the z-index rules below still apply and the popover anchors here — but PLACED
-     by the cluster above rather than by its own left/bottom. */
+  /* Positioned — the popover inside it anchors here, and the z-index rules below apply to it.
+     T247: this box is the anchor, and the panel it opens stays VISIBLE only because the cluster
+     holding it (`.canvas-rail__badges`) is a sibling of the card's scroll container rather than a
+     child of it — see that rule. Anchored here the panel's right edge is 17px left of the hovered
+     pill's own left edge and its bottom edge 6px above the pill's top edge. */
   position: relative;
   z-index: 5;
   display: flex;
@@ -8786,17 +8831,25 @@ button.group-node__setup:disabled {
 
 .usage-popover {
   position: absolute;
-  bottom: 34px;
-  /* T246: opens LEFTWARD, the way every other overlay on this rail does (T223/T229 — the base
-     `.dock-menu` rule is the same expression). It used to anchor on `left: 0`, i.e. the badge
-     CIRCLE's left edge, and grow rightward: measured live at (1657,499) in a 1728-wide window, the
-     280px panel put its right edge at 1937 — 209px past the window, the account list cut in half.
-     The 17px is the rail card's own inset (`.canvas-rail__body`: 1px border + 6px padding = 7px,
-     the badge circle sits that far inside the card) PLUS the 10px edge gap the rail's menus keep —
-     so the panel clears the CARD by 10px instead of the 3px a bare 10px would leave. Its right edge
-     is then always `viewportWidth - 88`, inside the T223 bound (`innerWidth - 22`) and left of the
-     card (`viewportWidth - 78`) at every window width. */
-  right: calc(100% + 17px);
+  /* T247: both offsets clear the pill this panel belongs to — the box the panel used to sit on top
+     of. Measured on the T246 package: the panel's bottom edge was 8px BELOW the pill's top edge and
+     its right edge 11px INSIDE the hovered pill, i.e. 88px² of opaque panel over the circle's
+     top-left corner.
+       bottom 48 = 42 (the pill) + 6px of air above it. `bottom: 34px` was written for the 26px pill
+                   that T226 replaced with a 42px one (26 + 8 = a clean 8px gap then; 8px of OVERLAP
+                   now), so the panel's bottom edge now lands 6px above the pill's top edge — the two
+                   rectangles cannot intersect at any pill width, since a wider pill grows leftward.
+       right 45  = 28 + 17. The hovered pill's left edge is 28px left of its own slot: the row
+                   overflows its fixed 42px indicator by the refresh control (24px + the row's 4px
+                   gap). The T246 anchor (`calc(100% + 17px)` on that static 42px box) ignored the
+                   drift and put the panel's right edge 11px inside the pill. Adding the drift and
+                   keeping the 17px of air puts it exactly 17px left of the pill.
+     Result on the measured 1728px window: panel 1332..1612 × 484..702, pill 1629..1671 × 708..750 —
+     disjoint, 17px beside it and 6px above it. Against the T223 bound the panel is still 94px inside
+     the window (right edge = viewportWidth − 116), and it opens LEFT of the card as the rail's
+     overlays do. */
+  bottom: 48px;
+  right: calc(100% + 45px);
   left: auto;
   width: 280px;
   padding: 14px 16px;
@@ -8808,9 +8861,10 @@ button.group-node__setup:disabled {
   /* Issue #503: each account is a tall block (label + Session/Weekly/Opus meters), so past
      about four accounts the panel grew off the TOP of the window — the first account's header
      and meter were clipped with no way to reach them. Capped to the space between the pill
-     (bottom: 34px) and the tab bar (`--tabbar-h` at z 30, which paints over this panel in canvas
-     mode), with the blocks scrolling inside __body while the heading and footer action stay put. */
-  max-height: calc(100vh - var(--tabbar-h) - 34px - 8px);
+     (bottom: 48px, the same offset it hangs by) and the tab bar (`--tabbar-h` at z 30, which paints
+     over this panel in canvas mode), with the blocks scrolling inside __body while the heading and
+     the block actions stay put. */
+  max-height: calc(100vh - var(--tabbar-h) - 48px - 8px);
   display: flex;
   flex-direction: column;
 }

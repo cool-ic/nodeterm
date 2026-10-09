@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { AGENT_CONFIG, BUILTIN_AGENT_IDS, type AgentId, type BuiltinAgentId } from '@shared/agents/config'
 import type { CanvasLayout } from '@shared/canvas-layout'
 import type { CustomAgent } from '@shared/types'
@@ -13,8 +14,92 @@ import { CONTENT_ADD_ITEMS, contentAddItemsToDockRows, type AddHandlers } from '
 import { layoutSubtitle, sortedLayouts } from '../lib/canvasLayoutView'
 import { ZOOM_PRESETS, activeZoomPreset } from '../lib/zoomPresets'
 import { Tooltip } from './Tooltip'
+import { railMenuPlacement, type RailMenuPlacement, type RailSide } from '../lib/railMenu'
 
 const isMac = /Mac/i.test(navigator.platform || navigator.userAgent)
+
+interface RailMenuAnchor {
+  /** Goes on the trigger (button or its wrapper), whose rect the menu is anchored to. */
+  triggerRef: (el: HTMLElement | null) => void
+  /** Goes on the menu itself: its size is what the vertical clamp needs. */
+  menuRef: (el: HTMLElement | null) => void
+  /** Inline `left`/`right`/`top` for the menu, or null before it has been measured. */
+  style: CSSProperties | null
+}
+
+/**
+ * The measured half of `railMenuPlacement` (see `../lib/railMenu`): keeps a portaled rail menu on
+ * its trigger. The menu renders in the same commit as the trigger's open state, so the layout effect
+ * below (which runs before the browser paints) already sees the menu's own box — no flash of an
+ * unplaced menu.
+ */
+function useRailMenu(open: boolean): RailMenuAnchor {
+  const trigger = useRef<HTMLElement | null>(null)
+  const menu = useRef<HTMLElement | null>(null)
+  const [style, setStyle] = useState<CSSProperties | null>(null)
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setStyle(null)
+      return
+    }
+    const place = (): void => {
+      const el = trigger.current
+      const box = menu.current
+      if (!el || !box) return
+      const side: RailSide = el.closest('.canvas-rail--left') ? 'left' : 'right'
+      const next = railMenuPlacement(
+        el.getBoundingClientRect(),
+        side,
+        { width: box.offsetWidth, height: box.offsetHeight },
+        { width: window.innerWidth, height: window.innerHeight }
+      )
+      setStyle((cur) =>
+        cur && cur.top === next.top && cur.left === next.left && cur.right === next.right ? cur : next
+      )
+    }
+    place()
+    window.addEventListener('resize', place)
+    // Capture: the rail column is an inner scroll container, so a listener on `window` alone never
+    // hears it scroll.
+    document.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      document.removeEventListener('scroll', place, true)
+    }
+  }, [open])
+
+  return {
+    triggerRef: useCallback((el: HTMLElement | null) => {
+      trigger.current = el
+    }, []),
+    menuRef: useCallback((el: HTMLElement | null) => {
+      menu.current = el
+    }, []),
+    style
+  }
+}
+
+/** A rail menu, portaled out of the card's scroller (see `railMenuPlacement`). */
+function RailMenu({
+  open,
+  anchor,
+  className,
+  children
+}: {
+  open: boolean
+  anchor: RailMenuAnchor
+  className?: string
+  children: ReactNode
+}): JSX.Element | null {
+  if (!open) return null
+  return createPortal(
+    <div ref={anchor.menuRef} className={className ? `dock-menu ${className}` : 'dock-menu'} style={anchor.style ?? undefined}>
+      {children}
+    </div>,
+    document.body
+  )
+}
 
 /** T226: which single-column track this dock renders — the left one (create + history) or the
  *  right one (view + status). Each instance owns only its own menus' open state. */
@@ -188,6 +273,11 @@ export function Dock({
   // Re-asked at render, not only at the click: switching to a relay tab while the menu is open
   // would otherwise leave it (and its backdrop) standing over a canvas it cannot act on.
   const layoutMenuVisible = layoutMenuOpen && !layoutsDisabled
+  // T249: each menu is portaled out of the card's scroll container, so it needs its trigger's rect
+  // (and its own size, for the vertical clamp) — see `useRailMenu`.
+  const addMenuAnchor = useRailMenu(menuOpen)
+  const zoomMenuAnchor = useRailMenu(zoomMenuOpen)
+  const layoutsMenuAnchor = useRailMenu(layoutMenuVisible)
   const layoutRows = sortedLayouts(activeProject?.layouts)
 
   // The preset the readout currently sits on, or null between two — the menu's tick.
@@ -221,20 +311,21 @@ export function Dock({
 
   return (
     <>
-      {(menuOpen || zoomMenuOpen || layoutMenuVisible) && (
-        <div
-          className="dock-backdrop"
-          onClick={() => {
-            setMenuOpen(false)
-            setZoomMenuOpen(false)
-            setLayoutMenuOpen(false)
-          }}
-        />
-      )}
+      {(menuOpen || zoomMenuOpen || layoutMenuVisible) &&
+        createPortal(
+          <div
+            className="dock-backdrop"
+            onClick={() => {
+              setMenuOpen(false)
+              setZoomMenuOpen(false)
+              setLayoutMenuOpen(false)
+            }}
+          />,
+          document.body
+        )}
 
       <div className="dock">
-        {menuOpen && (
-          <div className="dock-menu">
+        <RailMenu open={menuOpen} anchor={addMenuAnchor}>
             <button onClick={pick(onAddTerminal)}>
               <TerminalIcon />
               <span>Terminal</span>
@@ -356,13 +447,13 @@ export function Dock({
               <RemoteIcon />
               <span>New Remote Connection</span>
             </button>
-          </div>
-        )}
+        </RailMenu>
 
         {group === 'create' && (
           <>
         <Tooltip label="Add node" placement={tip}>
           <button
+            ref={addMenuAnchor.triggerRef}
             className={`dock-btn dock-add${menuOpen ? ' active' : ''}`}
             aria-label="Add node"
             onClick={() => {
@@ -432,9 +523,8 @@ export function Dock({
             <MinusIcon />
           </button>
         </Tooltip>
-        <div className="dock-zoom-wrap">
-          {zoomMenuOpen && (
-            <div className="dock-menu dock-zoom-menu">
+        <div className="dock-zoom-wrap" ref={zoomMenuAnchor.triggerRef}>
+          <RailMenu open={zoomMenuOpen} anchor={zoomMenuAnchor} className="dock-zoom-menu">
               {ZOOM_PRESETS.map((pct) => (
                 <button
                   key={pct}
@@ -452,8 +542,7 @@ export function Dock({
                 <span>Zoom to fit</span>
                 <span className="dock-menu__chord">⇧1</span>
               </button>
-            </div>
-          )}
+          </RailMenu>
           <Tooltip label="Zoom presets" placement={tip}>
             <button
               className={`dock-zoom${zoomMenuOpen ? ' active' : ''}`}
@@ -498,9 +587,8 @@ export function Dock({
 
         {/* An arrangement is view state, not a node you add, so it sits in the view cluster rather
             than behind the "+". */}
-        <div className="dock-layouts-wrap">
-          {layoutMenuVisible && (
-            <div className="dock-menu dock-layouts-menu">
+        <div className="dock-layouts-wrap" ref={layoutsMenuAnchor.triggerRef}>
+          <RailMenu open={layoutMenuVisible} anchor={layoutsMenuAnchor} className="dock-layouts-menu">
               {layoutRows.length === 0 ? (
                 // Never an empty popover: a menu that opens onto nothing reads as broken rather
                 // than as empty.
@@ -570,8 +658,7 @@ export function Dock({
                 <PlusSmallIcon />
                 <span>Save current layout…</span>
               </button>
-            </div>
-          )}
+          </RailMenu>
           <Tooltip
             label={layoutsDisabled ? 'Layouts are managed on the host' : 'Layouts'}
             placement={tip}

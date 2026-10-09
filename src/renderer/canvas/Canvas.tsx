@@ -19145,34 +19145,43 @@ export function Canvas() {
               </button>
             </Tooltip>
             <span className="dock-sep" />
+          </div>
 
-            {/* T226: the ambient badges, squeezed to 42px circles that expand LEFTWARD on hover or
-                focus into the full pill (usage brings its refresh control with it), so the track
-                stays exactly as wide as its buttons. */}
-            <div className="canvas-rail__badges">
-              {/* `travelToNode`, not `focusNodeById`: the panel resolves sessions in CLOSED
-                  projects too (their tmux sessions keep running), and reaching one means reopening
-                  its tab first — the same path a notification click and a peer jump take. */}
-              <SystemResourcePill
-                overBoard={kanbanOpen}
-                onGoToNode={travelToNode}
-                onKillSession={killSessionById}
-                pauseOfferFor={sessionPauseOfferFor}
-                onPauseSession={pauseSessionById}
-              />
+          {/* T226: the ambient badges, squeezed to 42px circles that expand LEFTWARD on hover or
+              focus into the full pill (usage brings its refresh control with it), so the track
+              stays exactly as wide as its buttons.
+              T247: a SIBLING of the card's body, not a child of it — the one structural fact the
+              panel's visibility rests on. The body scrolls (`.canvas-rail__body { overflow-y: auto }`,
+              T235's tall-column cap) and a scroll container clips what it holds: measured on the
+              packaged build, the hovered pill had its left 22px sliced off and the usage panel was
+              invisible end to end (the pixels that should have carried it hit-tested as the canvas).
+              These two clusters are the only rail children that must paint OUTSIDE the card — the
+              pill expands past the card's left edge, and both panels (usage, session memory) open
+              there — so they sit outside the element that clips, pinned to the card's foot by
+              `.canvas-rail__badges`, which keeps their exact pixels. */}
+          <div className="canvas-rail__badges">
+            {/* `travelToNode`, not `focusNodeById`: the panel resolves sessions in CLOSED
+                projects too (their tmux sessions keep running), and reaching one means reopening
+                its tab first — the same path a notification click and a peer jump take. */}
+            <SystemResourcePill
+              overBoard={kanbanOpen}
+              onGoToNode={travelToNode}
+              onKillSession={killSessionById}
+              pauseOfferFor={sessionPauseOfferFor}
+              onPauseSession={pauseSessionById}
+            />
 
-              {/* Same write path as the TabBar caret menu (project.defaultAccountId + persist) —
-                  the popover row is a second, better-placed entrance to the same action (issue
-                  #142). */}
-              <UsageIndicator
-                rail
-                overBoard={kanbanOpen}
-                onSetDefaultAccount={setProjectDefaultAccount}
-                countAccountSessions={countAccountSessions}
-                onMoveSessions={(from, to, label) => void moveAccountSessions(from, to, label)}
-                accountMove={accountMove}
-              />
-            </div>
+            {/* Same write path as the TabBar caret menu (project.defaultAccountId + persist) —
+                the popover row is a second, better-placed entrance to the same action (issue
+                #142). */}
+            <UsageIndicator
+              rail
+              overBoard={kanbanOpen}
+              onSetDefaultAccount={setProjectDefaultAccount}
+              countAccountSessions={countAccountSessions}
+              onMoveSessions={(from, to, label) => void moveAccountSessions(from, to, label)}
+              accountMove={accountMove}
+            />
           </div>
         </div>
         {/* Canvas-mounted, deliberately NOT in the .top-banners column: this is about THIS canvas,
