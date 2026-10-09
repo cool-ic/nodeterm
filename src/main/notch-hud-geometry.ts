@@ -107,7 +107,9 @@ export function hudGeometry(input: HudGeometryInput): HudGeometry {
   // `hasNotch`, …) because the renderer draws the same mascots, but nothing on this path is fused.
   if (input.align === 'bottom-right') {
     const width = Math.min(HUD_DOCK_WINDOW_WIDTH, input.workArea.width)
-    const height = Math.min(HUD_DOCK_WINDOW_HEIGHT, input.workArea.height)
+    // T244: the taller bottom-right window, clamped into the work area — a short work area yields
+    // a short window (window top stays at/above workArea.top) and the panel shortens with it.
+    const height = Math.min(HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT, input.workArea.height)
     return {
       x: input.workArea.x + input.workArea.width - width,
       y: input.workArea.y + input.workArea.height - height,
@@ -160,6 +162,26 @@ export const HUD_EDGE_MARGIN = 12
  */
 export const HUD_DOCK_WINDOW_WIDTH = HUD_PANEL_WIDTH + 2 * HUD_EDGE_MARGIN
 export const HUD_DOCK_WINDOW_HEIGHT = HUD_WINDOW_HEIGHT
+/**
+ * T244 — the `bottom-right` dock's window is TALLER than the top strip's by exactly the avoidance
+ * inset. T243 raised the capsule `HUD_BOTTOM_RIGHT_INSET` above the work area's bottom edge (was
+ * `HUD_EDGE_MARGIN`) but kept this window at 460, which wasted the window's lower band (nothing
+ * drew between the capsule and the corner) while the expanded panel's budget was charged for the
+ * same 174px — `expandedMaxHeight` fell 436 → 262 and a full 6-row panel (297px) grew a scrollbar.
+ * Growing the window by the inset gives the panel back exactly what the top strip has:
+ *
+ *   height - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP
+ *   = HUD_WINDOW_HEIGHT + (INSET - EDGE_MARGIN) - INSET - GAP
+ *   = 460 - 12 - 12 = 436
+ *
+ * Declared HERE rather than in shared because it composes main's `HUD_WINDOW_HEIGHT` /
+ * `HUD_EDGE_MARGIN` with the shared inset, and shared cannot import main; the dock's window height
+ * has exactly one reader (the `hudGeometry` branch below) and one source (`pushNow` hands the same
+ * `g.height` to `hudPlacement`, and the controller's `setBounds` uses the geometry object), so
+ * there is no second copy to drift.
+ */
+export const HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT =
+  HUD_WINDOW_HEIGHT + (HUD_BOTTOM_RIGHT_INSET - HUD_EDGE_MARGIN)
 /** Clearance between the docked window's top edge and the expanded panel's top edge (px). The panel
  *  grows UP from the capsule's bottom edge, so this is what keeps it inside the window — and the
  *  window is inside the work area, so it keeps it inside the work area too. */
@@ -177,9 +199,11 @@ export interface HudPlacementInput {
   /** Already-sanitized settings.notchAlign / settings.notchOffsetY. */
   align: NotchAlign
   offsetY: number
-  /** T227 — the window's height, needed only by the docked layout to bound the expanded panel.
-   *  Absent ⇒ `HUD_DOCK_WINDOW_HEIGHT` (the standard docked window), which is what a caller that
-   *  never asks for `bottom-right` gets anyway. */
+  /** T227/T244 — the window's height, needed only by the docked layout to bound the expanded
+   *  panel. Absent ⇒ `HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT` (the standard docked window), which is
+   *  what a caller that never asks for `bottom-right` gets anyway. `pushNow` always passes it —
+   *  from the same geometry object the controller's `setBounds` uses — so the panel budget and the
+   *  real window cannot disagree. */
   height?: number
 }
 
@@ -271,7 +295,7 @@ export function hudPlacement(input: HudPlacementInput): HudPlacement {
       capsuleBottom: HUD_BOTTOM_RIGHT_INSET,
       expandedMaxHeight: Math.max(
         0,
-        (input.height ?? HUD_DOCK_WINDOW_HEIGHT) - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP
+        (input.height ?? HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT) - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP
       )
     }
   }

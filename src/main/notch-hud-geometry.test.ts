@@ -4,11 +4,12 @@ import {
   hudPlacement,
   HUD_DOCK_TOP_GAP,
   HUD_DOCK_WINDOW_HEIGHT,
+  HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT,
   HUD_DOCK_WINDOW_WIDTH,
   HUD_EDGE_MARGIN,
   HUD_PANEL_WIDTH,
-  NOTCH_BAR_FLOOR,
   HUD_WINDOW_HEIGHT,
+  NOTCH_BAR_FLOOR,
   PILL_TOP_GAP,
   type HudGeometryInput,
   type HudPlacementInput,
@@ -241,12 +242,19 @@ describe('hudGeometry — the bottom-right dock (T227)', () => {
     const g = hudGeometry(docked())
     expect(g.docked).toBe(true)
     expect(g.width).toBe(HUD_DOCK_WINDOW_WIDTH)
-    expect(g.height).toBe(HUD_DOCK_WINDOW_HEIGHT)
+    // T244: taller than the top strip's own window, by exactly the avoidance inset — the raised
+    // capsule must not be allowed to cost the panel its budget.
+    expect(g.height).toBe(HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT)
+    expect(HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT).toBe(
+      HUD_WINDOW_HEIGHT + (HUD_BOTTOM_RIGHT_INSET - HUD_EDGE_MARGIN)
+    )
     // Right/bottom edges flush with the work area's — the Dock and the menu bar are dodged by using
     // `workArea` at all, which is the load-bearing part: `bounds` would put us UNDER the Dock.
     expect(g.x + g.width).toBe(1710)
     expect(g.y + g.height).toBe(37 + 985)
     expect(g.x).toBe(1710 - HUD_DOCK_WINDOW_WIDTH)
+    // The window top stays inside the work area even at the taller height.
+    expect(g.y).toBeGreaterThanOrEqual(37)
     // The top strip is still reported (the renderer draws the same mascots) but is not used.
     expect(g.bar).toBe(37)
     expect(g.hasNotch).toBe(true)
@@ -270,7 +278,7 @@ describe('hudGeometry — the bottom-right dock (T227)', () => {
 
   it('never exceeds a SHORT work area (a small window, so the panel is bounded rather than clipped)', () => {
     const g = hudGeometry(docked({ workArea: { x: 0, y: 24, width: 900, height: 300 } }))
-    // The height gives way (300 < 460); the width does not, because a 900-wide work area has room
+    // The height gives way (300 < 634); the width does not, because a 900-wide work area has room
     // for the standard box and the panel needs its own width to stay legible.
     expect(g.height).toBe(300)
     expect(g.width).toBe(HUD_DOCK_WINDOW_WIDTH)
@@ -289,7 +297,7 @@ describe('hudGeometry — the bottom-right dock (T227)', () => {
   it('ignores the vertical offset — the corner is the position, so the window never grows for one', () => {
     // The top-strip layout grows the window by a downward offset so a lowered panel is not clipped.
     // There is nothing below the dock's resting place to lower it into, and the spec pins the capsule
-    // to HUD_EDGE_MARGIN from the work area's bottom edge.
+    // to the minimap ledge (`HUD_BOTTOM_RIGHT_INSET`) above the work area's bottom edge.
     const base = hudGeometry(docked())
     const lowered = hudGeometry(docked({ offsetY: 200 }))
     expect({ x: lowered.x, y: lowered.y, width: lowered.width, height: lowered.height }).toEqual({
@@ -314,7 +322,7 @@ describe('hudPlacement — the bottom-right dock (T227)', () => {
   /** The dock's own window, as `hudGeometry` reports it. */
   const dockPlace = (over: Partial<HudPlacementInput> = {}): HudPlacementInput => ({
     width: HUD_DOCK_WINDOW_WIDTH,
-    height: HUD_DOCK_WINDOW_HEIGHT,
+    height: HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT,
     bar: 37,
     notchWidth: 168,
     notchCenterX: 855,
@@ -376,17 +384,54 @@ describe('hudPlacement — the bottom-right dock (T227)', () => {
 
   it('bounds the expanded panel by the WINDOW above the capsule, so it can never leave the work area', () => {
     const p = hudPlacement(dockPlace())
-    // Room above the capsule's bottom edge, minus the top gap: the expanded box spans
-    // [topGap, height − inset] ⊂ [0, height] ⊂ workArea. T243 raised the capsule
-    // (HUD_BOTTOM_RIGHT_INSET, was HUD_EDGE_MARGIN), so the panel's budget shrank by the same
-    // amount — the employer accepted the smaller panel to clear the minimap.
+    // T244: the window grew by the avoidance inset (634 = 460 + 174), so the room above the
+    // capsule — `height - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP` — is 436 again, what the
+    // top-strip layout gives. The formula is unchanged from T243; only the height it divides is new.
     expect(p.expandedMaxHeight).toBe(
-      HUD_DOCK_WINDOW_HEIGHT - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP
+      HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP
     )
-    expect(p.capsuleBottom! + p.expandedMaxHeight!).toBeLessThanOrEqual(HUD_DOCK_WINDOW_HEIGHT)
-    // The top-strip layout still gives the panel more room (436 vs 262); that is the cost the
-    // employer accepted when they picked "move the capsule up" over moving the minimap. The panel
-    // scrolls instead of overlapping the map.
+    expect(p.expandedMaxHeight).toBe(436)
+    // THE INVARIANT — the panel budget is alignment-independent: whatever the inset is, the panel
+    // plus the capsule's ledge always spends the window minus the top gap.
+    expect(p.expandedMaxHeight! + p.capsuleBottom!).toBe(
+      HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT - HUD_DOCK_TOP_GAP
+    )
+    expect(p.capsuleBottom! + p.expandedMaxHeight!).toBeLessThanOrEqual(
+      HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT
+    )
+    // THE EQUIVALENCE — the same budget the top-strip layout's expanded box has
+    // (`HUD_WINDOW_HEIGHT` less its two edge margins), so no alignment is second-class.
+    expect(p.expandedMaxHeight).toBe(HUD_WINDOW_HEIGHT - 2 * HUD_EDGE_MARGIN)
+    // THE PANEL DOES NOT SCROLL at full rows: a row is 47px tall (`.hud-row` padding 7/8), rows
+    // are separated by a 3px hairline, and the panel caps at 6 rows → 6×47 + 5×3 = 297px of rows;
+    // the panel's own padding takes 18 (CSS `.dock-bottom-right .hud-panel`), so the usable height
+    // must hold the full stack.
+    expect(p.expandedMaxHeight! - 18).toBeGreaterThanOrEqual(297)
+  })
+
+  it('T244 — a work area of 700 fits the taller window whole, with the top edge inside', () => {
+    // The nail's "短 work area 也不溢出" at the height the butler named: 634 < 700, so the window
+    // keeps its full height and its top edge (700 - 634 above the bottom) is inside the work area.
+    const g = hudGeometry(docked({ workArea: { x: 0, y: 24, width: 900, height: 700 } }))
+    expect(g.height).toBe(HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT)
+    expect(g.y).toBe(24 + 700 - HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT)
+    expect(g.y).toBeGreaterThanOrEqual(24)
+    const p = hudPlacement(dockPlace({ width: g.width, height: g.height, hasNotch: false, bar: 24 }))
+    expect(p.expandedMaxHeight).toBe(
+      HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP
+    )
+    expect(p.expandedMaxHeight!).toBeGreaterThanOrEqual(0)
+  })
+
+  it('T244 — the butler’s nail, verbatim: work area 960 → window 634, ledge 186, budget 436', () => {
+    const g = hudGeometry(docked({ workArea: { x: 0, y: 30, width: 1728, height: 960 } }))
+    expect(g.height).toBe(634)
+    expect(g.y).toBe(30 + 960 - 634)
+    expect(g.y).toBeGreaterThanOrEqual(30)
+    const p = hudPlacement(dockPlace({ width: g.width, height: g.height, hasNotch: false, bar: 30 }))
+    expect(g.height).toBe(HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT)
+    expect(p.capsuleBottom).toBe(186)
+    expect(p.expandedMaxHeight).toBe(436)
   })
 
   it('in a SHORT work area the panel is shortened, never allowed to overflow', () => {
