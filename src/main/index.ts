@@ -2107,6 +2107,12 @@ app.whenReady().then(async () => {
   // queue's own table (`EXPIRY_REASON_TEXT`) so this notice, the durable board line and the receipt
   // cannot drift apart.
   messagingDeps.onExpiredInBand = (req, info) => {
+    // T240④: the dead letter for a body-omitted NOTICE would be ITSELF a station notice — the link
+    // that fed the restart chain this ticket cuts (notice dies at restore → dead letter queues →
+    // next restart eats it too). The durable legs (trace, board-log line) still say the end; only
+    // the in-band notice is spared, and only for a notice — a body-omitted `send` still tells its
+    // sender, because nothing else would.
+    if (req.verb === STATION_NOTICE_VERB && info.bodyOmitted) return
     const projectId = workspaceStore
       .persistedCanvases()
       .find((c) => c.nodes.some((n) => n.id === req.sourceNodeId))?.id
