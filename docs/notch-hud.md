@@ -67,11 +67,14 @@ alwaysOnTop:true, focusable:false, skipTaskbar:true}` + `setAlwaysOnTop(true,'sc
 
   - **The WINDOW is a small box in the corner of the WORK AREA, not a full-width strip.**
     `hudGeometry` returns `width = min(HUD_DOCK_WINDOW_WIDTH 424, workArea.width)`,
-    `height = min(HUD_DOCK_WINDOW_HEIGHT 460, workArea.height)`, at
+    `height = min(HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT 634, workArea.height)`, at
     `x = workArea.right - width`, `y = workArea.bottom - height`. **`workArea` and not `bounds`
     is load-bearing**: `bounds` is the whole panel including the menu bar and the Dock, so a
     `bounds`-anchored corner would put the capsule UNDER the Dock and off the usable screen on
-    every Mac that has one. A short work area gives up height first (the panel then scrolls), the
+    every Mac that has one. The window is TALLER than the top strip's by exactly the avoidance
+    inset (T244: `HUD_WINDOW_HEIGHT + (HUD_BOTTOM_RIGHT_INSET - HUD_EDGE_MARGIN)` = 634) — that is
+    what keeps the expanded panel's budget at 436 with the capsule raised; a short work area gives
+    up height first (the panel then scrolls), the
     width is the dock's own and does not grow to the screen. The geometry still reports
     `bar` / `hasNotch` / `notchWidth` (harmless, unused here) and adds `docked: true`.
   - **The capsule hangs by its BOTTOM edge, on a LEDGE above the minimap** (`--capsule-bottom` =
@@ -88,8 +91,9 @@ alwaysOnTop:true, focusable:false, skipTaskbar:true}` + `setAlwaysOnTop(true,'sc
     capsule's top edge touches the right rail card's bottom by ~14px).
     `--dock-expanded-max-h` = `height - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP (12)` bounds that
     growth: a work area too short to hold the full panel SHORTENS it (which then scrolls) rather
-    than letting it overflow the work area at the top — and the raised capsule shrank the panel's
-    budget with it (436 → 262 at the standard window height).
+    than letting it overflow the work area at the top — and since T244 the window grows by the
+    inset, so the budget is 436 at the standard work area again (T243's 262 was a defect, fixed
+    same day: the window's lower band was empty while the panel paid for it).
   - **`fused` is always `false`**, `anchor` reports `'right'`, and `notchOffsetY` is **ignored** —
     the spec pins the docked capsule to the minimap ledge above the work area's bottom edge, and
     the "Vertical position" slider says so (see Settings). An unknown string still sanitizes to
@@ -268,8 +272,10 @@ display height), `NOTCH_BAR_FLOOR` (24), `HUD_WINDOW_HEIGHT` (460, added ON TOP 
 `HUD_PANEL_WIDTH` (400, pushed as `--panel-width` — main reasons with it for `panelLeft`, so the
 CSS must not carry its own number), `PILL_TOP_GAP` (6), `HUD_EDGE_MARGIN` (12),
 `HUD_DOCK_WINDOW_WIDTH` (424 = `HUD_PANEL_WIDTH` + two margins — the docked window's width, so the
-open panel is flush with equal side insets) and `HUD_DOCK_WINDOW_HEIGHT` (460, its own height, NOT
-added on top of `bar`) with `HUD_DOCK_TOP_GAP` (12, the headroom the docked panel leaves at the top
+open panel is flush with equal side insets), `HUD_DOCK_WINDOW_HEIGHT` (460, the top strip's own
+height, NOT added on top of `bar`) and `HUD_DOCK_WINDOW_HEIGHT_BOTTOM_RIGHT` (634 = 460 + the
+avoidance inset — T244 grew the docked window by `HUD_BOTTOM_RIGHT_INSET - HUD_EDGE_MARGIN` so the
+panel budget stays 436) with `HUD_DOCK_TOP_GAP` (12, the headroom the docked panel leaves at the top
 of the work area) for the `bottom-right` dock — whose vertical place comes from
 `src/shared/notch-hud.ts`: `CANVAS_MINIMAP_WIDTH 200` / `CANVAS_MINIMAP_HEIGHT 150` (adopted from
 @xyflow/react's defaults and now passed to the `MiniMap` element explicitly),
