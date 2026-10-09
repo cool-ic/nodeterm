@@ -1,7 +1,7 @@
 /**
  * Fit-view geometry: place the canvas content in the largest chrome-free rectangle.
  *
- * The dock, minimap, controls, sidebars and banners all paint OVER the flow, so a plain `fitView`
+ * The dock, minimap, sidebars and banners all paint OVER the flow, so a plain `fitView`
  * tucks nodes underneath them. Reserving a fixed margin per edge is too blunt — it taxes content
  * that never reaches the offending panel (narrow content paying for a bottom-RIGHT minimap).
  *
@@ -18,10 +18,11 @@ export const CANVAS_CHROME_SELECTOR = [
   '[data-canvas-chrome]',
   '.dock',
   '.minimap',
-  '.react-flow__controls',
   // T235: the two top clusters (`.sessions-icon-cluster`, `.controls-cluster`) are gone — their
   // buttons live inside the rail cards, which are `data-canvas-chrome` elements. Naming the dead
   // selectors here would reserve a rect that no longer exists.
+  // T241: the bottom-left zoom column joined them — it was deleted and its buttons absorbed by
+  // the right rail's dock group.
   '.sessions-sidebar',
   '.top-banners',
   '.presence-prompt',

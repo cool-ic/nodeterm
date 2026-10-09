@@ -92,7 +92,40 @@ describe('the canvas rail is fit-view chrome', () => {
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\] \.canvas-rail__toggle \{[^}]*width: 14px;/)
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.minimap-dock/)
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.minimap-restore/)
-    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.react-flow__controls/)
+  })
+})
+
+// T241: the bottom-left React Flow controls column is gone — three of its four buttons were a
+// second copy of the right rail's zoom group and the fourth (the camera lock) moved INTO that
+// group. These pins keep the column from drifting back and keep its replacement honest.
+describe('the old bottom-left controls column stays deleted (T241)', () => {
+  it('no source mounts or styles the library controls panel, and the width variable is gone', () => {
+    expect(CANVAS_SRC).not.toMatch(/<Controls\b|ControlButton|react-flow__controls/)
+    expect(STYLES_SRC).not.toMatch(/react-flow__controls|--controls-w/)
+  })
+
+  it('the camera lock lives in the dock as a .dock-btn with its own separator', () => {
+    const dockSrc = fs
+      .readFileSync(path.join(__dirname, '../components/Dock.tsx'), 'utf8')
+      .replace(/\r\n/g, '\n')
+    // Same family as its neighbours, with a hairline above AND below: a mode toggle, not a
+    // fourth camera action.
+    expect(dockSrc).toMatch(/className=\{`dock-btn canvas-lock-btn\$\{canvasLocked \? ' locked' : ''\}`\}/)
+    expect(dockSrc).toMatch(
+      /aria-label=\{canvasLocked \? 'Unlock view' : 'Lock view'\}/
+    )
+    const lockRow = dockSrc.indexOf('canvas-lock-btn')
+    const sepBefore = dockSrc.lastIndexOf('dock-sep', lockRow)
+    const sepAfter = dockSrc.indexOf('dock-sep', lockRow)
+    expect(sepBefore).toBeGreaterThan(-1)
+    expect(sepAfter).toBeGreaterThan(-1)
+    // Canvas feeds the dock the same state the old Controls button used.
+    expect(CANVAS_SRC).toMatch(/canvasLocked=\{canvasLocked\}/)
+    expect(CANVAS_SRC).toMatch(/onToggleCanvasLock=\{\(\) => setCanvasLocked\(\(v\) => !v\)\}/)
+    // The locked look survived the move: accent ink over a faint accent wash.
+    expect(STYLES_SRC).toMatch(
+      /\.dock-btn\.canvas-lock-btn\.locked \{[^}]*color: var\(--accent\);[^}]*background: color-mix\(in srgb, var\(--accent\) 14%, transparent\);/
+    )
   })
 })
 

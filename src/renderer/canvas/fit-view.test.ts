@@ -187,16 +187,15 @@ describe('the right rail gives the fit rectangle its height back', () => {
     { left: 407, top: 678, right: 858, bottom: 756 }, // .dock
     { left: 48, top: 728, right: 312, bottom: 778 }, // .canvas-pills (inflated by data-canvas-chrome)
     { left: 1023, top: 575, right: 1273, bottom: 775 }, // .minimap
-    { left: -9, top: 623, right: 65, bottom: 775 } // .react-flow__controls
+    { left: -9, top: 623, right: 65, bottom: 775 } // the old .react-flow__controls column
   ]
-  // After: ONE rail rect on the right edge (dock + pills merged via data-canvas-chrome); minimap
-  // and flow controls keep their corners.
+  // After: ONE rail rect on the right edge (dock + pills merged via data-canvas-chrome); the
+  // minimap keeps its corner. T241 deleted the flow-controls column, so it leaves the fixture too.
   const AFTER = [
     { left: 1068, top: 50, right: 1214, bottom: 724 }, // .canvas-rail__body
-    { left: 1023, top: 575, right: 1273, bottom: 775 }, // .minimap
-    { left: -9, top: 623, right: 65, bottom: 775 } // .react-flow__controls
+    { left: 1023, top: 575, right: 1273, bottom: 775 } // .minimap
   ]
-  // Collapsed: rail body, minimap, flow controls and the top-right cluster all hide; the 14px
+  // Collapsed: rail body and minimap hide (T241 removed the flow-controls rule); the 14px
   // toggle tab sits inside the 12px edge inset, so the solver measures NOTHING.
   const FLEET_W = 1550
   const FLEET_H = 1324
@@ -225,6 +224,8 @@ describe('T235: the clusters are gone and the rails sit on their old row', () =>
   const FLEET_W = 1550
   const FLEET_H = 1324
   const MINIMAP = { left: 1023, top: 575, right: 1273, bottom: 775 }
+  // The bottom-left zoom column still existed at T235; T241 deleted it, so it stays in the
+  // BEFORE fixture as history and leaves the AFTER one.
   const FLOW_CONTROLS = { left: -9, top: 623, right: 65, bottom: 775 }
   // T232 (before): rails 42px below the clusters, and both clusters were obstacles of their own.
   const BEFORE = [
@@ -235,13 +236,13 @@ describe('T235: the clusters are gone and the rails sit on their old row', () =>
     MINIMAP,
     FLOW_CONTROLS
   ]
-  // T235 (after): rails on the old cluster row, no cluster rects. The card HEIGHTS do not enter
-  // the solve — it is x-limited (left rail → minimap), so only each rail's x band matters.
+  // T241 (after): T235's rails plus the deleted zoom column — the winning rect is x-limited
+  // (left rail → minimap) and the column sat left of the left rail, so its removal moves no
+  // number here; it is dropped from the fixture because the element no longer exists to measure.
   const AFTER = [
     { left: 10, top: 50, right: 90, bottom: 600 }, // left rail card, inflated
     { left: 1174, top: 50, right: 1254, bottom: 640 }, // right rail card, inflated
-    MINIMAP,
-    FLOW_CONTROLS
+    MINIMAP
   ]
 
   it('removing the clusters widens the winning rect by exactly their intrusion', () => {
