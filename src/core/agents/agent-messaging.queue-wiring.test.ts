@@ -20,6 +20,7 @@ function factoryDeps(over: Partial<AgentMessagingDeps> = {}) {
     req: QueuedDeliveryRequest
     info: { traceId: string; queuedForMs: number; reason: QueueExpiryReason; bodyOmitted?: boolean }
   }[] = []
+  const boardLog: { projectId: string; title: string }[] = []
   const deps: AgentMessagingDeps = {
     paneOwner: async () => null,
     sendEnvelope: async () => true,
@@ -32,11 +33,15 @@ function factoryDeps(over: Partial<AgentMessagingDeps> = {}) {
     messagingEnabled: () => true,
     paneOwnerProject: () => 'p1',
     customAgents: () => undefined,
-    appendBoardLog: async () => false,
+    appendBoardLog: async (projectId, entry) => {
+      const ev = entry.event as { title?: string } | undefined
+      boardLog.push({ projectId, title: String(ev?.title ?? '') })
+      return true
+    },
     onExpiredInBand: (req, info) => expiredInBand.push({ req, info }),
     ...over
   }
-  return { deps, probes, expiredInBand }
+  return { deps, probes, expiredInBand, boardLog }
 }
 
 /** A queue built the way a shell builds it, with a scheduler the test fires by hand. */
@@ -102,6 +107,29 @@ describe('createDeliveryQueue forwards the session-liveness probe (T207b)', () =
     h.lapse()
     await vi.waitFor(() => expect(h.expiredInBand).toHaveLength(1))
     expect(h.expiredInBand[0].info.reason).toBe('session-unknown')
+  })
+
+  it('T245 — an expired NOTICE reaches main with the decision, the durable leg still writes, and NO new notice enters the queue', async () => {
+    // The chain, verbatim from the field: a notice expires → main's in-band leg generated a dead
+    // letter that was ITSELF a notice → that one expired too (three generations, one waiting
+    // 15453s). The queue's job ends at the expiry: it reports ONCE, on every leg, and enqueues
+    // nothing — the "no new notice" half is main's verb-level skip (sendsInBandDeadLetter, pinned
+    // there), which this seam still feeds with the whole story.
+    const h = wiredQueue({ hasLiveSession: () => 'unknown' })
+    await h.queue.enqueue(req({ verb: 'station-notice', sourceNodeId: 'b1', targetNodeId: 'a1' }))
+    expect(h.queue.depth('a1')).toBe(1)
+    h.lapse()
+    await vi.waitFor(() => expect(h.expiredInBand).toHaveLength(1))
+    // Main receives the whole decision (verb + T240④'s flag) and the honest reason.
+    expect(h.expiredInBand[0].req.verb).toBe('station-notice')
+    expect(h.expiredInBand[0].info.reason).toBe('session-unknown')
+    // THE DURABLE LEG IS NOT SPARED: the board-log `expired` line is written for the notice's
+    // source's project, whoever the in-band decision turns out to be.
+    expect(h.boardLog.some((l) => l.projectId === 'p1' && l.title === 'expired')).toBe(true)
+    // THE CHAIN STAYS CUT at this layer too: the expiry enqueued nothing, so there is no second
+    // notice for the next restart or TTL to eat.
+    expect(h.expiredInBand).toHaveLength(1)
+    expect(h.queue.depth('a1')).toBe(0)
   })
 
   it('a lapsed entry at RESTORE asks the host before declaring it dead, and re-queues a live one', async () => {

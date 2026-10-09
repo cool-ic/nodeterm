@@ -425,6 +425,7 @@ import {
 } from './media-protocol'
 import { initPlatform, platform } from '../core/platform'
 import { electronPlatform } from './platform-electron'
+import { sendsInBandDeadLetter } from './in-band-dead-letter'
 import { registerPeerSink, unregisterPeerSink, wirePeerRegistry } from './peer-registry'
 import { WEBGL_CONTEXT_CAP_DESKTOP } from '../shared/webgl'
 
@@ -2107,12 +2108,12 @@ app.whenReady().then(async () => {
   // queue's own table (`EXPIRY_REASON_TEXT`) so this notice, the durable board line and the receipt
   // cannot drift apart.
   messagingDeps.onExpiredInBand = (req, info) => {
-    // T240④: the dead letter for a body-omitted NOTICE would be ITSELF a station notice — the link
-    // that fed the restart chain this ticket cuts (notice dies at restore → dead letter queues →
-    // next restart eats it too). The durable legs (trace, board-log line) still say the end; only
-    // the in-band notice is spared, and only for a notice — a body-omitted `send` still tells its
-    // sender, because nothing else would.
-    if (req.verb === STATION_NOTICE_VERB && info.bodyOmitted) return
+    // T245: 通知一律不生在带死信 —— 不再生成「关于通知的通知」，链条断在源头。通知的"发送方"
+    // 是 app 自己，没人发过值得悼念的东西；它的死亡只落 durable 腿（board-log 的 expired 行 +
+    // trace）。T240④ 的 bodyOmitted 只是通知里的一种缘由，如今被这条按 verb 的规则覆盖（判定
+    // 本体在 `sendsInBandDeadLetter`，in-band-dead-letter.ts，有钉）。`send`/`reply`/`notify`
+    // 照旧通知发送方——那些是真人/agent 真正说出去的话（T234/T237 语义不动）。
+    if (!sendsInBandDeadLetter(req, info)) return
     const projectId = workspaceStore
       .persistedCanvases()
       .find((c) => c.nodes.some((n) => n.id === req.sourceNodeId))?.id
