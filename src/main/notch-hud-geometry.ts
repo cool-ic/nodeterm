@@ -7,6 +7,7 @@
 // panel inside that window from the user's side / vertical-offset settings.
 
 import type { NotchAlign } from '../shared/notch-hud'
+import { HUD_BOTTOM_RIGHT_INSET } from '../shared/notch-hud'
 
 /** A rectangle in Electron's logical (point) coordinate space. */
 export interface Rect {
@@ -217,10 +218,12 @@ export interface HudPlacement {
    *  bottom edge (`--capsule-bottom`) and grows the panel UPWARD. */
   docked?: boolean
   /** Distance from the capsule's bottom edge to the window's bottom edge (px, window coords) —
-   *  `HUD_EDGE_MARGIN`. Only present when `docked`. */
+   *  `HUD_BOTTOM_RIGHT_INSET` since T243: the corner's lower reaches belong to the canvas minimap,
+   *  so the capsule sits on a ledge above it instead of `HUD_EDGE_MARGIN` from the edge. Only
+   *  present when `docked`. */
   capsuleBottom?: number
   /** The tallest the EXPANDED capsule may grow in this window (px), i.e. the room left above the
-   *  capsule's bottom edge after the edge margin and the top gap. Only present when `docked`: the
+   *  capsule's bottom edge after the minimap inset and the top gap. Only present when `docked`: the
    *  window is inside the work area, so bounding the growth here keeps the panel inside it — which
    *  is what a short work area needs (the panel is SHORTENED, never allowed to overflow). */
   expandedMaxHeight?: number
@@ -239,8 +242,11 @@ export function hudPlacement(input: HudPlacementInput): HudPlacement {
   // Answered BEFORE anything about the notch strip, because none of it applies: the dock is a
   // standalone pill in the work area's corner, `fused` is false by construction (a square-cornered
   // capsule fused to a notch that is nowhere near it is the "black box below the menu bar" bug, one
-  // screenful further away), and the vertical offset does not move it — the corner IS the position,
-  // pinned to `HUD_EDGE_MARGIN` from both edges so the setting cannot push it out of the work area.
+  // screenful further away), and the vertical offset does not move it — the corner IS the position.
+  // Horizontally it is `HUD_EDGE_MARGIN` from the right edge; VERTICALLY it hangs
+  // `HUD_BOTTOM_RIGHT_INSET` above the bottom edge (T243) — the corner's lower reaches belong to
+  // the canvas minimap, so the distance off the bottom edge is decided by the minimap's footprint,
+  // not by the edge margin.
   //
   // The panel grows UP (the renderer anchors the capsule's bottom edge) and LEFT (its right edge is
   // the capsule's right edge, so `panelLeft` = that minus the panel's width). Both stay inside the
@@ -257,10 +263,15 @@ export function hudPlacement(input: HudPlacementInput): HudPlacement {
       panelLeft: Math.round(Math.max(0, Math.min(maxLeft, capsuleX - panelWidth))),
       panelWidth,
       docked: true,
-      capsuleBottom: HUD_EDGE_MARGIN,
+      // T243: the corner's lower reaches belong to the canvas minimap, so the capsule no longer
+      // hugs the work area's bottom edge (that was HUD_EDGE_MARGIN = 12). It hangs
+      // HUD_BOTTOM_RIGHT_INSET above it instead — the minimap's own footprint (margin, box,
+      // 1px borders) plus the clearance — and the panel's budget below shrinks by the same
+      // amount so the expanded box still fits the window.
+      capsuleBottom: HUD_BOTTOM_RIGHT_INSET,
       expandedMaxHeight: Math.max(
         0,
-        (input.height ?? HUD_DOCK_WINDOW_HEIGHT) - HUD_EDGE_MARGIN - HUD_DOCK_TOP_GAP
+        (input.height ?? HUD_DOCK_WINDOW_HEIGHT) - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP
       )
     }
   }

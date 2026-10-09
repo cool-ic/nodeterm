@@ -14,7 +14,13 @@ import {
   type HudPlacementInput,
   type Rect
 } from './notch-hud-geometry'
-import type { NotchAlign } from '../shared/notch-hud'
+import {
+  CANVAS_MINIMAP_HEIGHT,
+  CANVAS_MINIMAP_MARGIN,
+  HUD_BOTTOM_RIGHT_INSET,
+  HUD_DOCK_CLEARANCE,
+  type NotchAlign
+} from '../shared/notch-hud'
 
 /** A display, described the way Electron reports one: full bounds plus a menu-bar-shortened workArea. */
 function display(width: number, height: number, menuBar: number, internal: boolean): HudGeometryInput {
@@ -330,18 +336,33 @@ describe('hudPlacement — the bottom-right dock (T227)', () => {
     expect(hudPlacement(dockPlace({ hasNotch: false })).fused).toBe(false)
   })
 
-  it('hangs by its BOTTOM edge, HUD_EDGE_MARGIN from the right and from the bottom', () => {
+  it('hangs by its BOTTOM edge, ABOVE the minimap: HUD_BOTTOM_RIGHT_INSET up, HUD_EDGE_MARGIN in', () => {
     const p = hudPlacement(dockPlace())
     expect(p.anchor).toBe('right')
     expect(p.capsuleX).toBe(HUD_DOCK_WINDOW_WIDTH - HUD_EDGE_MARGIN)
-    expect(p.capsuleBottom).toBe(HUD_EDGE_MARGIN)
+    // T243: the corner's lower reaches belong to the canvas minimap, so the bottom inset is the
+    // minimap's footprint + clearance, no longer the edge margin.
+    expect(p.capsuleBottom).toBe(HUD_BOTTOM_RIGHT_INSET)
     // `capsuleTop` is meaningless while docked (the renderer uses --capsule-bottom); pinned at 0 so
     // a stale reader cannot position it by a leftover number.
     expect(p.capsuleTop).toBe(0)
-    // In display coordinates: the pill's right/bottom edges are HUD_EDGE_MARGIN from the work area's.
+    // In display coordinates: the pill's right edge is HUD_EDGE_MARGIN from the work area's; its
+    // bottom edge is the inset above the work area's.
     const g = hudGeometry(docked())
     expect(g.x + p.capsuleX).toBe(g.x + g.width - HUD_EDGE_MARGIN)
-    expect(g.y + g.height - p.capsuleBottom!).toBe(g.y + g.height - HUD_EDGE_MARGIN)
+    expect(g.y + g.height - p.capsuleBottom!).toBe(g.y + g.height - HUD_BOTTOM_RIGHT_INSET)
+  })
+
+  it('THE RELATION — the capsule lands on a ledge above the minimap, with the stated clearance', () => {
+    // Not a magic number: the inset must clear the minimap's own footprint (its dock margin, its
+    // declared height, the dock's 1px borders) by HUD_DOCK_CLEARANCE. If any of those grows, this
+    // fails until somebody decides what to do about it — the capsule may not slide back under the
+    // map unnoticed.
+    expect(HUD_BOTTOM_RIGHT_INSET).toBeGreaterThanOrEqual(
+      CANVAS_MINIMAP_MARGIN + CANVAS_MINIMAP_HEIGHT + HUD_DOCK_CLEARANCE
+    )
+    // …and the placement uses it, so the ledge is real, not a constant only tests know.
+    expect(hudPlacement(dockPlace()).capsuleBottom).toBe(HUD_BOTTOM_RIGHT_INSET)
   })
 
   it('grows the panel UP and LEFT: its right edge is the capsule’s, inside the window', () => {
@@ -353,14 +374,19 @@ describe('hudPlacement — the bottom-right dock (T227)', () => {
     expect(p.panelLeft).toBeGreaterThanOrEqual(0)
   })
 
-  it('bounds the expanded panel by the WINDOW, so it can never leave the work area', () => {
+  it('bounds the expanded panel by the WINDOW above the capsule, so it can never leave the work area', () => {
     const p = hudPlacement(dockPlace())
-    // Room above the capsule's bottom edge, minus the edge margin and the top gap: the expanded box
-    // spans [topGap, height − edgeMargin] ⊂ [0, height] ⊂ workArea.
-    expect(p.expandedMaxHeight).toBe(HUD_DOCK_WINDOW_HEIGHT - HUD_EDGE_MARGIN - HUD_DOCK_TOP_GAP)
+    // Room above the capsule's bottom edge, minus the top gap: the expanded box spans
+    // [topGap, height − inset] ⊂ [0, height] ⊂ workArea. T243 raised the capsule
+    // (HUD_BOTTOM_RIGHT_INSET, was HUD_EDGE_MARGIN), so the panel's budget shrank by the same
+    // amount — the employer accepted the smaller panel to clear the minimap.
+    expect(p.expandedMaxHeight).toBe(
+      HUD_DOCK_WINDOW_HEIGHT - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP
+    )
     expect(p.capsuleBottom! + p.expandedMaxHeight!).toBeLessThanOrEqual(HUD_DOCK_WINDOW_HEIGHT)
-    // …and it is the room the top-strip layout gives the same panel, so nothing is lost by docking.
-    expect(p.expandedMaxHeight!).toBeGreaterThanOrEqual(420 + 16)
+    // The top-strip layout still gives the panel more room (436 vs 262); that is the cost the
+    // employer accepted when they picked "move the capsule up" over moving the minimap. The panel
+    // scrolls instead of overlapping the map.
   })
 
   it('in a SHORT work area the panel is shortened, never allowed to overflow', () => {
@@ -370,7 +396,7 @@ describe('hudPlacement — the bottom-right dock (T227)', () => {
     const g = hudGeometry(docked({ workArea: { x: 0, y: 24, width: 900, height: 300 } }))
     const p = hudPlacement(dockPlace({ width: g.width, height: g.height, hasNotch: false, bar: 24 }))
     expect(g.height).toBe(300)
-    expect(p.expandedMaxHeight).toBe(300 - HUD_EDGE_MARGIN - HUD_DOCK_TOP_GAP)
+    expect(p.expandedMaxHeight).toBe(300 - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP)
     const topOfExpandedBox = g.height - p.capsuleBottom! - p.expandedMaxHeight!
     expect(topOfExpandedBox).toBe(HUD_DOCK_TOP_GAP)
     // Window coordinates: the expanded box fits the WINDOW with the top gap to spare, and the window

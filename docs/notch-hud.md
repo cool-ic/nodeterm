@@ -74,22 +74,31 @@ alwaysOnTop:true, focusable:false, skipTaskbar:true}` + `setAlwaysOnTop(true,'sc
     every Mac that has one. A short work area gives up height first (the panel then scrolls), the
     width is the dock's own and does not grow to the screen. The geometry still reports
     `bar` / `hasNotch` / `notchWidth` (harmless, unused here) and adds `docked: true`.
-  - **The capsule hangs by its BOTTOM edge** (`--capsule-bottom` = `HUD_EDGE_MARGIN` 12, with
-    `top: auto`), so the panel — whose height is driven by `max-height` — grows UPWARD as it
-    opens instead of pushing content off the bottom of the screen, and it is anchored
+  - **The capsule hangs by its BOTTOM edge, on a LEDGE above the minimap** (`--capsule-bottom` =
+    `HUD_BOTTOM_RIGHT_INSET` 186 since T243 — it was `HUD_EDGE_MARGIN` 12 until the minimap moved
+    in underneath; `top: auto`), so the panel — whose height is driven by `max-height` — grows
+    UPWARD as it opens instead of pushing content off the bottom of the screen, and it is anchored
     `HUD_EDGE_MARGIN` from the work area's right edge with the SAME margin as its left inset
     (`panelLeft = capsuleX - panelWidth`), so the panel grows LEFT and keeps equal side margins.
-    `--dock-expanded-max-h` = `height - HUD_EDGE_MARGIN - HUD_DOCK_TOP_GAP (12)` bounds that
+    The inset is computed from the MINIMAP'S OWN FOOTPRINT (shared constants in
+    `src/shared/notch-hud.ts`, which the renderer also feeds to the `MiniMap` element:
+    `CANVAS_MINIMAP_MARGIN 22` — canvas's `--float-gap` — + the declared `CANVAS_MINIMAP_HEIGHT 150`
+    + the dock's 1px borders ×2 + `HUD_DOCK_CLEARANCE 12`), because the canvas minimap occupies the
+    corner's lower reaches and the employer chose "move the capsule up" (accepting that the
+    capsule's top edge touches the right rail card's bottom by ~14px).
+    `--dock-expanded-max-h` = `height - HUD_BOTTOM_RIGHT_INSET - HUD_DOCK_TOP_GAP (12)` bounds that
     growth: a work area too short to hold the full panel SHORTENS it (which then scrolls) rather
-    than letting it overflow the work area at the top.
+    than letting it overflow the work area at the top — and the raised capsule shrank the panel's
+    budget with it (436 → 262 at the standard window height).
   - **`fused` is always `false`**, `anchor` reports `'right'`, and `notchOffsetY` is **ignored** —
-    the spec pins the docked capsule to `HUD_EDGE_MARGIN` from the work area's bottom edge, and
+    the spec pins the docked capsule to the minimap ledge above the work area's bottom edge, and
     the "Vertical position" slider says so (see Settings). An unknown string still sanitizes to
     the DEFAULT (`bottom-right` here, `center` upstream).
-  - **Known cost, not fixed here**: this fork also draws its minimap-restore widget in the
-    bottom-right corner of the workspace (≈1672,904), so the two can visually overlap. T227 does
-    not add any avoidance; they are independent surfaces and the dock is transparent apart from
-    the capsule and an open panel.
+  - **The minimap overlap T227 shipped with is GONE (T243)**: the collapsed restore button
+    (34×34) and the expanded map both sit below the capsule's ledge now — the capsule clears the
+    expanded map's top edge by `HUD_DOCK_CLEARANCE`, and the collapsed button by more. T227 had
+    accepted the overlap as a known cost; the employer later chose "move the capsule up" from the
+    three options, which is the inset above.
 
   Rules the placement keeps — **(1)** and **(2)** are the TOP-STRIP shapes (the dock positions
   itself from the work area's corner instead, see above): **(1)** a top-strip pill's top is
@@ -261,7 +270,12 @@ CSS must not carry its own number), `PILL_TOP_GAP` (6), `HUD_EDGE_MARGIN` (12),
 `HUD_DOCK_WINDOW_WIDTH` (424 = `HUD_PANEL_WIDTH` + two margins — the docked window's width, so the
 open panel is flush with equal side insets) and `HUD_DOCK_WINDOW_HEIGHT` (460, its own height, NOT
 added on top of `bar`) with `HUD_DOCK_TOP_GAP` (12, the headroom the docked panel leaves at the top
-of the work area) for the `bottom-right` dock,
+of the work area) for the `bottom-right` dock — whose vertical place comes from
+`src/shared/notch-hud.ts`: `CANVAS_MINIMAP_WIDTH 200` / `CANVAS_MINIMAP_HEIGHT 150` (adopted from
+@xyflow/react's defaults and now passed to the `MiniMap` element explicitly),
+`CANVAS_MINIMAP_MARGIN 22` (canvas's `--float-gap`; the two comment blocks point at each other),
+`HUD_DOCK_CLEARANCE 12` and `HUD_BOTTOM_RIGHT_INSET 186` = margin + (height + 2 borders) +
+clearance — the ledge the docked capsule hangs on and the panel budget shrinks by,
 `--capsule-drop` (0 — the bulge was dropped; kept only for the expand math),
 `--capsule-radius` (16), `--panel-max-h` (420), `--capsule-dur` (0.22s)/`--capsule-ease`,
 `--capsule-bottom` and `--dock-expanded-max-h` (pushed by main only while docked — the capsule's
