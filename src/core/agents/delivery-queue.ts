@@ -75,11 +75,20 @@ import type { SessionLiveness } from '../../shared/agents/agent-messaging'
  *    refused `notPermitted` — the sender is told, which is still strictly better than the silent
  *    loss it replaces. After a machine reboot the cold-restored pane IS a fresh spawn, so a message
  *    for a session that resumed under its old id is delivered.
- *  - **Two kinds never flush after a restart**: a board comment (only the local user, typing in THIS
- *    app, may trigger one — a message read back off disk must not be able to speak as a person) and
- *    an app-composed station notice (its monitor's state did not survive). Both, and an entry whose
- *    body was too large to store (`QUEUE_PERSIST_BODY_MAX`), are expired at restore so their row /
- *    sender still hears the end.
+ *  - **A board comment never flushes after a restart**: only the local user, typing in THIS app,
+ *    may trigger one — a message read back off disk must not be able to speak as a person. An
+ *    entry whose body was too large to store (`QUEUE_PERSIST_BODY_MAX`) ends at restore too: there
+ *    is nothing on disk to deliver. Both ends are TOLD (row / sender), never silent.
+ *  - **A station notice DOES survive a restart now (T240).** It used to be expired at restore on
+ *    the theory that its monitor's state did not survive — but its body is self-contained (core
+ *    composed it from a closed table, so nothing needs re-deriving), every delivery gate re-runs
+ *    at flush, and expiring it produced a dead letter that is ITSELF a station notice: a restart
+ *    ate a notice, the dead letter queued, the next restart ate it too — three field loops on
+ *    2026-10-09, one entry waiting 17306s before expiring twice. Restored notices now ride the
+ *    same rules as a `send`: one delivery attempt per idle flush, T237's binding verdicts when the
+ *    conversation cannot be proven, the sender told at the end. Only a body-omitted notice still
+ *    ends at restore (nothing to deliver), and its end no longer spawns a dead letter — main skips
+ *    the in-band leg for it, which is the last link of that chain.
  *  - Not flushed at boot: the first flush waits for the target's next `done`, like any entry. A
  *    target that stays idle through the rest of the TTL expires it (sender told).
  *  - A crash inside the save window loses that window; a clean quit flushes synchronously. The file
@@ -162,7 +171,15 @@ export interface DeliveryQueueDeps {
    */
   onExpired?(
     req: QueuedDeliveryRequest,
-    info: { traceId: string; queuedForMs: number; reason: QueueExpiryReason }
+    info: {
+      traceId: string
+      queuedForMs: number
+      reason: QueueExpiryReason
+      /** T240④ — the entry's body was never on disk (snapshot reduction), so an in-band dead
+       *  letter has nothing to quote and, for a notice, must not spawn another one. Absent on
+       *  every entry that lived its whole life in memory. */
+      bodyOmitted?: boolean
+    }
   ): void
   /**
    * T205/T207b: what the host can say about the target's session right now. Drives the expiry rule
@@ -257,6 +274,10 @@ interface QueueEntry {
   binding?: QueueBinding
   /** Came back from disk after a restart: flushes only into the session it was queued for. */
   restored?: true
+  /** T240④ — the body was too large to store, so this restored entry has nothing to deliver and
+   *  ends at restore; its expiry must not spawn an in-band dead letter for a notice (main reads
+   *  the flag). An entry that lived its whole life in memory never carries it. */
+  bodyOmitted?: true
   /**
    * T228③ — how many flushes of THIS entry met the target's provider cooldown, and the epoch the
    * next one is allowed (the backoff ladder's own deadline). Both are process-lifetime on purpose:
@@ -325,9 +346,16 @@ export const QUEUE_PERSIST_MAX = 1024
 /** The longest TTL a restored entry may claim — a hand-edited `ttlMs` must not keep one forever. */
 export const QUEUE_PERSIST_TTL_MAX = 24 * 60 * 60 * 1000
 
-/** The verbs a restored entry may still deliver. See the header: a board comment and a station
- *  notice are expired at restore instead. */
-const RESTORABLE_VERBS: ReadonlySet<string> = new Set(['send', 'reply', 'notify'])
+/** The verbs a restored entry may still deliver. A board comment stays out on purpose (only the
+ *  local user, typing in THIS app, may trigger one). `station-notice` was out until T240 — see the
+ *  header: its expiry spawned a dead letter that was itself a notice, so a restart fed the chain.
+ *  EVERY verb in this set has a NODE-ID source, which is what lets the sanitize guard below key on
+ *  the set: a station notice's source is the station the notice is about (station-notice.ts's
+ *  monitor and the outcome store) or the original message's target (main's two reversed routes —
+ *  the expiry dead letter and the undelivered-sender notice), a node id at every production site.
+ *  A board comment's `board-comment:<id>` source is the one non-node source in the file, and it is
+ *  not in this set. */
+const RESTORABLE_VERBS: ReadonlySet<string> = new Set(['send', 'reply', 'notify', 'station-notice'])
 
 const EXTRA_KEY_RE = /^[A-Za-z][A-Za-z0-9]{0,40}$/
 
@@ -781,7 +809,12 @@ export class DeliveryQueue {
       reason: EXPIRY_REASON_TEXT[reason],
       bodyChars: entry.req.body.length
     }, entry.req)
-    this.deps.onExpired?.(entry.req, { traceId: t.traceId, queuedForMs, reason })
+    this.deps.onExpired?.(entry.req, {
+      traceId: t.traceId,
+      queuedForMs,
+      reason,
+      bodyOmitted: entry.bodyOmitted === true
+    })
   }
 
   /** Every queued entry as it is written to disk, oldest first per target. */
@@ -836,7 +869,10 @@ export class DeliveryQueue {
         queuedTraceId: p.queuedTraceId,
         cancelTimer: () => {},
         restored: true,
-        ...(p.binding ? { binding: p.binding } : {})
+        ...(p.binding ? { binding: p.binding } : {}),
+        // T240④: a reduced entry's end must be traceable to "nothing was on disk" — the in-band
+        // leg reads this to keep a bodyless notice from spawning another notice.
+        ...(p.bodyOmitted ? { bodyOmitted: true } : {})
       }
       this.deps.onQueued?.(entry.req)
       // Capacity counts only what is really re-queued: a lapsed entry never takes a slot.

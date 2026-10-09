@@ -242,7 +242,15 @@ export interface AgentMessagingDeps {
    */
   onExpiredInBand?(
     req: QueuedDeliveryRequest,
-    info: { traceId: string; queuedForMs: number; reason: QueueExpiryReason }
+    info: {
+      traceId: string
+      queuedForMs: number
+      reason: QueueExpiryReason
+      /** T240④ — the entry's body was never on disk (snapshot reduction). A notice in this state
+       *  must not get a dead letter: the dead letter would be ITSELF a station notice, and that
+       *  link is the chain T240 exists to cut. The durable legs (trace, board line) still run. */
+      bodyOmitted?: boolean
+    }
   ): void
   /**
    * Where a message stands on its way INTO a target's pane — the facts a station's task-outcome
