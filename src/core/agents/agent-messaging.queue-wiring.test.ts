@@ -18,7 +18,7 @@ function factoryDeps(over: Partial<AgentMessagingDeps> = {}) {
   const probes: string[] = []
   const expiredInBand: {
     req: QueuedDeliveryRequest
-    info: { traceId: string; queuedForMs: number; reason: QueueExpiryReason }
+    info: { traceId: string; queuedForMs: number; reason: QueueExpiryReason; bodyOmitted?: boolean }
   }[] = []
   const deps: AgentMessagingDeps = {
     paneOwner: async () => null,
@@ -151,5 +151,39 @@ describe('createDeliveryQueue forwards the session-liveness probe (T207b)', () =
     ])
     expect(h.expiredInBand).toHaveLength(1)
     expect(h.expiredInBand[0].info.reason).toBe('not-restorable')
+  })
+
+  it('T240 — a station notice restored through the FACTORY survives, like a send', async () => {
+    // The seam that bit T205: the queue can know a verb is restorable while the one builder both
+    // shells use fails to wire it. This drives createDeliveryQueue, the builder main drives.
+    const h = wiredQueue()
+    await h.queue.restore([
+      {
+        req: req({ verb: 'station-notice', sourceNodeId: 'st1', targetNodeId: 'b1' }),
+        enqueuedAt: -1_000,
+        ttlMs: DELIVERY_QUEUE_TTL_MS,
+        queuedTraceId: 'q1'
+      }
+    ])
+    expect(h.expiredInBand).toEqual([])
+    expect(h.queue.depth('b1')).toBe(1)
+  })
+
+  it('T240④ — a body-omitted entry reaches onExpiredInBand with the fact on it', async () => {
+    const h = wiredQueue({ hasLiveSession: () => 'live' })
+    await h.queue.restore([
+      {
+        req: req({ verb: 'station-notice', sourceNodeId: 'st1', targetNodeId: 'b1' }),
+        enqueuedAt: -1_000,
+        ttlMs: DELIVERY_QUEUE_TTL_MS,
+        queuedTraceId: 'q1',
+        bodyOmitted: true
+      }
+    ])
+    expect(h.expiredInBand).toHaveLength(1)
+    expect(h.expiredInBand[0].info.reason).toBe('not-restorable')
+    // The flag main reads to spare the dead letter (the chain's last link). An in-run expiry never
+    // carries it.
+    expect(h.expiredInBand[0].info.bodyOmitted).toBe(true)
   })
 })

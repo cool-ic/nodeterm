@@ -24,7 +24,8 @@ import { testTmpDir } from '../test-tmp'
  * builds a NEW queue (a new process) and restores it — what a restart is to the queue. The rules
  * pinned: the TTL keeps running while the app is down (a lapsed message ends `expired` with the
  * sender told, never delivered late); a restored message goes only into the session it was queued
- * for; a board comment and a station notice are never replayed into a pane.
+ * for; a board comment is never replayed into a pane — but a station notice IS, since T240 (its
+ * expiry used to spawn a dead letter that was itself a notice: the restart chain).
  */
 
 function instance(opts: {
@@ -36,7 +37,12 @@ function instance(opts: {
   liveness?: DeliveryQueueDeps['sessionLiveness']
 }) {
   const delivered: QueuedDeliveryRequest[] = []
-  const expired: { req: QueuedDeliveryRequest; queuedForMs: number; reason?: string }[] = []
+  const expired: {
+    req: QueuedDeliveryRequest
+    queuedForMs: number
+    reason?: string
+    bodyOmitted?: boolean
+  }[] = []
   const flushed: { req: QueuedDeliveryRequest; outcome: AgentMessageOutcome }[] = []
   const queued: QueuedDeliveryRequest[] = []
   const traced: string[] = []
@@ -58,7 +64,13 @@ function instance(opts: {
     // T237: the host's answer. Deliberately UNWIRED by default — the same shape a shell with no
     // probe has, where `liveness()` is `unknown`, which must never be readable as a death.
     ...(opts.liveness ? { sessionLiveness: opts.liveness } : {}),
-    onExpired: (req, info) => expired.push({ req, queuedForMs: info.queuedForMs, reason: info.reason }),
+    onExpired: (req, info) =>
+      expired.push({
+        req,
+        queuedForMs: info.queuedForMs,
+        reason: info.reason,
+        bodyOmitted: info.bodyOmitted
+      }),
     onFlushed: (req, outcome) => flushed.push({ req, outcome }),
     onQueued: (req) => queued.push(req),
     schedule: (ms, fn): CancelTimer => {
@@ -290,21 +302,99 @@ describe('delivery queue across a restart', () => {
     expect(a.delivered).toHaveLength(1)
   })
 
-  it('a board comment and a station notice are expired at restore, never replayed into a pane', async () => {
+  it('a board comment is expired at restore, never replayed into a pane', async () => {
+    // Only the local user, typing in THIS app, may trigger a board comment — a message read back
+    // off disk must not be able to speak as a person. (A station notice left this test in T240:
+    // it now replays like a send — see the restored-notice pins below.)
     const a = instance({ now: () => 1000, binding: () => ({ sessionId: 's-A' }) })
     await a.queue.enqueue(
       req({ verb: 'board-comment', sourceNodeId: 'board-comment:c1', projectId: 'p1', commentId: 'c1', author: 'me', text: '@x hi' })
     )
-    await a.queue.enqueue(req({ verb: 'station-notice', targetNodeId: 'st2' }))
     const disk = onDisk(a.saved())
-    expect(disk).toHaveLength(2)
+    expect(disk).toHaveLength(1)
     expect(disk[0].req.projectId).toBe('p1') // its trace still finds its board
     const b = instance({ now: () => 2000, binding: () => ({ sessionId: 's-A' }) })
     await b.queue.restore(disk)
-    expect(b.expired.map((e) => e.req.verb)).toEqual(['board-comment', 'station-notice'])
+    expect(b.expired.map((e) => e.req.verb)).toEqual(['board-comment'])
     await b.queue.onTargetIdle('st1')
-    await b.queue.onTargetIdle('st2')
     expect(b.delivered).toEqual([])
+  })
+
+  it('T240 — a station notice survives the restart: still queued, delivered ONCE on the next idle', async () => {
+    // The chain, for the record: a queued notice hit a restart, was judged not-restorable, and its
+    // dead letter was ITSELF a notice — three field loops on 2026-10-09, one entry expiring twice
+    // after 17306s of waiting. Now it rides the same rules as a send: source is a node id, the
+    // binding gates the flush, one delivery, one delivered end.
+    const a = instance({ now: () => 1000, binding: () => ({ sessionId: 's-A', agentId: 'claude' }) })
+    await a.queue.enqueue(req({ verb: 'station-notice', sourceNodeId: 'st1', targetNodeId: 'orch1', sourceTitle: 'Station' }))
+    const disk = onDisk(a.saved())
+    expect(disk).toHaveLength(1)
+    expect(disk[0].req.sourceNodeId).toBe('st1')
+
+    let now = 1000 + 60_000
+    const b = instance({
+      now: () => now,
+      binding: () => ({ sessionId: 's-A', agentId: 'claude' })
+    })
+    await b.queue.restore(disk)
+    expect(b.queued).toHaveLength(1) // replayed like any entry
+    expect(b.expired).toEqual([]) // NOT judged not-restorable any more
+    expect(b.queue.depth('orch1')).toBe(1)
+    await b.queue.onTargetIdle('orch1')
+    expect(b.delivered.map((r) => r.verb)).toEqual(['station-notice'])
+    // Exactly one delivered end: the entry is gone from the queue, so a second idle flush (or a
+    // replayed onQueued) cannot put a second copy of the notice into the pane.
+    await b.queue.onTargetIdle('orch1')
+    expect(b.delivered).toHaveLength(1)
+    expect(b.flushed.map((f) => f.outcome.kind)).toEqual(['delivered'])
+    expect(b.saved()).toEqual([])
+    // The end is a delivery, never an expiry: no dead letter leg runs for it at all.
+    expect(b.expired).toEqual([])
+  })
+
+  it('T240 — a restored notice binds like a send: another session in the pane is T237, not a drop', async () => {
+    const a = instance({ now: () => 1000, binding: () => ({ sessionId: 's-A' }) })
+    await a.queue.enqueue(req({ verb: 'station-notice', sourceNodeId: 'st1', targetNodeId: 'orch1' }))
+    // The host says the session is LIVE while the ledger disagrees: held, never typed, never a
+    // death — the notice must not sneak past the binding just because "it is only a notification".
+    const live = instance({
+      now: () => 2000,
+      binding: () => ({ sessionId: 's-B' }),
+      liveness: async () => 'live'
+    })
+    await live.queue.restore(onDisk(a.saved()))
+    await live.queue.onTargetIdle('orch1')
+    expect(live.delivered).toEqual([])
+    expect(live.flushed).toEqual([])
+    expect(live.expired).toEqual([])
+    expect(live.queue.depth('orch1')).toBe(1)
+  })
+
+  it('T240④ — a body-omitted notice still ends at restore, and says so on the expiry', async () => {
+    const a = instance({ now: () => 1000, binding: () => ({ sessionId: 's-A' }) })
+    await a.queue.enqueue(req({ verb: 'station-notice', sourceNodeId: 'st1', targetNodeId: 'orch1', body: 'x'.repeat(QUEUE_PERSIST_BODY_MAX + 1) }))
+    const disk = onDisk(a.saved())
+    expect(disk[0]).toMatchObject({ bodyOmitted: true, req: { body: '' } })
+    const b = instance({ now: () => 2000, binding: () => ({ sessionId: 's-A' }) })
+    await b.queue.restore(disk)
+    // Nothing on disk to deliver: the not-restorable end stands — but the expiry now CARRIES the
+    // fact, so main's in-band leg can spare the dead letter that used to feed the chain.
+    expect(b.expired).toHaveLength(1)
+    expect(b.expired[0].reason).toBe('not-restorable')
+    expect(b.expired[0].bodyOmitted).toBe(true)
+    expect(b.queue.depth('orch1')).toBe(0)
+  })
+
+  it('T240 — the sanitize guard stays whole for the new verb', () => {
+    // A station notice's source is a node id at every production site; the restore guard keys on
+    // RESTORABLE_VERBS, so admitting the verb must NOT admit a foreign source shape with it.
+    const req = { targetNodeId: 'orch1', verb: 'station-notice', sourceTitle: 'Station', body: 'n', sourceNodeId: 'st1' }
+    const meta = { enqueuedAt: 1, ttlMs: 1000, queuedTraceId: 'q' }
+    expect(sanitizePersistedQueueEntry({ req: { ...req, sourceNodeId: 'board-comment:c1' }, ...meta })).toBeNull()
+    expect(sanitizePersistedQueueEntry({ req: { ...req, sourceNodeId: '' }, ...meta })).toBeNull()
+    expect(sanitizePersistedQueueEntry({ req: { ...req, sourceNodeId: '..' }, ...meta })).toBeNull()
+    const ok = sanitizePersistedQueueEntry({ req, ...meta })
+    expect(ok?.req.sourceNodeId).toBe('st1')
   })
 
   it('a body too large to store is written without it and expired at restore', async () => {
