@@ -54,6 +54,44 @@ export const NOTCH_OFFSET_MIN = -48
 export const NOTCH_OFFSET_MAX = 240
 export const NOTCH_OFFSET_DEFAULT = 0
 
+// ---- The bottom-right dock's avoidance of the canvas minimap (T243) -------------------------
+//
+// The docked capsule and the canvas minimap share the work area's bottom-right corner, and the gap
+// between the right rail's card and the minimap's top edge is exactly one capsule tall — so the
+// capsule's only way out of the minimap's way is UP, onto a ledge computed from the minimap's own
+// footprint. These constants are that footprint, held in ONE place both sides read: main's
+// `hudPlacement` reasons with them, and the renderer feeds them to the MiniMap element, so the
+// measured box can never silently drift away from the avoidance value.
+
+/** The canvas minimap's width (px). These two were never OUR numbers — they are @xyflow/react's
+ *  `MiniMap` defaults, which the canvas never overrode, so the HUD's avoidance silently depended
+ *  on a library default. T243 makes them ours: `VisibleMiniMap` passes them as explicit style, so
+ *  the rendered box is `CANVAS_MINIMAP_WIDTH × CANVAS_MINIMAP_HEIGHT` by declaration, not by
+ *  coincidence with the library. */
+export const CANVAS_MINIMAP_WIDTH = 200
+export const CANVAS_MINIMAP_HEIGHT = 150
+/** The minimap dock's edge margin (px) — the same value canvas CSS carries as `--float-gap`
+ *  (`.minimap-dock { right/bottom: var(--float-gap) }` in `src/renderer/styles.css`). The CSS copy
+ *  remains the renderer's implementation; this one is what the HUD reasons with, and the two
+ *  comment blocks point at each other so a change to one gets asked about in the other. */
+export const CANVAS_MINIMAP_MARGIN = 22
+/** Air the docked capsule keeps between its bottom edge and the minimap's top edge (px). */
+export const HUD_DOCK_CLEARANCE = 12
+/**
+ * How far above the work area's bottom edge the DOCKED capsule hangs (px). The minimap's dock is
+ * `CANVAS_MINIMAP_MARGIN` off the corner and `CANVAS_MINIMAP_HEIGHT + 2` tall (its own 1px border
+ * on each side — the field-measured box is 202×152), so sitting `HUD_DOCK_CLEARANCE` above it
+ * means the capsule's bottom edge is this far up:
+ *
+ *   CANVAS_MINIMAP_MARGIN + (CANVAS_MINIMAP_HEIGHT + 2) + HUD_DOCK_CLEARANCE = 186
+ *
+ * The employer picked "move the capsule up" from the three options and accepted the cost: the
+ * capsule's top edge now touches the right rail card's bottom edge by ~14px. The right rail is not
+ * moved and the minimap is not moved; the three top-strip alignments are untouched by this.
+ */
+export const HUD_BOTTOM_RIGHT_INSET =
+  CANVAS_MINIMAP_MARGIN + (CANVAS_MINIMAP_HEIGHT + 2) + HUD_DOCK_CLEARANCE
+
 /** Clamp a hand-editable width to something that can't push the capsule off the display. */
 export function sanitizeNotchWidth(px: unknown): number {
   return typeof px === 'number' && Number.isFinite(px)

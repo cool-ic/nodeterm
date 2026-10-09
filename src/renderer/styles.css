@@ -8073,6 +8073,9 @@ button.group-node__setup:disabled {
    of margin over the canvas. */
 .minimap-dock {
   position: absolute;
+  /* T243: this 22px is mirrored by `CANVAS_MINIMAP_MARGIN` in src/shared/notch-hud.ts — the HUD's
+     docked capsule sits on a ledge computed from THIS margin plus the minimap's declared size, so
+     the two copies must move together (each comment block names the other). */
   right: var(--float-gap);
   bottom: var(--float-gap);
   z-index: 5;

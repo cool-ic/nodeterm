@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { act, useLayoutEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { applyNodeChanges, MiniMap, ReactFlowProvider, useStoreApi, type Node } from '@xyflow/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { MINIMAP_FULL_SYNC_DEBOUNCE_MS, MiniMapProjection, VisibleMiniMap } from './VisibleMiniMap'
+import { CANVAS_MINIMAP_HEIGHT, CANVAS_MINIMAP_WIDTH } from '@shared/notch-hud'
 import { mergeWithKeepAlive, retireIntoPool } from '../lib/webviewKeepAlive'
 import type { CanvasNode } from '../state/workspace'
+
+const CANVAS_SRC = readFileSync(join(__dirname, 'Canvas.tsx'), 'utf8')
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 let root: Root
@@ -211,4 +216,28 @@ it('a camera update carries the viewport size with it, and a nodes change riding
   act(() => store.setState({ transform: [3, 4, 1], nodes }))
   expect(targetState().nodes).not.toBe(before.nodes)
   expect(targetState().nodes.map((x) => x.id)).toEqual(['a'])
+})
+
+// T243: the minimap's size is OUR declared fact now, not an @xyflow/react default the HUD's
+// avoidance silently depended on. The style reaches the DOM element, and the values are the SHARED
+// constants main's hudPlacement reasons with — one footprint, two readers.
+it('an explicit style reaches the MiniMap element, at the shared constants’ size', () => {
+  host = document.createElement('div')
+  document.body.append(host)
+  root = createRoot(host)
+  act(() =>
+    root.render(
+      <ReactFlowProvider>
+        <Capture />
+        <VisibleMiniMap style={{ width: CANVAS_MINIMAP_WIDTH, height: CANVAS_MINIMAP_HEIGHT }} />
+      </ReactFlowProvider>
+    )
+  )
+  act(() => store.setState({ width: 800, height: 600, transform: [-2000, -2000, 1] }))
+  const el = host.querySelector<HTMLElement>('.react-flow__minimap')!
+  expect(el).toBeTruthy()
+  expect(el.style.width).toBe(`${CANVAS_MINIMAP_WIDTH}px`)
+  expect(el.style.height).toBe(`${CANVAS_MINIMAP_HEIGHT}px`)
+  // …and the call site passes exactly these constants (source pin: Canvas has no render harness).
+  expect(CANVAS_SRC).toContain('style={{ width: CANVAS_MINIMAP_WIDTH, height: CANVAS_MINIMAP_HEIGHT }}')
 })

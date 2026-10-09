@@ -688,6 +688,7 @@ import {
 import { projectSwitchHint } from '../lib/projectSwitchHint'
 import { uuid } from '../lib/uuid'
 import { CANVAS_LAYOUTS_CAP, findLayoutByName, type CanvasLayout } from '@shared/canvas-layout'
+import { CANVAS_MINIMAP_HEIGHT, CANVAS_MINIMAP_WIDTH } from '@shared/notch-hud'
 import { applyLayout, captureLayout } from '../lib/canvasLayout'
 import {
   deleteLayoutMessage,
@@ -1292,6 +1293,10 @@ function StatusAwareMiniMap({ onNodeDoubleClick }: { onNodeDoubleClick: (node: N
       zoomable
       onClick={onMinimapClick}
       onNodeClick={onMinimapNodeClick}
+      /* T243: explicit, so the rendered box is our declared size and not a library default the
+         HUD's avoidance silently depended on. Same constants main's `hudPlacement` reasons with
+         (src/shared/notch-hud.ts) — one footprint, two readers. */
+      style={{ width: CANVAS_MINIMAP_WIDTH, height: CANVAS_MINIMAP_HEIGHT }}
       /* The mask dims what's OUTSIDE the viewport rectangle, so it has to be the app's own
          darkness — a near-black wash over a white minimap would invert the reading. */
       maskColor="var(--minimap-mask)"
