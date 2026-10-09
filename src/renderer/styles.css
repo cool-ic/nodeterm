@@ -8787,7 +8787,17 @@ button.group-node__setup:disabled {
 .usage-popover {
   position: absolute;
   bottom: 34px;
-  left: 0;
+  /* T246: opens LEFTWARD, the way every other overlay on this rail does (T223/T229 — the base
+     `.dock-menu` rule is the same expression). It used to anchor on `left: 0`, i.e. the badge
+     CIRCLE's left edge, and grow rightward: measured live at (1657,499) in a 1728-wide window, the
+     280px panel put its right edge at 1937 — 209px past the window, the account list cut in half.
+     The 17px is the rail card's own inset (`.canvas-rail__body`: 1px border + 6px padding = 7px,
+     the badge circle sits that far inside the card) PLUS the 10px edge gap the rail's menus keep —
+     so the panel clears the CARD by 10px instead of the 3px a bare 10px would leave. Its right edge
+     is then always `viewportWidth - 88`, inside the T223 bound (`innerWidth - 22`) and left of the
+     card (`viewportWidth - 78`) at every window width. */
+  right: calc(100% + 17px);
+  left: auto;
   width: 280px;
   padding: 14px 16px;
   border-radius: 12px;
