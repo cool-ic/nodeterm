@@ -143,11 +143,6 @@
      surface — Chrome's own light strip is a grey behind a paler active tab. Themed per block. */
   --tabbar-bg: var(--panel);
 
-  /* Outer width of the bottom-left controls column: one button plus the column's 1px border on
-     each side. The pill cluster clears the column by reading this, so resizing the buttons cannot
-     silently drop the pills back on top of them. */
-  --controls-w: 30px;
-
   /* Canvas chrome that lives on React Flow props rather than in a rule. */
   --canvas-dot: #303030;
   --minimap-mask: rgba(10, 12, 18, 0.6);
@@ -903,6 +898,14 @@ body,
 .dock-btn.active {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--accent-hover);
+}
+
+/* T241: the camera lock moved into the rail's dock group from the old bottom-left controls
+   column, and keeps that column's locked look — the padlock strokes with currentColor, so
+   tinting `color` recolours it, over a faint wash of the same accent. */
+.dock-btn.canvas-lock-btn.locked {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .dock-sep {
@@ -8050,67 +8053,6 @@ button.group-node__setup:disabled {
   color: var(--muted);
 }
 
-/* ---- Canvas controls (bottom-left) ----
-   Same plate and --float-gap offset as the other floating chrome; the library's own glyphs are
-   replaced in Canvas.tsx, so these rules only size and color our 16px icons.
-   The plate, the blur and the border sit on the COLUMN, matching .dock: with a background on each
-   button instead, the four read as four stacked chips and the border around them had nothing to
-   enclose. */
-.react-flow__controls {
-  margin: var(--float-gap) !important;
-  background: rgba(var(--menu-rgb), 0.92);
-  backdrop-filter: blur(10px);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, calc(0.4 * var(--shadow-k)));
-}
-
-/* Each button wraps in a Tooltip span, which must not break the library's vertical stack. */
-.react-flow__controls .tooltip-trigger {
-  display: block;
-}
-
-.react-flow__controls-button {
-  width: calc(var(--controls-w) - 2px);
-  height: calc(var(--controls-w) - 2px);
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  color: var(--text);
-}
-
-/* ONE separator, where there used to be a rule under every button. Zoom in, zoom out and fit view
-   are all camera moves; the lock is a mode toggle, and it is the only one that changes what the
-   other three are allowed to do. The lock already carries its own class, so this needs no
-   nth-child over the Tooltip spans that wrap each button. */
-.react-flow__controls-button.canvas-lock-btn {
-  border-top: 1px solid var(--border);
-}
-
-.react-flow__controls-button svg {
-  width: 15px;
-  height: 15px;
-  max-width: none;
-  max-height: none;
-  fill: none;
-  stroke: currentColor;
-}
-
-.react-flow__controls-button:hover {
-  background: var(--panel-header);
-}
-
-/* Canvas lock toggle. The padlock strokes with currentColor, so the locked state tints via
-   `color`. */
-.react-flow__controls-button.canvas-lock-btn.locked {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-
 /* ---- Minimap ---- */
 .react-flow__minimap.minimap {
   /* Monaco also mounts a .minimap even when disabled. Styling that zero-width element
@@ -8284,8 +8226,8 @@ button.group-node__setup:disabled {
    stacking context, so each pill's own z-index (5 / 13 / 26 / 60) keeps competing with the sessions
    sidebar and the kanban overlay exactly as it did when each was anchored on its own. Do not add
    z-index, transform, filter or opacity here — any of them would trap both pills below the sidebar.
-   The left offset clears the controls column, which shares this corner: --controls-w plus the 12px
-   the other chrome already uses between two adjacent clusters (see .resume-card). */
+   The left offset clears the sessions sidebar, which shares that edge when it is open (see
+   .resume-card). */
 .canvas-rail {
   /* T226: TWO single-column tracks, one per edge. Left = create + history, right = view + status.
      Each body is exactly as wide as its 42px buttons plus the card's chrome (56px total), so a
@@ -8507,8 +8449,7 @@ button.group-node__setup:disabled {
 
 .canvas-root[data-rail-collapsed] .canvas-rail__body > :not(.canvas-rail__toggle),
 .canvas-root[data-rail-collapsed] .minimap-dock,
-.canvas-root[data-rail-collapsed] .minimap-restore,
-.canvas-root[data-rail-collapsed] .react-flow__controls {
+.canvas-root[data-rail-collapsed] .minimap-restore {
   display: none;
 }
 
@@ -16870,7 +16811,6 @@ body.focus-mode .dock:hover {
 :root[data-nt-glass='on']
   :is(
     .tabbar,
-    .react-flow__controls,
     .react-flow__minimap.minimap,
     .minimap-restore button,
     .sysres-pill,
@@ -16896,14 +16836,6 @@ body.focus-mode .dock:hover {
   width: 26px;
   height: 26px;
   border-radius: 13px;
-}
-/* The zoom column matches the sessions toggle above it (34px, not 30 — their centres sat 2px apart,
-   visual QA L4/N10). The canvas pills' left offset reads the same variable and moves with it. */
-:root[data-nt-glass='on'] {
-  --controls-w: 34px;
-}
-:root[data-nt-glass='on'] .react-flow__controls-button:hover {
-  background: var(--glass-lift-hover);
 }
 :root[data-nt-glass='on'] :is(.sysres-pill, .usage-pill, .usage-refresh):hover {
   background:
