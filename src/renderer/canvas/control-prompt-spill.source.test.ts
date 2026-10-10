@@ -97,12 +97,10 @@ describe('each open path types openPrompt, never its own inline prompt', () => {
       expect(calls.length, `${name} builds agent nodes`).toBeGreaterThan(0)
       for (const call of calls) {
         expect(call).toContain('openPrompt.prompt,')
-        // promptFile is no longer the LAST argument: the factory's 12th parameter is the resume
-        // session id (T173 resume grammar), spelled `(args.resume ?? '').trim() || undefined` on
-        // the two flag-driven paths and `controlResumeId` on the live one. Pin THAT tail — after
-        // the spilled file only the resume id may follow, so no inline prompt can creep back.
+        // After the spilled file, only the resume id and explicit Qoder yolo switch may follow;
+        // neither may smuggle another inline prompt into the launch command.
         expect(call).toMatch(
-          /openPrompt\.promptFile,\s*(?:\(args\.resume \?\? ''\)\.trim\(\) \|\| undefined|(?:\s*\/\/[^\n]*\n)*\s*controlResumeId)\s*\)\s*$/
+          /openPrompt\.promptFile,\s*(?:\(args\.resume \?\? ''\)\.trim\(\) \|\| undefined|(?:\s*\/\/[^\n]*\n)*\s*controlResumeId),\s*args\.yolo !== undefined && (?:tgAgentId|coldAgentId|agentId) === 'qoder'\s*\)\s*$/
         )
       }
       // The per-path prompt that used to be typed inline is gone, not merely unused.

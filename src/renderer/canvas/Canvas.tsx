@@ -15317,9 +15317,8 @@ export function Canvas() {
               const outcome = await guardConcurrentRestart(args.node, async () => {
                 try {
                   typedAt = Date.now()
-                  const target = nodesRef.current.find((n) => n.id === args.node)
-                  const ok = await api.pty.sendText(
-                    args.node,
+                  const target = ctlNodes().find((n) => n.id === args.node)
+                  const ok = await api.pty.sendText(args.node,
                     args.text ?? '',
                     target?.data.agentId === 'qoder' ? { agentId: 'qoder' } : undefined
                   )

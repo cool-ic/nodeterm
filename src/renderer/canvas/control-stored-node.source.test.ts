@@ -53,10 +53,11 @@ describe('the stored-node dispatch cases (source pins)', () => {
     }
   })
 
-  it('`write` needs no node array at all — it reaches a pane through main', () => {
-    // It is on the stored-node list only because it used to TRAVEL to get here. If a future edit
-    // gives it a canvas lookup, that lookup owes `ctlNodes()` like every other case.
+  it('`write` resolves Qoder from the owning project, then reaches the pane through main', () => {
+    // Off canvas, the live array belongs to the human's visible project. The Qoder routing hint
+    // must come from the control call's owning project, exactly like the other stored-node verbs.
     expect(code(caseBody('write'))).not.toContain('nodesRef.current')
+    expect(caseBody('write')).toContain('ctlNodes().find(')
     expect(caseBody('write')).toContain('api.pty.sendText(args.node')
   })
 
