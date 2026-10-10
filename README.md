@@ -1,3 +1,5 @@
+> **使用此二开版本？请先读 [FORK.md](./FORK.md)。** 它是本 fork 的功能与文档入口；下文主要介绍上游 nodeterm 的通用能力。
+
 <div align="center">
 
 <img src="docs/assets/nodeterm.png" alt="nodeterm" width="120" height="120" />
