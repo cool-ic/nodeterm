@@ -5872,7 +5872,7 @@ export class PtyManager {
           || agentPidIn(expected, 'qoder') !== agentPidIn(current, 'qoder')) return
         submitted = (await this.sendTextNow(persistKey, '', { enter: true })) === true
       }
-    })
+    }, { footerStableSamples: 3 })
     return !pasted ? false : submitted ? true : 'pasted-not-submitted'
   }
 

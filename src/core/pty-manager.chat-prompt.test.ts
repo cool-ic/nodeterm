@@ -161,7 +161,7 @@ describe('PtyManager — Qoder paste and separate submit', () => {
       qoderSettledText(k: string, t: string, expected: typeof owner): Promise<unknown>
     }
     expect(await internal.qoderSettledText(NODE, '/model performance', owner)).toBe(true)
-    expect(capture).toHaveBeenCalledTimes(2)
+    expect(capture).toHaveBeenCalledTimes(4)
     expect(writes.mock.calls).toEqual([
       [NODE, '/model performance', { enter: false }],
       [NODE, '', { enter: true }]

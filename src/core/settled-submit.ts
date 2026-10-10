@@ -33,6 +33,8 @@ export interface SettleSurface {
 export interface SettleOptions {
   wait?: (ms: number) => Promise<void>
   polls?: number
+  /** Consecutive, unchanged footer-visible snapshots required before submit. */
+  footerStableSamples?: number
 }
 
 function delay(ms: number): Promise<void> {
@@ -69,6 +71,9 @@ export async function pasteThenSubmitWhenSettled(
   const footer = compact(envelope.split('\n').at(-1) ?? '')
   const wait = options.wait ?? delay
   const polls = Math.max(1, options.polls ?? ENVELOPE_SETTLE_POLLS)
+  const footerStableSamples = Math.max(1, options.footerStableSamples ?? 1)
+  let priorFooterSnapshot: string | null = null
+  let stableFooterCount = 0
   let priorChanged: string | null = null
   let settled = false
 
@@ -76,10 +81,18 @@ export async function pasteThenSubmitWhenSettled(
     if (i > 0) await wait(ENVELOPE_SETTLE_POLL_MS)
     const current = await snapshot()
     if (current === null) continue
-    if (footer && compact(current).includes(footer)) {
-      settled = true
-      break
+    const normalized = compact(current)
+    if (footer && normalized.includes(footer)) {
+      stableFooterCount = normalized === priorFooterSnapshot ? stableFooterCount + 1 : 1
+      priorFooterSnapshot = normalized
+      if (stableFooterCount >= footerStableSamples) {
+        settled = true
+        break
+      }
+      continue
     }
+    priorFooterSnapshot = null
+    stableFooterCount = 0
     if (current && current !== before) {
       if (current === priorChanged) {
         settled = true

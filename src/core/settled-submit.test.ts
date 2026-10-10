@@ -27,6 +27,26 @@ describe('pasteThenSubmitWhenSettled', () => {
     expect(log).toEqual(['paste', 'submit'])
   })
 
+  it('waits for a Qoder footer to remain unchanged across consecutive captures', async () => {
+    const first = `prompt> ${ENVELOPE}`
+    const second = `${first}\ncontext repaint`
+    const { s, log } = surface(['prompt>', first, second, first, first, first])
+    expect(await pasteThenSubmitWhenSettled(ENVELOPE, s, { ...noWait, footerStableSamples: 3 })).toBe(true)
+    expect(log).toEqual(['paste', 'submit'])
+  })
+
+  it('withholds Enter when a Qoder footer keeps changing', async () => {
+    const { s, log } = surface([
+      'prompt>',
+      `prompt> ${ENVELOPE}`,
+      `prompt> ${ENVELOPE} loading`,
+      `prompt> ${ENVELOPE} loading.`,
+      `prompt> ${ENVELOPE} loading..`,
+    ])
+    expect(await pasteThenSubmitWhenSettled(ENVELOPE, s, { ...noWait, polls: 4, footerStableSamples: 3 })).toBe(true)
+    expect(log).toEqual(['paste'])
+  })
+
   it('still finds the footer through the Braille animation Codex paints over its composer', async () => {
     // Measured 2026-09-14: dots from Codex's idle animation land inside rendered envelope lines.
     const noisy = '  --- END NODE⠈TERM MESS⠁AGE abc ---   ⠠⠄'
