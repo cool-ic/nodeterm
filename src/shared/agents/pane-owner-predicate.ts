@@ -68,7 +68,14 @@ export const AGENT_BINARIES: Record<string, readonly string[]> = {
   gemini: ['gemini'],
   opencode: ['opencode'],
   grok: ['grok'],
-  antigravity: ['agy']
+  antigravity: ['agy'],
+  // The `qoder` command is a bash dispatcher that execs `$(type -P qodercli)`, so the argv this
+  // predicate reads carries the SYMLINK path (`/Users/f/.local/bin/qodercli`) and never the
+  // versioned target (`…/qoder/bin/qodercli/qodercli-1.1.67`). MEASURED in a tmux pane on this host
+  // (2026-10-10, `ps -ww -o pid=,pgid=,stat=,args= -t <pane tty>`: the foreground `S+` line is
+  // `/Users/f/.local/bin/qodercli --permission-mode …`), which is what keeps this name stable
+  // across the CLI's own self-updates.
+  qoder: ['qodercli']
 }
 
 /**

@@ -1,0 +1,167 @@
+{
+  "_agent": "qoder",
+  "_cli": "qodercli 1.1.67 (installed at ~/.qoder/bin/qodercli/qodercli-1.1.67, 2026-10-10)",
+  "_capture": "Two entries are LIVE captures: a hook was written into a scratch qoder config dir's settings.json, the CLI was run in a tmux pane, and the hook's stdin (the JSON payload) was appended to a file. Values are anonymised; KEYS AND SHAPES ARE UNCHANGED. The rest are reconstructed from the binary's own emitters (`hookEventHandler.fireXEvent`, found by string-extracting the shipped binary) and are marked provenance=emitter, so no reader mistakes a reconstructed text field for a captured one. Every event NAME and every KEY in this file is measured.",
+  "_liveCommands": [
+    "qoder --config-dir <scratch> --permission-mode dont_ask --prompt-interactive '<text>'",
+    "# hooks block in <scratch>/settings.json: {hooks: {<Event>: [{hooks: [{type: 'command', command: '<script reading stdin>'}]}]}}"
+  ],
+  "events": [
+    {
+      "event": "SessionStart",
+      "provenance": "live",
+      "note": "Session id here IS the transcript's own file stem, i.e. the id `qoder --resume <id>` accepts.",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "transcript_path": "/Users/example/.qoder/projects/-Users-example-code-manager/c87e162b-51d0-422c-9be1-491eb9f65df5.jsonl",
+        "cwd": "/Users/example/code/manager",
+        "hook_event_name": "SessionStart",
+        "permission_mode": "dontAsk",
+        "source": "startup"
+      }
+    },
+    {
+      "event": "Notification",
+      "provenance": "live",
+      "note": "idle_prompt, verbatim from the capture (message text and details included).",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "transcript_path": "/Users/example/.qoder/projects/-Users-example-code-manager/c87e162b-51d0-422c-9be1-491eb9f65df5.jsonl",
+        "cwd": "/Users/example/code/manager",
+        "hook_event_name": "Notification",
+        "permission_mode": "dontAsk",
+        "notification_type": "idle_prompt",
+        "message": "Qoder CLI finished responding and is awaiting input.",
+        "details": { "streamingState": "idle" }
+      }
+    },
+    {
+      "event": "Notification",
+      "provenance": "emitter",
+      "note": "notification_type from the binary's own enum (permission_prompt | idle_prompt | auth_success | elicitation_dialog | elicitation_response | elicitation_complete); `message` text is illustrative, the keys are not.",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "hook_event_name": "Notification",
+        "permission_mode": "dontAsk",
+        "notification_type": "permission_prompt",
+        "message": "Qoder CLI needs your permission to run this command."
+      }
+    },
+    {
+      "event": "Notification",
+      "provenance": "emitter",
+      "note": "elicitation_dialog → waiting (a question is on screen).",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "hook_event_name": "Notification",
+        "permission_mode": "dontAsk",
+        "notification_type": "elicitation_dialog",
+        "message": "Qoder CLI is asking you a question."
+      }
+    },
+    {
+      "event": "Notification",
+      "provenance": "emitter",
+      "note": "Informational type: must NOT move the node (a sticky badge on a finished session is the failure this pin exists for).",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "hook_event_name": "Notification",
+        "permission_mode": "dontAsk",
+        "notification_type": "auth_success",
+        "message": "Signed in."
+      }
+    },
+    {
+      "event": "UserPromptSubmit",
+      "provenance": "emitter",
+      "note": "text field is `prompt` (Qoder's spelling; Claude's is the same).",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "hook_event_name": "UserPromptSubmit",
+        "permission_mode": "dontAsk",
+        "prompt": "fix the failing test"
+      }
+    },
+    {
+      "event": "PreToolUse",
+      "provenance": "emitter",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "hook_event_name": "PreToolUse",
+        "permission_mode": "dontAsk",
+        "tool_name": "Bash",
+        "tool_input": { "command": "npm test" }
+      }
+    },
+    {
+      "event": "PostToolUse",
+      "provenance": "emitter",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "hook_event_name": "PostToolUse",
+        "permission_mode": "dontAsk",
+        "tool_name": "Bash",
+        "tool_input": { "command": "npm test" }
+      }
+    },
+    {
+      "event": "PostToolUseFailure",
+      "provenance": "emitter",
+      "note": "Carries is_interrupt + original_request_name; a failed tool is still a running turn.",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "hook_event_name": "PostToolUseFailure",
+        "permission_mode": "dontAsk",
+        "tool_name": "Bash",
+        "original_request_name": "Bash",
+        "is_interrupt": false
+      }
+    },
+    {
+      "event": "Stop",
+      "provenance": "emitter",
+      "note": "stop_hook_active + last_assistant_message, exactly as fireStopEvent builds it.",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "hook_event_name": "Stop",
+        "permission_mode": "dontAsk",
+        "stop_hook_active": false,
+        "last_assistant_message": "All tests pass."
+      }
+    },
+    {
+      "event": "Stop",
+      "provenance": "emitter",
+      "note": "A Stop carrying is_interrupt (an aborted turn) is still `done`, flagged interrupted.",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "hook_event_name": "Stop",
+        "permission_mode": "dontAsk",
+        "stop_hook_active": false,
+        "is_interrupt": true,
+        "last_assistant_message": ""
+      }
+    },
+    {
+      "event": "StopFailure",
+      "provenance": "emitter",
+      "note": "Fired INSTEAD of Stop when the turn dies on an API/model error — without this branch the badge sticks on RUNNING.",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "hook_event_name": "StopFailure",
+        "permission_mode": "dontAsk",
+        "error": { "message": "stream error" },
+        "last_assistant_message": "partial answer"
+      }
+    },
+    {
+      "event": "SessionEnd",
+      "provenance": "emitter",
+      "payload": {
+        "session_id": "c87e162b-51d0-422c-9be1-491eb9f65df5",
+        "hook_event_name": "SessionEnd",
+        "permission_mode": "dontAsk"
+      }
+    }
+  ]
+}

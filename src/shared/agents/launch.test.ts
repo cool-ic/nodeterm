@@ -171,6 +171,32 @@ describe('assembleLaunchCommand — builtins (byte-identical to the historical p
       assembleLaunchCommand({ agentId: 'custom:agy', customAgent: agyCustom, initialPrompt: 'go' }, ENV).command
     ).toBe("agy-wrapper --prompt-interactive 'go'")
   })
+  it('Qoder delivers its first order through --prompt-interactive, with no separator', () => {
+    // MEASURED against qodercli 1.1.67: `qoder -p status …` and `qoder -p -- status` BOTH run the
+    // `status` subcommand, so a one-word brief on the positional would be executed instead of sent —
+    // and the `--` separator grok needs does not survive here. The flag form cannot be read as a
+    // command name, and the CLI's own help describes it as "execute prompt and continue in
+    // interactive mode", which is the shape a station node wants.
+    expect(
+      assembleLaunchCommand({ agentId: 'qoder', initialPrompt: 'fix  it\nnow' }, ENV).command
+    ).toBe("qoder --prompt-interactive 'fix it now'")
+    expect(assembleLaunchCommand({ agentId: 'qoder' }, ENV).command).toBe('qoder')
+    // No minted id and no permission flag: qoder is in neither list (deliberately).
+    expect(
+      assembleLaunchCommand(
+        { agentId: 'qoder', sessionId: 'abc-123', sessionIdFlagSupported: true, permissionMode: 'plan' },
+        ENV
+      ).command
+    ).toBe('qoder')
+  })
+  it('resumes a Qoder session by the id its hooks report', () => {
+    const sid = 'c87e162b-51d0-422c-9be1-491eb9f65df5'
+    expect(assembleResumeCommand({ agentId: 'qoder', sessionId: sid }, ENV).command).toBe(
+      `qoder --resume ${sid}`
+    )
+    // A dead session id falls back to a fresh launch rather than a command that cannot work.
+    expect(assembleResumeCommand({ agentId: 'qoder', sessionId: 'not a safe id!' }, ENV).command).toBe('qoder')
+  })
   it('adds a safely quoted model override after the ordinary Claude launch flags', () => {
     expect(
       assembleLaunchCommand(

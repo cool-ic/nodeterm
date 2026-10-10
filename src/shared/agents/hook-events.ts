@@ -149,3 +149,47 @@ export const ANTIGRAVITY_HOOK_EVENTS: readonly ManagedHookEvent[] = [
   { event: 'PostToolUse', matcher: '*' },
   'Stop'
 ]
+
+/**
+ * Qoder CLI hook events (→ normalizeQoder), subscribed in the USER settings file
+ * (`<qoder config dir>/settings.json` → `~/.qoder/settings.json`) through the shared merge helper —
+ * Qoder's `hooks` block is Claude Code's shape, `{matcher?, hooks: [{type, command, timeout?}]}`
+ * per event (measured on 1.1.67; docs/qoder-agent.md).
+ *
+ * MEASURED live on this host (1.1.67, 2026-10-10): a hook written into `<configDir>/settings.json`
+ * really does fire, with a Claude-shaped snake_case payload
+ * `{session_id, transcript_path, cwd, hook_event_name, permission_mode, source?, notification_type?,
+ * message?, prompt?, stop_hook_active?, last_assistant_message?, …}`. So the subscription list is
+ * shared while its installer (core/agents/hooks/qoder.ts) owns the config path.
+ *
+ * The nine here are the ones this normalization can act on — plus `StopFailure`, which Qoder fires
+ * INSTEAD of `Stop` when a turn dies on an API/model error (measured in the binary:
+ * `fireStopFailureEvent(… last_assistant_message …)`), without which the badge would stick on
+ * RUNNING after any errored turn, exactly as it did on claude and grok.
+ *
+ * Deliberately NOT subscribed, each for its own reason:
+ *   - `PermissionRequest` / `PermissionDenied`: Qoder documents the first as a DECISION hook that can
+ *     change the permission result. Subscribing would make our script a synchronous gate in front of
+ *     every permission prompt in every Qoder session on this machine, and the held-hook approval
+ *     machinery behind it (docs/hook-reply-approvals.md) is claude-only — an unmeasured contract
+ *     where a wrong exit code is a denied tool call. `Notification` (permission_prompt /
+ *     elicitation_dialog) carries the NEEDS-YOU signal we render without participating in
+ *     authorization, which is exactly how copilot is wired.
+ *   - `SubagentStart` / `SubagentStop`: they feed subagent CARDS, which needs a normalizer keyed to
+ *     Qoder's own child-identity fields — not part of this adaptation.
+ *   - `PreCompact` / `PostCompact` / `QueryEnd` / `ConfigChange` / `TeammateIdle` /
+ *     `InstructionsLoaded` / `CwdChanged` / `FileChanged` / `WorktreeCreate` / `WorktreeRemove` /
+ *     `Elicitation` / `ElicitationResult` / `TaskCreated` / `TaskCompleted` / `Setup`: nothing we
+ *     render, and every subscribed event is one more hook process per occurrence.
+ */
+export const QODER_HOOK_EVENTS = [
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'PostToolUseFailure',
+  'Stop',
+  'StopFailure',
+  'Notification',
+  'SessionEnd'
+] as const satisfies readonly ManagedHookEvent[]

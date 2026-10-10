@@ -34,6 +34,7 @@ import {
 import { copilotHomeDir } from './agents/hooks/copilot'
 import { managedHookScriptPath } from './agents/hooks/install-helper'
 import { opencodeConfigDir } from './agents/hooks/opencode'
+import { qoderConfigDir } from './agents/hooks/qoder'
 import { grokHomeDir } from './agents/grok-paths'
 import { buildCanvasSkillBody } from './canvas-control-core'
 import { buildContextLinkSkillBody } from './context-link-core'
@@ -159,6 +160,12 @@ export function skillRootsFor(
       return [path.join(copilotHomeDir(), 'skills')]
     case 'opencode':
       return [path.join(opencodeConfigDir(), 'skills')]
+    // Qoder's global config has its own `skills` dir in the Claude Code layout (measured from the
+    // binary's own path table: `{root, settingsJson, skillsDir, commandsDir, agentsDir,
+    // outputStylesDir}`) — the skill needs no merge into an instruction file. `qoderConfigDir` is
+    // shared with the hook installer so the two can never disagree about the root.
+    case 'qoder':
+      return [path.join(qoderConfigDir(), 'skills')]
     default:
       return []
   }
@@ -194,7 +201,8 @@ const HOOK_SCRIPTS: Partial<Record<IntegrationAgentId, string[]>> = {
   gemini: ['gemini.sh'],
   grok: ['grok.sh'],
   copilot: ['copilot.sh'],
-  antigravity: ['antigravity.sh', 'antigravity-hook.cmd']
+  antigravity: ['antigravity.sh', 'antigravity-hook.cmd'],
+  qoder: ['qoder.sh']
 }
 
 export interface IntegrationLifecycle {

@@ -129,6 +129,8 @@ describe('registry invariants', () => {
         scope: 'canvas', darwin: [], other: [] },
       { id: 'node.newAgent.antigravity', title: 'New Antigravity node', group: 'Nodes',
         scope: 'canvas', darwin: [], other: [] },
+      { id: 'node.newAgent.qoder', title: 'New Qoder node', group: 'Nodes',
+        scope: 'canvas', darwin: [], other: [] },
       { id: 'node.newSticky', title: 'New sticky note', group: 'Nodes', scope: 'canvas',
         darwin: [], other: [] },
       { id: 'node.newBrowser', title: 'New browser node', group: 'Nodes', scope: 'canvas',
@@ -219,7 +221,9 @@ describe('registry invariants', () => {
       'node.newDino',
       'node.newFile'
     ]
-    expect(added).toHaveLength(12)
+    // 8 builtins (one per BUILTIN_AGENT_IDS entry) + the five non-agent creates below. Grows with
+    // the registry on purpose: the point of this test is that a newly added agent arrives UNBOUND.
+    expect(added).toHaveLength(13)
     for (const id of added) {
       const d = COMMANDS_BY_ID.get(id as CommandId)
       expect(d, id).toBeDefined()

@@ -1091,6 +1091,103 @@ export function normalizeAntigravity(env: RawHookEnvelope): NormalizedAgentEvent
   return null
 }
 
+/**
+ * Qoder CLI hook payload. Field names are snake_case and were taken from the 1.1.67 binary's own
+ * emitters (`createBaseInput` / `fireXEvent`) AND confirmed live for the two events a session fires
+ * before its first turn: a hook installed in a scratch config dir received
+ *
+ *   {"session_id":"c87e162b-…","transcript_path":"<configDir>/projects/<slug>/c87e162b-….jsonl",
+ *    "cwd":"…","hook_event_name":"SessionStart","permission_mode":"dontAsk","source":"startup"}
+ *   {"…same base…","hook_event_name":"Notification","notification_type":"idle_prompt",
+ *    "message":"Qoder CLI finished responding and is awaiting input.","details":{"streamingState":"idle"}}
+ *
+ * `session_id` is that transcript's own file stem, i.e. the id `qoder --resume <id>` accepts.
+ * Fields read defensively (`sessionId` is only forwardable when it is a string): this payload is
+ * another program's output, and `sessionId` reaches a `--resume` command line.
+ */
+interface QoderPayload {
+  hook_event_name?: string
+  session_id?: string
+  /** UserPromptSubmit: the prompt text, Qoder's own name for Claude's `prompt`. */
+  prompt?: string
+  tool_name?: string
+  last_assistant_message?: string
+  notification_type?: string
+  message?: string
+  is_interrupt?: boolean
+  source?: string
+}
+
+/**
+ * Qoder CLI (1.1.67) status normalizer — a NATIVE mapping, not a reuse of `normalizeClaude`.
+ *
+ * The payload shape is Claude-compatible (that is where the field names came from), but the two
+ * dialect's EVENT SETS are not the same, and the parts of claude's normalizer that would have been
+ * carried along by reuse are precisely the parts that need a measurement qoder does not have yet:
+ * AskUserQuestion/`tool_use_id` question correlation, the `background_tasks` inventory on Stop,
+ * `prompt_id` turn ids, the SubagentStart/SubagentStop child lifecycle, and the PermissionRequest
+ * held-hook ticket (a claude-only contract; `PermissionRequest` is deliberately not subscribed — see
+ * QODER_HOOK_EVENTS). Reusing the claude branch would silently claim all of them.
+ *
+ * What is mapped: the four states we render, from the events this integration subscribes to.
+ * Nothing here reads a field Qoder has not been observed to send.
+ */
+export function normalizeQoder(env: RawHookEnvelope): NormalizedAgentEvent | null {
+  const p = env.payload as QoderPayload
+  const base = {
+    nodeId: env.nodeId,
+    agentId: env.agentId,
+    sessionId: typeof p.session_id === 'string' ? p.session_id : undefined
+  }
+
+  const ev = p.hook_event_name
+  if (ev === 'SessionStart') return { ...base, kind: 'session', sessionPhase: 'start' }
+  if (ev === 'SessionEnd') return { ...base, kind: 'session', sessionPhase: 'end' }
+  if (ev === 'UserPromptSubmit') {
+    return { ...base, kind: 'state', state: 'working', task: p.prompt, newTurn: true }
+  }
+  if (ev === 'PreToolUse' || ev === 'PostToolUse' || ev === 'PostToolUseFailure') {
+    return { ...base, kind: 'state', state: 'working' }
+  }
+  if (ev === 'Stop') {
+    return {
+      ...base,
+      kind: 'state',
+      state: 'done',
+      interrupted: p.is_interrupt === true,
+      lastMessage: p.last_assistant_message
+    }
+  }
+  // Same reason as claude and grok: the CLI fires this INSTEAD of Stop when the turn died on an
+  // API/model error, so without the branch the node would sit on RUNNING forever.
+  if (ev === 'StopFailure') {
+    return { ...base, kind: 'state', state: 'done', errored: true, lastMessage: p.last_assistant_message }
+  }
+  if (ev === 'Notification') {
+    // Closed set of types (measured from the binary's own enum): permission_prompt, idle_prompt,
+    // auth_success, elicitation_dialog, elicitation_response, elicitation_complete. Only the first
+    // two change state; the rest are informational, so an unknown future type must be a no-op
+    // rather than a sticky badge.
+    if (p.notification_type === 'permission_prompt') {
+      return { ...base, kind: 'state', state: 'blocked', lastMessage: p.message }
+    }
+    if (p.notification_type === 'elicitation_dialog') {
+      return { ...base, kind: 'state', state: 'waiting', lastMessage: p.message }
+    }
+    // `idle_prompt` is the CLI saying it is back at its input prompt — measured live as
+    // `"Qoder CLI finished responding and is awaiting input."` with `details.streamingState:"idle"`.
+    // Mapped exactly as claude's is, and for the same reason: it is the only signal that can rescue a
+    // node stuck on `working` when a turn ended without a turn-end hook, and the consumer's rule
+    // (`idle` may only move a node that is still WORKING) is what keeps a pending approval — which is
+    // `blocked`/`waiting`, never `working` — from being cleared by it.
+    if (p.notification_type === 'idle_prompt') {
+      return { ...base, kind: 'state', state: 'done', interrupted: true, idle: true }
+    }
+    return null
+  }
+  return null
+}
+
 export function normalizeFor(agentId: AgentId, env: RawHookEnvelope): NormalizedAgentEvent | null {
   if (agentId === 'claude') return normalizeClaude(env)
   if (agentId === 'codex') return normalizeCodex(env)
@@ -1099,5 +1196,6 @@ export function normalizeFor(agentId: AgentId, env: RawHookEnvelope): Normalized
   if (agentId === 'grok') return normalizeGrok(env)
   if (agentId === 'copilot') return normalizeCopilot(env)
   if (agentId === 'antigravity') return normalizeAntigravity(env)
+  if (agentId === 'qoder') return normalizeQoder(env)
   return null
 }

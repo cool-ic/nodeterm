@@ -12,6 +12,7 @@ export type BuiltinAgentId =
   | 'grok'
   | 'copilot'
   | 'antigravity'
+  | 'qoder'
 // Open type — custom agents are any string ('custom:<uuid>'). Never restrict the set.
 export type AgentId = BuiltinAgentId | (string & {})
 
@@ -89,7 +90,8 @@ export const BUILTIN_AGENT_IDS: readonly BuiltinAgentId[] = [
   'gemini',
   'opencode',
   'grok',
-  'copilot'
+  'copilot',
+  'qoder'
 ]
 
 export const AGENT_CONFIG: Record<BuiltinAgentId, AgentConfig> = {
@@ -171,6 +173,37 @@ export const AGENT_CONFIG: Record<BuiltinAgentId, AgentConfig> = {
     promptInjectionMode: 'flag-interactive',
     promptFlag: '--prompt-interactive',
     expectedProcess: 'agy'
+  },
+  qoder: {
+    // Alibaba's Qoder CLI. Every claim below was measured against the installed 1.1.67 binary on
+    // this host (2026-10-10) — see docs/qoder-agent.md for the commands and the raw output.
+    label: 'Qoder',
+    // Indigo — the only hue left that is not within a few degrees of an existing agent's
+    // (antigravity teal, codex green, gemini blue, copilot purple, opencode lilac, claude orange).
+    color: '#4f46e5',
+    // The documented entry point. It is a BASH DISPATCHER, not the CLI: it `exec`s
+    // `$(type -P qodercli)` when the invocation is a CLI one (or the IDE launcher when it is not),
+    // which is why `expectedProcess` below is the resolved name and not this one.
+    launchCmd: 'qoder',
+    // Qoder has BOTH a positional query and a subcommand list (`status`, `update`, `commit`,
+    // `login`, `mcp`, `hooks`, `skills`, `agents`, `plugins`, `rollback`, `security`, `feedback`,
+    // `wiki`, `remote-control`). The separator grok needs for exactly that collision does NOT work
+    // here: MEASURED, `qoder -p status …` and `qoder --model X -p -- status` both run the `status`
+    // SUBCOMMAND and print account info instead of sending the text to the model — commander's `--`
+    // does not re-route a token that names a child command. So the first order rides the flag form,
+    // which cannot be read as a command name: `-i, --prompt-interactive <text>` "Execute prompt and
+    // continue in interactive mode" — precisely the shape a station node wants (submit, then stay).
+    // MEASURED end to end in a tmux pane: the TUI starts, submits the prompt, answers, and keeps
+    // running with the prompt on its composer line.
+    promptInjectionMode: 'flag-interactive',
+    promptFlag: '--prompt-interactive',
+    // The foreground process on the pane's tty is `qodercli`, NOT the versioned real path:
+    // `ps -ww -o pid=,pgid=,stat=,args= -t <pane tty>` shows
+    // `/Users/f/.local/bin/qodercli --permission-mode dont_ask --prompt-interactive …` with the
+    // foreground `+` flag, because the dispatcher execs the `qodercli` SYMLINK rather than
+    // `…/qoder/bin/qodercli/qodercli-1.1.67`. That is what keeps this name stable across the CLI's
+    // own self-updates (the versioned name never appears in argv).
+    expectedProcess: 'qodercli'
   }
 }
 
@@ -187,7 +220,8 @@ export const AGENT_HOOK_TARGETS = [
   'opencode',
   'grok',
   'copilot',
-  'antigravity'
+  'antigravity',
+  'qoder'
 ] as const
 // antigravity: `agy --conversation=<id>` — the `=` spelling agy prints in its own exit hint
 // (`agy --conversation=%s`, 1.2.12 binary). The id is the hook payload's `conversationId`, recorded
@@ -203,7 +237,13 @@ export const RESUMABLE_AGENTS = [
   'opencode',
   'grok',
   'copilot',
-  'antigravity'
+  'antigravity',
+  // `qoder --resume <id>` (1.1.67 `-r, --resume [id]`). The id is the hook payload's `session_id`,
+  // which is also the transcript's own file stem (`<configDir>/projects/<slug>/<session_id>.jsonl`,
+  // MEASURED), so the id we store is the id this flag accepts. Deliberately NOT in
+  // SESSION_ID_CAPABLE: minting needs a per-CLI capability probe (`--session-id` on an older build
+  // would kill the launch), and the hook already hands us the id on every session.
+  'qoder'
 ] as const
 // Agents whose session id we MINT at launch (`--session-id <uuid>`) instead of learning it only
 // from hook events. Each member must have a measured caller-chosen-id grammar below.
@@ -255,7 +295,7 @@ export const BRANCH_CAPABLE = ['claude'] as const
 // `~/.grok/config.toml`, and `GROK_CLAUDE_SKILLS_ENABLED=false`. Then the skill is undiscoverable
 // however this list reads, and the same `inspect` cell is what says so (`enabled:false`, a
 // non-default `source`) rather than leaving support to guess.
-export const CONTEXT_LINK_CAPABLE = ['claude', 'codex', 'gemini', 'opencode', 'grok'] as const
+export const CONTEXT_LINK_CAPABLE = ['claude', 'codex', 'gemini', 'opencode', 'grok', 'qoder'] as const
 // Agents whose per-node context meter we can fill. Each needs BOTH numbers: a used count and a
 // TRUSTWORTHY window.
 //  - claude: used from its transcript's assistant usage, window INFERRED from the model family
@@ -362,7 +402,7 @@ export const TRANSFER_SOURCE_CAPABLE = ['claude', 'codex', 'gemini', 'grok'] as 
 //
 // Before adding an id: find its normalizer's `sessionPhase: 'end'` branch. If there isn't one, the
 // branch is the change — this list is a consequence of it, never a substitute for it.
-export const SESSION_END_CAPABLE = ['claude', 'gemini', 'copilot', 'grok'] as const
+export const SESSION_END_CAPABLE = ['claude', 'gemini', 'copilot', 'grok', 'qoder'] as const
 // Agents that accept a node title being PUSHED back into the session — the write leg only. The
 // write is the same literal `/rename <name>` for both, which grok also accepts as `/title`.
 // The READ leg is TITLE_READ_CAPABLE below, which is a superset: an agent can name its own session
@@ -410,7 +450,12 @@ export const SHARED_IDENTITY_CAPABLE = ['codex'] as const
 // RemoteHooks.installCanvasControl. Membership here is what sets NODETERM_CANVAS_CONTROL in the
 // session env (hook-server's buildPtyEnv, remoteHookEnvArgs), i.e. what makes the shim anything
 // other than a no-op.
-export const CANVAS_CONTROL_CAPABLE = ['claude', 'codex', 'gemini', 'opencode', 'grok', 'copilot'] as const
+// qoder ships its OWN skills dir (`<configDir>/skills`, i.e. `~/.qoder/skills`) in the Claude Code
+// layout — MEASURED: a hook written into `<configDir>/settings.json` fires, and the config root
+// exposes `skills/`, `commands/`, `agents/`, `output-styles/` beside it — so it gets the skill
+// directly and needs no compatibility detour. Membership is also what sets NODETERM_CANVAS_CONTROL
+// in the session env, i.e. what makes its `nodeterm` shim anything but a no-op.
+export const CANVAS_CONTROL_CAPABLE = ['claude', 'codex', 'gemini', 'opencode', 'grok', 'copilot', 'qoder'] as const
 // Agents whose session start-up permission mode we can set (see AgentPermissionMode below).
 // claude and grok share the flag SPELLING and the value vocabulary
 // (`--permission-mode auto|plan|acceptEdits|bypassPermissions`; our `manual` = no flag = grok's own
@@ -524,8 +569,14 @@ export const hasHooks = (id: AgentId): boolean => includes(AGENT_HOOK_TARGETS, i
  * Hook-reporting agents whose hooks nodeterm installs on THIS machine only — `RemoteHooks.setup()`
  * has no installer for them on an SSH host yet. On an SSH project such a node never reports a
  * state, so nothing may WAIT on it (`--after`): the dependant would sit QUEUED forever.
+ *
+ * qoder is the second member, and its absence from `remote-hooks.ts` is the reason rather than an
+ * accident of this adaptation: the local installer merges into `~/.qoder/settings.json`, and the
+ * remote one has no Qoder leg (its `AGENT_TARGETS` covers claude/gemini, plus codex/grok/copilot
+ * through their own branches). Declaring that here is what turns "silently reports nothing over
+ * SSH" into a refusal the renderer acts on.
  */
-export const LOCAL_ONLY_HOOK_AGENTS = ['antigravity'] as const
+export const LOCAL_ONLY_HOOK_AGENTS = ['antigravity', 'qoder'] as const
 /** Does this agent report status when its node runs on an SSH project's host? */
 export const hasHooksOverSsh = (id: AgentId): boolean =>
   hasHooks(id) && !includes(LOCAL_ONLY_HOOK_AGENTS, id)
@@ -732,6 +783,7 @@ export function resumeCommandWith(
     case 'claude':
     case 'gemini':
     case 'grok':
+    case 'qoder':
       return `${launchCmd} --resume ${sid}`
     default:
       return null

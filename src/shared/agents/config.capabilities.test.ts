@@ -312,8 +312,9 @@ describe('antigravity capabilities', () => {
     // `--after` asks this before accepting a dependency in an SSH project: a node that can never
     // report "done" there would hold its dependant QUEUED forever.
     expect(hasHooksOverSsh('antigravity')).toBe(false)
-    expect(LOCAL_ONLY_HOOK_AGENTS as readonly string[]).toEqual(['antigravity'])
-    for (const id of BUILTIN_AGENT_IDS.filter((a) => a !== 'antigravity')) {
+    // Two members now — qoder joined for the same reason (no RemoteHooks leg yet).
+    expect(LOCAL_ONLY_HOOK_AGENTS as readonly string[]).toEqual(['antigravity', 'qoder'])
+    for (const id of BUILTIN_AGENT_IDS.filter((a) => !LOCAL_ONLY_HOOK_AGENTS.includes(a as never))) {
       expect(hasHooksOverSsh(id), id).toBe(hasHooks(id))
     }
   })
@@ -327,11 +328,17 @@ describe('antigravity capabilities', () => {
     expect(AGENT_CONFIG.antigravity.promptFlag).toBe('--prompt-interactive')
   })
 
-  it('is the only agent that overrides the interactive prompt flag', () => {
-    // copilot's `--interactive` must stay the default, byte-identical.
-    for (const id of BUILTIN_AGENT_IDS.filter((a) => a !== 'antigravity')) {
+  it('is the only agent besides qoder that overrides the interactive prompt flag', () => {
+    // copilot's `--interactive` must stay the default, byte-identical. qoder is the second
+    // override, and for a measured reason of its own (docs/qoder-agent.md): it has BOTH a
+    // positional query and a subcommand list, and `--` does NOT re-route a token that names a child
+    // command (`qoder -p status` and `qoder -p -- status` both run the `status` subcommand), so a
+    // bare-word brief could be executed as a command. Its flag form removes that class of failure.
+    for (const id of BUILTIN_AGENT_IDS.filter((a) => a !== 'antigravity' && a !== 'qoder')) {
       expect(AGENT_CONFIG[id].promptFlag, id).toBeUndefined()
     }
+    expect(AGENT_CONFIG.qoder.promptInjectionMode).toBe('flag-interactive')
+    expect(AGENT_CONFIG.qoder.promptFlag).toBe('--prompt-interactive')
   })
 
   it('reports status through its own hooks', () => {
@@ -379,6 +386,76 @@ describe('antigravity capabilities', () => {
     // No shared app-server mode, and agy does not announce its own copies.
     expect(hasSharedIdentity('antigravity')).toBe(false)
     expect(reportsOwnCopy('antigravity')).toBe(false)
+  })
+})
+
+// The minimal, measured Qoder adaptation. Every leaf this agent DOES have is listed here so a later
+// edit can see what it is changing, and every leaf it deliberately does NOT have is listed with the
+// reason — the omissions are the ones a well-meaning follow-up would "fix" blindly. The
+// measurements live in docs/qoder-agent.md; the raw payloads in
+// `__fixtures__/qoder/hook-payloads.json` (two of them captured live).
+describe('qoder capabilities', () => {
+  it('is a builtin whose dispatcher reaches the real CLI, launched by name', () => {
+    expect(BUILTIN_AGENT_IDS).toContain('qoder')
+    expect(AGENT_CONFIG.qoder.label).toBe('Qoder')
+    // `qoder` is the documented entry point (a bash dispatcher); the process it execs is `qodercli`,
+    // which is what both the launch config and the pane-ownership table must name.
+    expect(AGENT_CONFIG.qoder.launchCmd).toBe('qoder')
+    expect(AGENT_CONFIG.qoder.expectedProcess).toBe('qodercli')
+  })
+
+  it('takes its first order through the flag form, never a bare positional', () => {
+    // MEASURED: `qoder -p status` and `qoder -p -- status` BOTH run the `status` subcommand, so a
+    // one-word brief could be executed as a command — and the `--` separator that fixes exactly this
+    // on grok does not work here. The flag form is immune by construction (the text is a value).
+    expect(AGENT_CONFIG.qoder.promptInjectionMode).toBe('flag-interactive')
+    expect(AGENT_CONFIG.qoder.promptFlag).toBe('--prompt-interactive')
+    expect(AGENT_CONFIG.qoder.argvPromptSeparator).toBeUndefined()
+  })
+
+  it('resumes by the id its own hooks report, with no minted-session flag', () => {
+    expect(canResume('qoder')).toBe(true)
+    expect(resumeCommand('qoder', 'c87e162b-51d0-422c-9be1-491eb9f65df5')).toBe(
+      'qoder --resume c87e162b-51d0-422c-9be1-491eb9f65df5'
+    )
+    // NOT SESSION_ID_CAPABLE: minting needs a per-CLI probe, and the hook already hands us the id.
+    expect(mintsSessionId('qoder')).toBe(false)
+    // Both probes true on purpose: a non-minting agent is refused whatever a probe would say.
+    expect(supportsSessionIdFlag('qoder', true, true)).toBe(false)
+  })
+
+  it('reports state: hooks locally, none over SSH yet', () => {
+    expect(hasHooks('qoder')).toBe(true)
+    expect(hasHooksOverSsh('qoder')).toBe(false)
+    expect(reportsSessionEnd('qoder')).toBe(true)
+  })
+
+  it('drives the canvas and reads linked nodes (the fleet-message surface)', () => {
+    expect(canControlCanvas('qoder')).toBe(true)
+    expect(canContextLink('qoder')).toBe(true)
+  })
+
+  it('leaves the unmeasured leaves OFF, each for its own reason', () => {
+    // Chat panel: its transcript is `<configDir>/projects/<slug>/<sessionId>.jsonl` — a real file we
+    // have not parsed, so a reader now would be a guess.
+    expect(canChat('qoder')).toBe(false)
+    // Context meter: no measured used/window pair in anything we can read yet.
+    expect(hasUsage('qoder')).toBe(false)
+    // Model switching: `--model` exists and its invalid-value path silently falls back to "auto"
+    // (MEASURED), but the per-agent model plumbing is out of this adaptation's scope.
+    expect(canSwitchModel('qoder')).toBe(false)
+    // Permission mode: `--permission-mode` exists with its own vocabulary (default, accept_edits,
+    // bypass_permissions, dont_ask, auto) that is NOT claude's — mapping it would be a guess.
+    expect(hasPermissionMode('qoder')).toBe(false)
+    // Subagent cards: Qoder fires SubagentStart/Stop, but we do not subscribe (see QODER_HOOK_EVENTS).
+    expect(canSubagent('qoder')).toBe(false)
+    // Not a shared-app-server agent, and no self-announced copies measured.
+    expect(hasSharedIdentity('qoder')).toBe(false)
+    expect(reportsOwnCopy('qoder')).toBe(false)
+    // Title/rename and transfer are per-CLI grammars we have not measured.
+    expect(canReadTitle('qoder')).toBe(false)
+    expect(canRename('qoder')).toBe(false)
+    expect(canTransferFrom('qoder')).toBe(false)
   })
 })
 

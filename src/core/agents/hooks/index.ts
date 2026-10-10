@@ -9,6 +9,7 @@ import { installGrokHooks, removeGrokHooks } from './grok'
 import { ensureGrokHomeProbed, grokHomeDir, grokHomeFallbackWasSilent } from '../grok-paths'
 import { installCopilotHooks, removeCopilotHooks } from './copilot'
 import { installAntigravityHooksWithProbe, removeAntigravityHooks } from './antigravity'
+import { installQoderHooks, removeQoderHooks } from './qoder'
 
 type HookInstaller = readonly [string, () => void]
 
@@ -23,7 +24,10 @@ export const MANAGED_HOOK_INSTALLERS: readonly HookInstaller[] = [
   // call on the machine. Only where agy is installed, decided in two passes around the login-shell
   // PATH probe (the same shape as grok's $GROK_HOME re-install below); refuses on Windows while
   // cmd.exe has an AutoRun (antigravity-autorun.ts).
-  ['antigravity', () => void installAntigravityHooksWithProbe()]
+  ['antigravity', () => void installAntigravityHooksWithProbe()],
+  // Merges into Qoder's SHARED user settings.json (`~/.qoder/settings.json`), the same shape and the
+  // same helper claude/gemini use — measured, not assumed: the entry fires (docs/qoder-agent.md).
+  ['qoder', installQoderHooks]
 ]
 
 export const MANAGED_HOOK_REMOVERS: readonly HookInstaller[] = [
@@ -33,7 +37,8 @@ export const MANAGED_HOOK_REMOVERS: readonly HookInstaller[] = [
   ['opencode', removeOpencodeHooks],
   ['grok', removeGrokHooks],
   ['copilot', removeCopilotHooks],
-  ['antigravity', () => removeAntigravityHooks()]
+  ['antigravity', () => removeAntigravityHooks()],
+  ['qoder', removeQoderHooks]
 ]
 
 /**
