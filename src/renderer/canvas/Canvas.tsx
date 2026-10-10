@@ -13013,7 +13013,8 @@ export function Canvas() {
                     // other open path (`withAgentModel` re-validates it at the interpolation site).
                     args.model,
                     openPrompt.promptFile,
-                    (args.resume ?? '').trim() || undefined
+                    (args.resume ?? '').trim() || undefined,
+                    args.yolo !== undefined && tgAgentId === 'qoder'
                   ),
                   tgIssueRef
                 )
@@ -13408,7 +13409,8 @@ export function Canvas() {
                       owner.id,
                       args.model,
                       openPrompt.promptFile,
-                      (args.resume ?? '').trim() || undefined
+                      (args.resume ?? '').trim() || undefined,
+                      args.yolo !== undefined && coldAgentId === 'qoder'
                     ),
                     coldIssueRef
                   )
@@ -14183,7 +14185,8 @@ export function Canvas() {
                   // `--resume`: same 12th argument Open recent passes. Main already ran
                   // resumeFlagRefusal + the duplicate-adoption guard above; an empty/absent
                   // flag is a fresh launch.
-                  controlResumeId
+                  controlResumeId,
+                  args.yolo !== undefined && agentId === 'qoder'
                 ),
                 after ?? [],
                 intoGroupId,
@@ -15314,7 +15317,12 @@ export function Canvas() {
               const outcome = await guardConcurrentRestart(args.node, async () => {
                 try {
                   typedAt = Date.now()
-                  const ok = await api.pty.sendText(args.node, args.text ?? '')
+                  const target = nodesRef.current.find((n) => n.id === args.node)
+                  const ok = await api.pty.sendText(
+                    args.node,
+                    args.text ?? '',
+                    target?.data.agentId === 'qoder' ? { agentId: 'qoder' } : undefined
+                  )
                   if (ok === 'pasted-not-submitted') thrown = TEXT_NOT_SUBMITTED
                   return ok === true ? ('sent' as const) : ('failed' as const)
                 } catch (e) {

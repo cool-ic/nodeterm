@@ -707,6 +707,17 @@ export function issueFlagRefusal(verb: string, args: Record<string, string | und
   return issue.ok ? null : `${verb}: ${issue.error}`
 }
 
+/** Shared by desktop main and Server Edition: a bypass flag must never be silently ignored. */
+export function yoloFlagRefusal(verb: string, args: Record<string, string | undefined>): string | null {
+  if (args.yolo === undefined) return null
+  if (verb !== 'open-agent' || args.agent !== 'qoder') {
+    return '--yolo is supported only by open-agent --agent qoder'
+  }
+  return ['', 'true', '1'].includes(args.yolo)
+    ? null
+    : '--yolo is a flag; omit it to keep Qoder permission checks enabled'
+}
+
 /**
  * `--resume <session-id>` on `open-agent`: open a NEW node that launches the agent CLI on an
  * existing conversation (same assembler Open recent / cold-restore use). Desktop main runs this
@@ -773,6 +784,8 @@ export function parseControlRequest(
   }
   if (v === 'open-browser' && !args.url) return { error: 'open-browser requires --url' }
   if (v === 'open-agent' && !args.agent) return { error: 'open-agent requires --agent <id>' }
+  const yoloRefusal = yoloFlagRefusal(v, args)
+  if (yoloRefusal) return { error: yoloRefusal }
   const issueRefusal = issueFlagRefusal(v, args)
   if (issueRefusal) return { error: issueRefusal }
   const resumeRefusal = resumeFlagRefusal(v, args)
@@ -927,7 +940,8 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `help` — print the verb list. Answered by the shim itself, so it works even if the app is down.',
     '- `open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--run-now]` — open N plain terminals. `--cmd` requires verified node identity.',
     '- `open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--run-now]` — open N Claude sessions.',
-    `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--resume <session-id>] [--run-now]\` — open`,
+    `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--yolo] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--resume <session-id>] [--run-now]\` — open`,
+    '  `--model performance` selects the Qoder model tier when `--agent qoder`. `--yolo` is Qoder-only and explicitly bypasses its permission checks; omit it for normal approvals.',
     '  any agent CLI. `--group` parents the node(s) into a group frame; a worktree-bound group also',
     '  hands its worktree path down as the cwd. `--after <id,id>` opens the node ARMED: it does not',
     '  start until every listed station has finished a turn SUCCESSFULLY. It is',
@@ -997,10 +1011,9 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '  not a leading `/model`.',
     '  `--model <id>` picks the model the session launches with, instead of inheriting the',
     '  default. Use it to keep a cheap station cheap: a node whose whole job is editing a README',
-    '  does not need the model you give the node rewriting a test suite. Honoured by claude, codex',
-    '  and copilot (and custom agents based on them); any other agent ignores it and launches',
-    '  exactly as it would without the flag. The id is passed to the CLI as-is, so a name that',
-    '  agent does not recognise fails inside the session, not at open time — name a model you know.',
+    '  does not need the model you give the node rewriting a test suite. Honoured by claude, codex,',
+    '  copilot, grok and qoder; other agents ignore it. The id is passed to the CLI as-is.',
+    '  An unknown Qoder name can silently fall back to auto; verify its selected tier in the pane.',
     ...issueBindingDocLines(),
     ...afterPrDocLines(),
     ...afterHandoverDocLines(),
@@ -1497,7 +1510,8 @@ Verbs:
   is also what to run when you are unsure whether the control endpoint is alive.
 - \`open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--run-now]\` — open N plain terminals (default 1). \`--cmd\` requires verified node identity.
 - \`open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--run-now]\` — open N Claude sessions (default 1).
-- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--resume <session-id>] [--run-now]\` — open N sessions of any agent CLI.
+- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--yolo] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--resume <session-id>] [--run-now]\` — open N sessions of any agent CLI.
+  \`--model performance\` selects the Qoder model tier when \`--agent qoder\`. \`--yolo\` is Qoder-only and explicitly bypasses its permission checks; omit it for normal approvals.
   \`--group\` parents the node(s) into an existing group frame; a worktree-bound group also
   hands its worktree path down as the cwd.
   \`--after <id,id>\` opens the node **armed**: it does NOT start yet, and launches itself once
@@ -1580,11 +1594,10 @@ Verbs:
   \`--model <id>\` decides which model the session LAUNCHES with, instead of inheriting the
   project default. This is the lever for cost: a station whose job is editing a README does not
   need the model you give the station rewriting a 1000-line test suite, and without this flag
-  every station you open runs on the same one. Honoured by claude, codex and copilot (and custom
-  agents declaring one of those as their base); every other agent IGNORES it and launches exactly
-  as it would have — the flag is never an error, so a mixed fan-out needs no special-casing. The
-  id goes to the CLI verbatim: an unknown name fails inside the session on its first turn, not at
-  open time, so name a model you know that CLI accepts rather than guessing.
+  every station you open runs on the same one. Honoured by claude, codex, copilot, grok and qoder
+  (also custom agents based on capable CLIs); other agents ignore it. The id goes to the CLI
+  verbatim. An unknown Qoder name can silently fall back to auto, so verify the selected tier in
+  its pane rather than guessing.
 
 ${resumeDocLines().join('\n')}
 ${issueBindingDocLines().join('\n')}

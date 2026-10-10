@@ -12,8 +12,8 @@ notifications, `--after` dependencies), `RESUMABLE_AGENTS` (`qoder --resume <id>
 `NODETERM_CANVAS_CONTROL=1`), and `SESSION_END_CAPABLE`. It is in `LOCAL_ONLY_HOOK_AGENTS` beside
 antigravity: **no SSH leg** — a remote Qoder node reports nothing, so nothing may wait on it.
 
-Deliberately **not** capabilities (each with its reason in §7): chat panel, context meter, model
-switching, permission-mode flag, session-id minting, subagent cards, title read/rename, transfer.
+Deliberately **not** capabilities (each with its reason in §8): chat panel, context meter,
+project-wide permission-mode mapping, session-id minting, subagent cards, title read/rename, transfer.
 
 > Sibling documents: `docs/antigravity-agent.md`, `docs/copilot-agent.md`, `docs/grok-agent.md`,
 > `docs/gemini-agent.md`. The distilled rules are **Adding a new agent** in `CLAUDE.md`.
@@ -176,7 +176,21 @@ every per-agent create) and its Canvas handler. No brand asset: `AGENT_LOGO` is
 `Partial<Record<…>>`, so Qoder nodes fall back to the plain pulsing dot until someone contributes a
 mark.
 
-## 7. Deliberate omissions
+## 7. Input submission and explicit launch choices
+
+`write --node <qoder-node> --text '/model performance'` and the `send`/`reply` envelope path
+paste without Enter, wait until the text appears in the Qoder pane, re-check that the same Qoder
+process owns it, then send Enter in a separate PTY write. If the paste was accepted but submission
+could not be confirmed, `write` reports an error rather than `sent`; `send` awaits its normal
+turn-start receipt and reports `stalled` without blindly pasting a duplicate envelope.
+
+`open-agent --agent qoder --model performance` passes a model override to Qoder. Add `--yolo`
+only when explicitly choosing to bypass Qoder's permission checks; the adapter maps it to the
+locally advertised `--dangerously-skip-permissions` flag and retains it for restart/resume.
+Neither choice changes the default for other Qoder nodes. An unknown model name can still fall
+back to auto in Qoder itself, so verify the selected tier in its UI when it matters.
+
+## 8. Deliberate omissions
 
 | Leaf | Why it stays off |
 | --- | --- |
@@ -185,11 +199,10 @@ mark.
 | chat panel (⌘M) | the transcript is a real JSONL we have not parsed |
 | context meter | no measured used/window pair anywhere we can read |
 | subagent cards | `SubagentStart`/`Stop` are not subscribed (see `QODER_HOOK_EVENTS`) |
-| model switching | `--model` exists, but an invalid value silently falls back to "auto" (MEASURED), and per-agent model plumbing is out of scope |
 | SSH hosts | no `RemoteHooks` leg: `LOCAL_ONLY_HOOK_AGENTS`, so nothing may WAIT on a remote Qoder node |
 | `QODER_CONFIG_DIR` in the installer | the CLI never reads it as a config-root override (MEASURED) — see §2 |
 
-## 8. Not yet run (the honest list)
+## 9. Not yet run (the honest list)
 
 - A real turn **on the employer's real `~/.qoder`** with our hook installed — the live payload
   capture ran in a scratch config dir (its own `.auth`, so it was signed out; only `SessionStart`

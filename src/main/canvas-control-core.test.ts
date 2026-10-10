@@ -78,6 +78,15 @@ describe('parseControlRequest', () => {
     expect(parseControlRequest('nuke', {})).toEqual({ error: 'Unknown verb: nuke' })
   })
 
+  it('accepts explicit Qoder model/yolo and refuses yolo elsewhere', () => {
+    expect(parseControlRequest('open-agent', { agent: 'qoder', model: 'performance', yolo: '' }))
+      .toEqual({ verb: 'open-agent', args: { agent: 'qoder', model: 'performance', yolo: '' } })
+    expect(parseControlRequest('open-agent', { agent: 'codex', yolo: '' }))
+      .toEqual({ error: '--yolo is supported only by open-agent --agent qoder' })
+    expect(parseControlRequest('open-agent', { agent: 'qoder', yolo: 'false' }))
+      .toEqual({ error: '--yolo is a flag; omit it to keep Qoder permission checks enabled' })
+  })
+
   it('open-project requires --cwd (issue #338, PR 1)', () => {
     expect(parseControlRequest('open-project', {})).toEqual({
       error: 'open-project requires --cwd <abs-path>'

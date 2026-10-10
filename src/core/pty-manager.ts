@@ -100,7 +100,7 @@ import {
   shouldRecordOwnership
 } from './agents/pane-ownership'
 import { PANE_OWNER_FMT, foregroundArgvArgs, paneOwnerFrom, parseCombinedPaneOwner, parsePaneOwner } from './agents/pane-owner'
-import { binariesFor, isAgentPane, type PaneOwner } from '../shared/agents/pane-owner-predicate'
+import { agentPidIn, binariesFor, isAgentPane, type PaneOwner } from '../shared/agents/pane-owner-predicate'
 import { readSpawnResources, spawnResourceNote } from './spawn-resources'
 import {
   primePtyCeiling,
@@ -121,6 +121,7 @@ import {
   runPasteDelivery
 } from './tmux-naming'
 import { localTypedArgs, localTypedEnv, typeThenSubmitWhenSettled } from './typed-input'
+import { pasteThenSubmitWhenSettled } from './settled-submit'
 import { encodeSendKeysHex } from './tmux-control'
 import {
   ZELLIJ_NESTING_ENV,
@@ -2059,8 +2060,11 @@ export class PtyManager {
     platform().handle(IPC.ptyReadScrollback, (persistKey: string) =>
       readScrollback(persistKey)
     )
-    platform().handle(IPC.ptySendText, (persistKey: string, text: string, enter?: boolean) =>
-      this.sendText(persistKey, text, enter === undefined ? undefined : { enter })
+    platform().handle(IPC.ptySendText, (persistKey: string, text: string, enter?: boolean, agentId?: unknown) =>
+      this.sendText(persistKey, text, {
+        ...(enter !== undefined ? { enter } : {}),
+        ...(agentId === 'qoder' ? { agentId: 'qoder' as const } : {})
+      })
     )
     platform().handle(IPC.ptySendChatPrompt, (persistKey: string, text: string, agentId: unknown) =>
       // `agentId` crosses a process boundary: it only picks the screen reader, and a non-string
@@ -5749,7 +5753,7 @@ export class PtyManager {
   async sendText(
     persistKey: string,
     text: string,
-    opts?: { enter?: boolean; typedFor?: AgentId }
+    opts?: { enter?: boolean; typedFor?: AgentId; agentId?: AgentId }
   ): Promise<TextDeliveryResult> {
     return this.serializePaneWrite(persistKey, () => this.sendTextNow(persistKey, text, opts))
   }
@@ -5784,11 +5788,22 @@ export class PtyManager {
   private async sendTextNow(
     persistKey: string,
     text: string,
-    opts?: { enter?: boolean; typedFor?: AgentId }
+    opts?: { enter?: boolean; typedFor?: AgentId; agentId?: AgentId }
   ): Promise<TextDeliveryResult> {
     const enter = opts?.enter ?? true
     const target = sessionName(persistKey)
     const live = this.liveSessionForPersistKey(persistKey)
+    if (opts?.agentId === 'qoder' && enter && text.length > 0) {
+      const owner = await this.paneOwner(persistKey)
+      if (!owner || isAgentPane(owner, 'qoder') !== 'agent') return false
+      const delivery = await this.qoderSettledText(persistKey, text, owner)
+      if (delivery !== true || !text.trimStart().startsWith('/')) return delivery
+      // Slash commands do not necessarily start an agent turn, so there is no hook receipt for
+      // `write` to await. Verify the Qoder composer released the command before saying "sent".
+      return await this.qoderSlashCommandLeftComposer(persistKey, text)
+        ? true
+        : 'pasted-not-submitted'
+    }
     // `typedFor` (the ⌘M chat view, set only by `sendChatPrompt`): deliver as keystrokes, not a
     // paste — see core/typed-input.ts. Only a SUBMITTED prompt on a tmux backend; everything else
     // keeps the paste path below.
@@ -5831,6 +5846,48 @@ export class PtyManager {
       // rather than throwing, precisely so the sweep cannot be skipped by an early exit.
       return false
     }
+  }
+
+  /** Qoder applies bracketed paste asynchronously. A same-command-list Enter is too early. */
+  private async qoderSettledText(
+    persistKey: string,
+    text: string,
+    expected: PaneOwner
+  ): Promise<TextDeliveryResult> {
+    let submitted = false
+    const pasted = await pasteThenSubmitWhenSettled(text, {
+      capture: async () => {
+        try { return (await this.captureSession(persistKey)) || null } catch { return null }
+      },
+      paste: async () => (await this.sendTextNow(persistKey, text, { enter: false })) === true,
+      submit: async () => {
+        // The settle poll can outlive this CLI process. Never send a bare Enter to the shell (or
+        // a newly started agent) merely because the previous Qoder composer showed our paste.
+        const current = await this.paneOwner(persistKey).catch(() => null)
+        if (!current || isAgentPane(current, 'qoder') !== 'agent'
+          || current.paneId !== expected.paneId || current.tty !== expected.tty
+          || current.panePid !== expected.panePid
+          || !expected.paneId
+          || agentPidIn(expected, 'qoder') === null
+          || agentPidIn(expected, 'qoder') !== agentPidIn(current, 'qoder')) return
+        submitted = (await this.sendTextNow(persistKey, '', { enter: true })) === true
+      }
+    })
+    return !pasted ? false : submitted ? true : 'pasted-not-submitted'
+  }
+
+  private async qoderSlashCommandLeftComposer(persistKey: string, text: string): Promise<boolean> {
+    const command = text.trim()
+    for (let i = 0; i < 20; i++) {
+      if (i > 0) await new Promise<void>((resolve) => setTimeout(resolve, 50))
+      const screen = await this.captureSession(persistKey).catch(() => '')
+      // Qoder paints both transcript and composer with a leading ` > `. The last such line is
+      // the composer: after `/model performance` runs the transcript retains that text, while
+      // the last ` > ` becomes its empty "Type your message" placeholder.
+      const lastInput = [...screen.matchAll(/^\s*>\s*(.+?)\s*$/gm)].at(-1)?.[1]?.trim()
+      if (screen.includes(command) && lastInput && lastInput !== command) return true
+    }
+    return false
   }
 
   /**
@@ -6260,6 +6317,11 @@ export class PtyManager {
     const live = this.liveSessionForPersistKey(persistKey)
     if (this.isZellij(persistKey, live)) return false
     if (live?.nativeWindowsPane) return live.nativeWindowsPane.sendEnvelope(envelope, expected)
+    if (expected && isAgentPane(expected, 'qoder') === 'agent') {
+      // Boolean is "paste reached pane", not "receipt arrived". The caller's hook watcher
+      // reports stalled if Enter was not sent; false here would retry and duplicate the envelope.
+      return (await this.qoderSettledText(persistKey, envelope, expected)) !== false
+    }
     const target = sessionName(persistKey)
     if (this.sessionHostOwns(persistKey, live)) {
       return expected ? sessionHostMessageEnvelope(target, envelope, expected) : false

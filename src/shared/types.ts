@@ -535,6 +535,8 @@ export interface CanvasNodeState {
   agentId?: AgentId
   /** Model selected for this agent node through the shared model gateway. */
   agentModel?: string
+  /** Explicit Qoder permission bypass, retained for resume/restart. */
+  qoderYolo?: boolean
   /**
    * Agent nodes started on a GitHub issue ("Start with agent" on an issue card, or
    * `open-agent --issue`): WHICH issue this session works on. It drives the binding chips (the
@@ -1351,7 +1353,7 @@ export interface PtyApi {
    *  `opts.enter: false` writes the text without submitting it (dictation's Insert). Returns
    *  false if unavailable; `pasted-not-submitted` means input was accepted but Enter was not
    *  confirmed written. Surface it without automatically resending. True is not an app receipt. */
-  sendText(persistKey: string, text: string, opts?: { enter?: boolean }): Promise<TextDeliveryResult>
+  sendText(persistKey: string, text: string, opts?: { enter?: boolean; agentId?: AgentId }): Promise<TextDeliveryResult>
   /** Submit a prompt from the ⌘M chat view. For an agent whose screen can be read
    *  (`readsScreenDialogs`), refused BEFORE anything is written when the agent's own dialog owns the
    *  keyboard (`ChatPromptBlocked`) — such dialogs fire no hook. Otherwise the `sendText` contract. */

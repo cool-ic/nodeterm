@@ -195,6 +195,7 @@ export interface NodeData {
   agentId?: AgentId
   /** Model selected for this node through the shared model gateway. */
   agentModel?: string
+  qoderYolo?: boolean
   /** The GitHub issue this agent session was started on (see `CanvasNodeState.issueRef`).
    *  Display + run history only — never read back into a launch line. */
   issueRef?: IssueRef
@@ -725,7 +726,9 @@ export function createAgentNode(
    *  conversation. An id the resume grammar refuses (`resumeCommandWith` re-validates it against
    *  SAFE_SESSION_ID) yields NO node-level resume: the caller must check `canResumeWith` first —
    *  this factory never silently starts a fresh conversation under a resume request, it throws. */
-  resumeSessionId?: string
+  resumeSessionId?: string,
+  /** Explicit Qoder bypass, never inferred from a project default. */
+  qoderYolo = false
 ): CanvasNode {
   const { label, color: agentColor } = resolveAgent(agentId)
   // ONE binding decision, shared with the phone-registration path (core/project-node-append) so
@@ -803,6 +806,7 @@ export function createAgentNode(
     promptFile,
     permissionMode,
     model,
+    qoderYolo,
     sharedIdentity: codexSharedIdentity(ssh),
     approvalCaps: codexApprovalCaps(ssh)
   }
@@ -818,6 +822,7 @@ export function createAgentNode(
       initialPrompt,
       promptFile,
       permissionMode,
+      qoderYolo,
       sessionId: mintedSessionId,
       sessionIdFlagSupported,
       // A per-builtin launch-command override (Settings → Agents → Launch commands) replaces the
@@ -872,6 +877,7 @@ export function createAgentNode(
       // A model chosen at creation (Transfer-to-agent-with-model). Persisted so cold-restore and
       // later restarts keep it; `withAgentModel` re-applies it on relaunch. Only stamped when set.
       ...(model ? { agentModel: model } : {}),
+      ...(agentId === 'qoder' && qoderYolo ? { qoderYolo: true } : {}),
       cwd: ssh ? ssh.remoteCwd : cwd,
       initialCommand,
       ...(ssh ? { ssh: ssh.server, sshRemoteTmux: true } : {})
@@ -2636,6 +2642,7 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
         highScore: n.highScore,
         agentId,
         agentModel: n.agentModel,
+        ...(n.qoderYolo === true && agentId === 'qoder' ? { qoderYolo: true } : {}),
         // Same seam rule as the icon: a git-shared file becoming live data. A malformed or hostile
         // reference becomes no binding (the node is kept — only the chip and history go).
         issueRef: normalizeIssueRef(n.issueRef),
@@ -2727,6 +2734,7 @@ export function flowToNodeStates(nodes: CanvasNode[], retainInitialCommand = tru
         highScore: n.data.highScore,
         agentId: n.data.agentId,
         agentModel: n.data.agentModel,
+        ...(n.data.qoderYolo === true && n.data.agentId === 'qoder' ? { qoderYolo: true } : {}),
         // Re-validated on the way OUT as well — the file is only as trustworthy as its last writer.
         issueRef: normalizeIssueRef(n.data.issueRef),
         openedBy: safeOpenedBy(n.data.openedBy),

@@ -367,3 +367,12 @@ describe('grok takes its model as a FLAG, and needs no gateway environment', () 
     )
   })
 })
+
+describe('Qoder accepts an explicit CLI model without joining the gateway picker', () => {
+  it('passes a safely quoted model flag but no gateway models or credentials', () => {
+    expect(withAgentModel('qoder', 'qoder', 'performance')).toBe("qoder --model 'performance'")
+    expect(modelsForAgent([{ id: 'gateway/other' }], 'qoder')).toEqual([])
+    expect(modelGatewayEnv({ baseUrl: 'https://gw.example', apiKey: 'k' }, 'qoder', 'performance'))
+      .toEqual({})
+  })
+})

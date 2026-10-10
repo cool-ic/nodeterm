@@ -333,7 +333,7 @@ import { contextLinkShimPath, initContextLink, setNodeTranscript } from '../core
 import { transcriptPathOf } from '../core/context-link-core'
 import { initCanvasControl, canvasControlShimPath } from './canvas-control'
 import { DRY_RUN_VERBS, dryRunRequested, dryRunRefusal } from '../shared/control-verbs'
-import { issueFlagRefusal, resumeFlagRefusal } from '../core/canvas-control-core'
+import { issueFlagRefusal, resumeFlagRefusal, yoloFlagRefusal } from '../core/canvas-control-core'
 import { afterPrFlagRefusal } from '../shared/pr-wait'
 import { arrangeArgsRefusal } from '../shared/arrange-verb'
 import { CONTROL_REQUEST_TIMEOUT_MS } from '../shared/control-confirm'
@@ -4386,6 +4386,8 @@ app.whenReady().then(async () => {
     // renderer resolves `#N` against the project's repository and re-parses with the same grammar.
     const issueRefusal = issueFlagRefusal(verb, args)
     if (issueRefusal) return { ok: false, error: issueRefusal, message: issueRefusal }
+    const yoloRefusal = yoloFlagRefusal(verb, args)
+    if (yoloRefusal) return { ok: false, error: yoloRefusal, message: yoloRefusal }
     const resumeRefusal = resumeFlagRefusal(verb, args)
     if (resumeRefusal) return { ok: false, error: resumeRefusal, message: resumeRefusal }
     // `--after-pr` / `--pr-deadline`: same placement and same reason. Whether the pull request

@@ -197,6 +197,17 @@ describe('assembleLaunchCommand — builtins (byte-identical to the historical p
     // A dead session id falls back to a fresh launch rather than a command that cannot work.
     expect(assembleResumeCommand({ agentId: 'qoder', sessionId: 'not a safe id!' }, ENV).command).toBe('qoder')
   })
+  it('keeps Qoder model and explicit yolo on fresh and resumed launches only', () => {
+    expect(assembleLaunchCommand({ agentId: 'qoder', model: 'performance', qoderYolo: true }, ENV).command)
+      .toBe("qoder --model 'performance' --dangerously-skip-permissions")
+    expect(assembleLaunchCommand({ agentId: 'qoder', initialPrompt: 'start', model: 'performance', qoderYolo: true }, ENV).command)
+      .toBe("qoder --prompt-interactive 'start' --model 'performance' --dangerously-skip-permissions")
+    expect(assembleResumeCommand({ agentId: 'qoder', sessionId: 'abc-123', model: 'performance', qoderYolo: true }, ENV).command)
+      .toBe("qoder --resume abc-123 --model 'performance' --dangerously-skip-permissions")
+    expect(assembleLaunchCommand({ agentId: 'qoder', model: 'performance' }, ENV).command)
+      .toBe("qoder --model 'performance'")
+    expect(assembleLaunchCommand({ agentId: 'grok', qoderYolo: true }, ENV).command).toBe('grok')
+  })
   it('adds a safely quoted model override after the ordinary Claude launch flags', () => {
     expect(
       assembleLaunchCommand(

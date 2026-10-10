@@ -55,6 +55,8 @@ export interface LaunchInputs {
   permissionMode?: AgentPermissionMode
   /** Per-node model override, applied through the effective base harness. */
   model?: string
+  /** Qoder-only, explicit canvas-control --yolo. Never inferred from the project permission mode. */
+  qoderYolo?: boolean
   /** A minted session id for FIRST launch (claude-base only, when the CLI supports `--session-id`).
    *  Ignored on resume. */
   sessionId?: string
@@ -93,6 +95,8 @@ export interface ResumeInputs {
   permissionMode?: AgentPermissionMode
   /** Per-node model override, applied through the effective base harness. */
   model?: string
+  /** Persisted Qoder-only bypass choice for resume/restart. */
+  qoderYolo?: boolean
   /** Should a SHARED_IDENTITY_CAPABLE agent (codex) name its managed launcher on resume? Same
    *  semantics as `LaunchInputs.sharedIdentity`. */
   sharedIdentity?: boolean
@@ -248,8 +252,11 @@ export function assembleLaunchCommand(
   }
 
   const composed = usesSep ? `${flagged(baseCmd)} ${sep} ${promptArg}` : flagged(withPrompt)
+  const withYolo = inputs.qoderYolo === true && capId === 'qoder'
+    ? `${composed} --dangerously-skip-permissions`
+    : composed
   // Codex has no prompt separator, so the flag lands last like its approval flag. See codex-daemon.
-  const command = withCodexNoDaemon(composed, capId, inputs.approvalCaps ?? {})
+  const command = withCodexNoDaemon(withYolo, capId, inputs.approvalCaps ?? {})
   return { command, missingEnv: [...m1, ...m2] }
 }
 
@@ -306,8 +313,12 @@ export function assembleResumeCommand(
     : resumePromptFlag
       ? `${withMode} ${resumePromptFlag} ${resumePromptArg}`
       : `${withMode} ${resumePromptArg}`
+  const modeled = withAgentModel(withResumePrompt, capId, inputs.model)
+  const withYolo = inputs.qoderYolo === true && capId === 'qoder'
+    ? `${modeled} --dangerously-skip-permissions`
+    : modeled
   const command = withCodexNoDaemon(
-    withAgentModel(withResumePrompt, capId, inputs.model),
+    withYolo,
     capId,
     inputs.approvalCaps ?? {}
   )

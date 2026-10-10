@@ -380,7 +380,7 @@ export function normalizedAgentModel(agentId: AgentId, model: string | undefined
     !value ||
     value.length > 500 ||
     /[\u0000-\u001f\u007f]/.test(value) ||
-    !canSwitchModel(agentId)
+    (!canSwitchModel(agentId) && capabilityAgentId(agentId) !== 'qoder')
   )
     return null
   return value

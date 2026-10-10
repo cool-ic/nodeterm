@@ -873,6 +873,18 @@ describe('model on agent node factory', () => {
     expect(node.data.agentModel).toBe('gemini-2.5')
     expect(node.data.initialCommand).not.toContain('--model')
   })
+  it('persists only an explicitly requested Qoder yolo model launch', () => {
+    const node = createAgentNode(
+      'qoder', 0, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, 'performance', undefined, undefined, true
+    )
+    expect(node.data.initialCommand).toBe("qoder --model 'performance' --dangerously-skip-permissions")
+    expect(node.data.qoderYolo).toBe(true)
+    const [saved] = flowToNodeStates([node])
+    expect(saved.qoderYolo).toBe(true)
+    expect(nodeStatesToFlow([saved])[0].data.qoderYolo).toBe(true)
+    expect(createAgentNode('qoder', 0).data.qoderYolo).toBeUndefined()
+  })
 })
 
 describe('accountId serialization', () => {

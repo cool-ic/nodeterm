@@ -102,7 +102,7 @@ export interface RecreateContext {
 }
 
 const COSMETIC_KEYS = [
-  'title', 'titleAuto', 'color', 'group', 'tags', 'collapsed', 'expandedHeight', 'shell', 'agentModel'
+  'title', 'titleAuto', 'color', 'group', 'tags', 'collapsed', 'expandedHeight', 'shell', 'agentModel', 'qoderYolo'
 ] as const
 
 function withCosmetics(node: CanvasNode, data: NodeData): CanvasNode {
@@ -136,7 +136,12 @@ function buildBase(snapshot: ReopenNodeSnapshot, ctx: RecreateContext): CanvasNo
               undefined,
               sshBinding,
               ctx.resolveAccountId(d.accountId),
-              ctx.permissionModeFor(d.agentId)
+              ctx.permissionModeFor(d.agentId),
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              d.qoderYolo === true
             )
           : createTerminalNode(0, d.cwd, undefined, undefined, sshBinding)
       }
@@ -163,7 +168,12 @@ function buildBase(snapshot: ReopenNodeSnapshot, ctx: RecreateContext): CanvasNo
           undefined,
           ctx.project?.ssh,
           ctx.resolveAccountId(d.accountId),
-          ctx.permissionModeFor(d.agentId)
+          ctx.permissionModeFor(d.agentId),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          d.qoderYolo === true
         )
       }
       // A run node reopens as a run node (same folder/configuration/device); its run is NOT

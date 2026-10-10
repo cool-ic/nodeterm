@@ -135,3 +135,79 @@ describe('PtyManager — one write into a pane at a time', () => {
     await expect(mgr.sendText(NODE, 'b')).resolves.toBe(true)
   })
 })
+
+describe('PtyManager — Qoder paste and separate submit', () => {
+  const owner = {
+    panePid: 100, paneId: '%7', tty: '/dev/ttys007', command: 'qodercli',
+    argv: ['/Users/f/.local/bin/qodercli'], pids: [200]
+  }
+  beforeEach(() => {
+    vi.resetModules()
+    initPlatform(fakePlatform())
+  })
+  afterEach(() => resetPlatformForTests())
+
+  it('submits only after the pasted Qoder text is visible and the same process still owns the pane', async () => {
+    const { PtyManager } = await import('./pty-manager')
+    const mgr = new PtyManager()
+    const capture = vi.spyOn(mgr, 'captureSession')
+      .mockResolvedValueOnce('idle')
+      .mockResolvedValue('idle\n/model performance')
+    vi.spyOn(mgr, 'paneOwner').mockResolvedValue(owner)
+    const writes = vi.spyOn(mgr as unknown as {
+      sendTextNow(k: string, t: string, opts: { enter: boolean }): Promise<boolean>
+    }, 'sendTextNow').mockResolvedValue(true)
+    const internal = mgr as unknown as {
+      qoderSettledText(k: string, t: string, expected: typeof owner): Promise<unknown>
+    }
+    expect(await internal.qoderSettledText(NODE, '/model performance', owner)).toBe(true)
+    expect(capture).toHaveBeenCalledTimes(2)
+    expect(writes.mock.calls).toEqual([
+      [NODE, '/model performance', { enter: false }],
+      [NODE, '', { enter: true }]
+    ])
+  })
+
+  it('does not send Enter to a replaced process, and tells write the text remains unsubmitted', async () => {
+    const { PtyManager } = await import('./pty-manager')
+    const mgr = new PtyManager()
+    vi.spyOn(mgr, 'captureSession').mockResolvedValueOnce('idle').mockResolvedValue('idle\nhello')
+    vi.spyOn(mgr, 'paneOwner').mockResolvedValue({ ...owner, pids: [201] })
+    const writes = vi.spyOn(mgr as unknown as {
+      sendTextNow(k: string, t: string, opts: { enter: boolean }): Promise<boolean>
+    }, 'sendTextNow').mockResolvedValue(true)
+    const internal = mgr as unknown as {
+      qoderSettledText(k: string, t: string, expected: typeof owner): Promise<unknown>
+    }
+    expect(await internal.qoderSettledText(NODE, 'hello', owner)).toBe('pasted-not-submitted')
+    expect(writes.mock.calls).toEqual([[NODE, 'hello', { enter: false }]])
+  })
+
+  it('does not retry an envelope that was pasted but could not be submitted', async () => {
+    const { PtyManager } = await import('./pty-manager')
+    const mgr = new PtyManager()
+    vi.spyOn(mgr as unknown as {
+      qoderSettledText(k: string, t: string, expected: typeof owner): Promise<'pasted-not-submitted'>
+    }, 'qoderSettledText').mockResolvedValue('pasted-not-submitted')
+    const internal = mgr as unknown as {
+      sendEnvelopeNow(k: string, t: string, expected: typeof owner): Promise<boolean>
+    }
+    expect(await internal.sendEnvelopeNow(NODE, 'envelope', owner)).toBe(true)
+  })
+
+  it('confirms a slash command only after it leaves the Qoder composer', async () => {
+    const { PtyManager } = await import('./pty-manager')
+    const mgr = new PtyManager()
+    vi.spyOn(mgr, 'captureSession').mockResolvedValue([
+      ' > /model performance',
+      ' ● Model set to Performance (persisted)',
+      '────────────────────────────────',
+      ' >   Type your message or @path/to/file',
+      '────────────────────────────────'
+    ].join('\n'))
+    const internal = mgr as unknown as {
+      qoderSlashCommandLeftComposer(k: string, t: string): Promise<boolean>
+    }
+    expect(await internal.qoderSlashCommandLeftComposer(NODE, '/model performance')).toBe(true)
+  })
+})
