@@ -1,0 +1,28 @@
+{
+  "scan": {
+    "include": [
+      "*.md"
+    ],
+    "exclude": [
+      "AGENTS.md"
+    ]
+  },
+  "max_loaded_chars": 4500,
+  "maintenance": {
+    "every_tool_calls": 50
+  },
+  "documents": [
+    {
+      "path": "纲领.md",
+      "parent": null,
+      "purpose": "核心方法论、基石规则与维护原则",
+      "max_chars": 4000
+    },
+    {
+      "path": "工作记忆.md",
+      "parent": "纲领.md",
+      "purpose": "开始或恢复任务时按需读：当前目标、决定与下一步",
+      "max_chars": 1200
+    }
+  ]
+}
