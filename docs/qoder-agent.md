@@ -192,6 +192,30 @@ back to auto in Qoder itself, so verify the selected tier in its UI when it matt
 
 ## 8. Deliberate omissions
 
+### Cold resume and the first message
+
+Qoder 1.1.68 was observed restoring the original session and composer after its tmux process was
+lost while the App was closed. It emitted SessionStart but no turn-end/idle proof, leaving the
+first `send` queued indefinitely until someone typed a turn.
+
+The delivery path now checks a narrow case: local Qoder, recorded opener, a verified current
+SessionStart(source=resume) with the same session id, no state committed since, three identical empty-composer
+frames, and the same pane/foreground process before and after the observation. This evidence is
+used only for that delivery; it does not forge a completed turn, release dependencies, or change
+the mirror. A busy/blocked/waiting state, changed process, user draft, unreadable pane or unfamiliar
+Qoder layout keeps the existing refusal. Desktop and Server Edition use the shared check; remote
+Qoder remains unsupported. Runtime verification is required for new CLI layouts.
+
+Runtime acceptance on 2026-10-12 (macOS, Qoder 1.1.68): close App, terminate only the disposable
+test tmux session, reopen the rebuilt App, and send the first envelope without typing a bootstrap
+turn. The receipt reported `delivered` / `newTurn`; Qoder recalled its original random token and
+kept its session ID, node ID, layout and opener relation. Server Edition wiring and unknown/modal
+surfaces are covered by code/tests, not claimed as separately measured native UI runs.
+
+This is separate from transcript export: terminal context reading works, but Qoder summary and
+transcript retrieval still need their locator/parser integration; a restored context link alone
+does not establish that feature.
+
 | Leaf | Why it stays off |
 | --- | --- |
 | `SESSION_ID_CAPABLE` (minting `--session-id`) | minting needs a per-CLI capability probe (an unknown flag kills a launch); the hook already reports the id on every session |

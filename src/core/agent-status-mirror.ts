@@ -179,7 +179,7 @@ export interface MirrorEntry {
    * unmessageable forever: the boundary left it unverified and only a turn could re-verify it.
    * Runtime-only (not in `buildFile`'s allowlist); cleared by every state commit.
    */
-  sessionStarted?: { sessionId: string; agentId: NormalizedAgentEvent['agentId']; at: number }
+  sessionStarted?: { sessionId: string; agentId: NormalizedAgentEvent['agentId']; at: number; resumed?: true }
   /**
    * T228: the provider rate limit this node's last turn died on, read out of its PANE
    * (`rate-limit-text.ts`) — the hook payloads carry `errored` and never the provider's own words,
@@ -717,7 +717,8 @@ function reduceEffectiveEntry(
     // The boundary proves nothing about a state (and leaves `verifiedAt` alone), but a VERIFIED
     // start arms the idle rescue above.
     if (ev.sessionPhase === 'start' && ev.verified === true && ev.sessionId) {
-      next.sessionStarted = { sessionId: ev.sessionId, agentId: ev.agentId, at: now }
+      next.sessionStarted = { sessionId: ev.sessionId, agentId: ev.agentId, at: now,
+        ...(ev.sessionResumed ? { resumed: true as const } : {}) }
     }
   }
   // subagent-start / subagent-end / recurring: identity captured above, main state untouched.

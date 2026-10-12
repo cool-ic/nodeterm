@@ -5,6 +5,7 @@ import { agentPidIn, isAgentPane } from '../../shared/agents/pane-owner-predicat
 import { buildEnvelope, newFrameNonce } from './agent-message-envelope'
 import { BOARD_COMMENT_REPLY_TO } from '../../shared/board-comment'
 import { PANE_PROBE_TIMEOUT_MS, probeWithin } from './pane-probe'
+import { qoderComposerSettled } from './qoder-startup-ready'
 import {
   decideDelivery,
   decidePreProbe,
@@ -126,6 +127,8 @@ export interface DeliveryRequest {
  * guarantee is checked by execution, not by grepping this file for a name.
  */
 export interface DeliveryDeps {
+  /** Visible pane only; optional for hosts without a measured Qoder surface. */
+  capturePane?(nodeId: string): Promise<string | null>
   /** Kernel truth about the target's pane. Unbounded by contract — this module bounds it. */
   paneOwner(nodeId: string): Promise<PaneOwner | null>
   /**
@@ -484,11 +487,21 @@ export async function deliverAgentMessage(
   }
 
   return deps.lock(req.targetNodeId, async () => {
+    const originalEntry = deps.mirrorEntry(req.targetNodeId)
+    let readyOwner: PaneOwner | null = null
+    // Local, per-delivery readiness evidence. Never commit a fabricated `done`
+    // into the mirror: that could incorrectly release an --after dependency.
+    const targetEntry = (): MirrorEntry | undefined => {
+      const current = deps.mirrorEntry(req.targetNodeId)
+      return readyOwner && current === originalEntry
+        ? { ...current!, state: 'done', stateVerified: true, idleInferred: undefined }
+        : current
+    }
     // The free gates first, and this ordering is load-bearing rather than tidy: a caller that is
     // not permitted, is talking to itself, is over its rate budget, cannot prove its target's
     // identity, or is aiming at a busy target must be refused WITHOUT a tmux round-trip (and, on an
     // SSH project, without an `ssh` one). The unit test asserts the probe never happens.
-    const cheap = decidePreProbe({
+    const preflight = () => decidePreProbe({
       sourceNodeId: req.sourceNodeId,
       targetNodeId: req.targetNodeId,
       notPermitted: req.notPermitted,
@@ -498,11 +511,34 @@ export async function deliverAgentMessage(
       // envelope can reach a turn the provider would refuse.
       cooldown: rateLimitCooldown(deps.mirrorEntry(req.targetNodeId)?.rateLimited, deps.now()) ?? undefined,
       targetLiveness: req.targetLiveness ?? 'unknown',
-      target: deps.mirrorEntry(req.targetNodeId),
+      target: targetEntry(),
       tokenFilePresent: deps.tokenFilePresent(req.targetNodeId),
       targetIsRemote: req.targetIsRemote,
       mayWakeTarget: req.mayWakeTarget === true
     })
+    let cheap = preflight()
+    const start = originalEntry?.sessionStarted
+    if (cheap?.kind === 'targetNotIdleUnknown' && req.targetAgentId === 'qoder' &&
+        req.mayWakeTarget === true && !req.targetIsRemote && deps.capturePane &&
+        originalEntry && originalEntry.state === undefined && !originalEntry.restored && !originalEntry.stateExpired &&
+        start?.agentId === 'qoder' && start.resumed === true && start.sessionId === originalEntry.sessionId) {
+      const owner = await probeWithin(() => deps.paneOwner(req.targetNodeId), PANE_PROBE_TIMEOUT_MS)
+      if (owner && isAgentPane(owner, 'qoder', req.targetBinaries) === 'agent') {
+        const stillStarting = () => deps.mirrorEntry(req.targetNodeId) === originalEntry
+        const settled = await qoderComposerSettled(
+          () => probeWithin(() => deps.capturePane!(req.targetNodeId), PANE_PROBE_TIMEOUT_MS),
+          deps.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+          stillStarting
+        )
+        const current = settled
+          ? await probeWithin(() => deps.paneOwner(req.targetNodeId), PANE_PROBE_TIMEOUT_MS)
+          : null
+        if (settled && stillStarting() && samePane(owner, current, 'qoder', req.targetBinaries)) {
+          readyOwner = current
+        }
+      }
+      cheap = preflight()
+    }
     if (cheap) return refuse(cheap)
 
     // ── DO NOT RETRY AN `unknown` PANE VERDICT ON A FIXED SHORT TIMER WITHOUT A CIRCUIT BREAKER ──
@@ -517,6 +553,8 @@ export async function deliverAgentMessage(
     // any caller that wants to retry an `unknown` needs backoff plus a per-target cap BEFORE its
     // second attempt, not after the incident.
     const before = await probeWithin(() => deps.paneOwner(req.targetNodeId), PANE_PROBE_TIMEOUT_MS)
+    if (readyOwner && !samePane(readyOwner, before, 'qoder', req.targetBinaries))
+      return refuse({ kind: 'targetNotIdleUnknown', reason: 'Qoder changed process after startup readiness check' })
     const verdict = isAgentPane(before, req.targetAgentId, req.targetBinaries)
     const facts: DeliveryFacts = {
       notPermitted: req.notPermitted,
@@ -525,7 +563,7 @@ export async function deliverAgentMessage(
       targetLiveness: req.targetLiveness ?? 'unknown',
       pane: verdict,
       paneObserved: before?.command,
-      target: deps.mirrorEntry(req.targetNodeId),
+      target: targetEntry(),
       tokenFilePresent: deps.tokenFilePresent(req.targetNodeId),
       targetIsRemote: req.targetIsRemote,
       mayWakeTarget: req.mayWakeTarget === true

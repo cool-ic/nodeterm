@@ -111,6 +111,68 @@ const req = (over: Partial<DeliveryRequest> = {}): DeliveryRequest => ({
   ...over
 })
 
+describe('Qoder verified startup wake', () => {
+  const screen = '────────────────────\n >   Type your message or @path/to/file\n────────────────────\n Performance Model · ctx ▓░░ 18% · ~/project'
+  const pane = { ...claudePane, command: 'qodercli', argv: ['/bin/qodercli --resume session'], pids: [5100] }
+  const start = (): MirrorEntry => ({
+    updatedAt: 1000, agentId: 'qoder', sessionId: 'session', stateVerified: false,
+    verifiedAt: 1000, clientRevision: MANAGED_SCRIPT_REVISION,
+    sessionStarted: { agentId: 'qoder', sessionId: 'session', at: 1000, resumed: true }
+  })
+  const request = () => req({ targetAgentId: 'qoder', mayWakeTarget: true })
+
+  it('delivers the first message without fabricating a turn-end or mutating the mirror', async () => {
+    const entry = start()
+    const before = structuredClone(entry)
+    const r = recorder({ paneOwner: async () => pane, capturePane: async () => screen }, entry)
+    r.deps.sendEnvelope = async (_id, body) => {
+      r.sends.push(body)
+      r.emit({ nodeId: 'n-dst', newTurn: true, verified: true })
+      return true
+    }
+    expect((await deliverAgentMessage(request(), r.deps)).kind).toBe('delivered')
+    expect(r.sends).toHaveLength(1)
+    expect(entry).toEqual(before)
+  })
+
+  it.each(['working', 'blocked', 'waiting'] as const)('never probes or writes into %s', async (state) => {
+    const capturePane = vi.fn(async () => screen)
+    const r = recorder({ capturePane }, { ...start(), state, stateVerified: true, sessionStarted: undefined })
+    expect((await deliverAgentMessage(request(), r.deps)).kind).toBe('targetBusy')
+    expect(capturePane).not.toHaveBeenCalled()
+    expect(r.sends).toEqual([])
+  })
+
+  it.each(['unverified', 'ended', 'fresh-launch', 'remote', 'not-opener', 'denied'] as const)('does not widen %s gates', async (mode) => {
+    const entry = start()
+    if (mode === 'unverified' || mode === 'ended') delete entry.sessionStarted
+    if (mode === 'fresh-launch') delete entry.sessionStarted!.resumed
+    const capturePane = vi.fn(async () => screen)
+    const r = recorder({ capturePane }, entry)
+    const requestValue = { ...request(), ...(mode === 'remote' ? { targetIsRemote: true } : {}),
+      ...(mode === 'not-opener' ? { mayWakeTarget: false } : {}),
+      ...(mode === 'denied' ? { notPermitted: 'self-send' as const } : {}) }
+    expect((await deliverAgentMessage(requestValue, r.deps)).kind).not.toBe('delivered')
+    expect(capturePane).not.toHaveBeenCalled()
+    expect(r.sends).toEqual([])
+  })
+
+  it.each(['approval', 'process', 'unreadable', 'draft'] as const)('refuses changed or unsafe %s evidence', async (mode) => {
+    let entry = start()
+    let owners = 0
+    const r = recorder({
+      mirrorEntry: () => entry,
+      paneOwner: async () => ({ ...pane, pids: [mode === 'process' && owners++ > 0 ? 6000 : 5100] }),
+      capturePane: async () => {
+        if (mode === 'approval') entry = { ...entry, state: 'blocked', stateVerified: true, sessionStarted: undefined }
+        return mode === 'unreadable' ? null : mode === 'draft' ? screen.replace('Type your message or @path/to/file', 'a draft') : screen
+      }
+    }, entry)
+    expect((await deliverAgentMessage(request(), r.deps)).kind).not.toBe('delivered')
+    expect(r.sends).toEqual([])
+  })
+})
+
 /** Deliver, and satisfy the receipt as soon as the delivery subscribes. */
 async function deliverWithReceipt(
   r: Recorder,

@@ -2035,6 +2035,7 @@ app.whenReady().then(async () => {
   // here; everything that authorizes or performs the delivery reads MAIN's stores. See
   // src/core/agents/agent-messaging.ts for the whole map.
   const messagingDeps: AgentMessagingDeps = {
+    capturePane: async (id) => (await ptyManager.captureSession(id)) || null,
     paneOwner: (id) => ptyManager.paneOwner(id),
     sendEnvelope: (id, envelope, expected) => ptyManager.sendEnvelope(id, envelope, expected),
     envelopePasteReady: (id) => ptyManager.envelopePasteReady(id),

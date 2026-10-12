@@ -127,6 +127,7 @@ export interface MessagingStoredNode {
  * tests the SERVICE (scope→switch→flow→deps→reply) without a pty, a workspace file or a window.
  */
 export interface AgentMessagingDeps {
+  capturePane?(nodeId: string): Promise<string | null>
   paneOwner(nodeId: string): Promise<PaneOwner | null>
   sendEnvelope(nodeId: string, envelope: string, expected?: PaneOwner): Promise<boolean>
   envelopePasteReady?(nodeId: string): Promise<boolean>
@@ -915,6 +916,7 @@ export async function runDelivery(
   const traceProject = board ? board.projectId : projectId
 
   const delivery: DeliveryDeps = {
+    ...(deps.capturePane ? { capturePane: (id: string) => deps.capturePane!(id) } : {}),
     paneOwner: (id) => deps.paneOwner(id),
     // #210 retired the `#{bracket_paste_flag}` probe with a "do not reintroduce" note
     // (pty-manager.ts): pre-3.7 tmux cannot distinguish "the app did not ask" from "I cannot

@@ -72,6 +72,13 @@ means — and what you may assume when writing a feature — is three tiers, not
 
 ## Commands
 
+**Qoder cold-resume readiness:** SessionStart establishes identity but may emit no idle event.
+`agents/agent-message.ts` may probe a local Qoder's empty composer for its recorded opener only
+when a verified current resume `sessionStarted` marker remains and no state has followed it. Three stable
+frames and unchanged pane/process identity provide per-delivery evidence; a new hook invalidates
+it. Do not mutate the mirror to `done`: that could release `--after` work before any turn completed.
+Unknown layouts, user drafts, approvals, busy states and remote panes retain their existing gates.
+
 **Direct Windows agent messaging:** `core/native-windows-pane.ts` owns a headless screen for
 non-persistent native PTYs. Lookup uses the runtime node index, and the console identity probe
 uses `GetConsoleProcessList` plus OS executable paths/birth times. A single process reached

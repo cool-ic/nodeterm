@@ -54,6 +54,13 @@ describe('normalizeQoder', () => {
     expect(run(one('SessionEnd'))).toMatchObject({ kind: 'session', sessionPhase: 'end' })
   })
 
+  it('distinguishes an explicit resume from a fresh startup or unknown source', () => {
+    for (const source of ['resume', 'startup', 'clear', 'compact', undefined]) {
+      const result = normalizeQoder(envFor({ hook_event_name: 'SessionStart', session_id: 'session', source }))
+      expect(result?.sessionResumed).toBe(source === 'resume' ? true : undefined)
+    }
+  })
+
   it('opens a turn on UserPromptSubmit with the prompt as the task label', () => {
     expect(run(one('UserPromptSubmit'))).toEqual({
       nodeId: 'node-1',

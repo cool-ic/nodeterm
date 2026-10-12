@@ -98,6 +98,8 @@ export interface NormalizedAgentEvent {
   sessionTitle?: string
   // session lifecycle phase: 'start' resets to idle, 'end' resets + clears loop/fan-out
   sessionPhase?: 'start' | 'end'
+  /** Explicit Qoder resume, not a fresh launch whose first prompt may still be pending. */
+  sessionResumed?: true
   // subagent
   toolUseId?: string
   subagentType?: string
@@ -1141,7 +1143,10 @@ export function normalizeQoder(env: RawHookEnvelope): NormalizedAgentEvent | nul
   }
 
   const ev = p.hook_event_name
-  if (ev === 'SessionStart') return { ...base, kind: 'session', sessionPhase: 'start' }
+  if (ev === 'SessionStart') return {
+    ...base, kind: 'session', sessionPhase: 'start',
+    ...(p.source === 'resume' ? { sessionResumed: true as const } : {})
+  }
   if (ev === 'SessionEnd') return { ...base, kind: 'session', sessionPhase: 'end' }
   if (ev === 'UserPromptSubmit') {
     return { ...base, kind: 'state', state: 'working', task: p.prompt, newTurn: true }

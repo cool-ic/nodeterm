@@ -115,6 +115,11 @@ used, an incompatible one is left running and reported, never killed.
 
 ## Three surfaces
 
+Qoder startup messaging has a narrow readiness path: a recorded opener may send to a local,
+verified SessionStart(source=resume) only after the same Qoder process shows three stable empty-composer frames.
+Keep that evidence per delivery; never publish a synthetic turn completion or weaken busy/approval gates.
+The shared core path is wired on desktop and Server Edition; it needs no mobile UI change.
+
 A feature is not done until you have decided how it behaves on each — even if the decision is "not
 applicable here":
 
