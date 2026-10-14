@@ -68,6 +68,14 @@ export function createLaunchWriter(opts: {
   shellReady(manual: boolean): Promise<boolean>
   killLine: string
   cleanup(cancel: () => void): void
+  /**
+   * Optional direct executor, asked AFTER the claim and the ready re-check — the same exactly-once
+   * gates the typed line passes. `'fallback'` = it delivered nothing (not its kind of pane, or it
+   * refused before touching the pane) and the typed line runs as before; any other answer is the
+   * delivery outcome itself. Today: a local Windows session-host pane's semantic launch
+   * (terminal/launch-intent.ts).
+   */
+  execute?(command: string, manual: boolean): Promise<DeliveryOutcome | 'fallback'>
 }): Writer {
   let attempted = false
   let submitted = false
@@ -94,6 +102,7 @@ export function createLaunchWriter(opts: {
     // The settled type is spelled out so the gate-4 refusal keeps `gate` as a
     // `LaunchFailureReason` instead of widening to `string`; `run` (not `inFlight`) is returned
     // because `inFlight` is `| undefined` by declaration and its `.finally` clears it.
+    let directDeliveryUncertain = false
     const run: Promise<LaunchOutcome> = (async () => {
       const ready = await confirmShell(manual)
       if (ready) return ready
@@ -105,6 +114,13 @@ export function createLaunchWriter(opts: {
       // Saving can take a remote round trip. Recheck after the barrier, before any input.
       const settled = await confirmShell(manual)
       if (settled) return settled
+      if (opts.execute) {
+        const direct = await opts.execute(command, manual)
+        // A lost direct-delivery reply does not prove that the pane was torn down.
+        directDeliveryUncertain = direct === 'cancelled'
+        if (direct !== 'fallback') return direct
+        if (disposed) return 'cancelled' as const
+      }
       return new Promise<DeliveryOutcome>((resolve) => {
         try {
           // A cancelled delivery may have left an unsubmitted prefix in the shell editor.
@@ -118,7 +134,7 @@ export function createLaunchWriter(opts: {
       // Gate 4 carries the byte count; a `cancelled` from deliverCommand is a transport that
       // could not be written to — the pane is gone, which is gate 3's territory.
       if (outcome === 'line-too-long') return { gate: 'line-too-long', failBytes: lineBytes(command) }
-      if (outcome === 'cancelled') return { gate: 'torn-down' }
+      if (outcome === 'cancelled') return directDeliveryUncertain ? 'cancelled' : { gate: 'torn-down' }
       return outcome
     }).catch((): LaunchOutcome => 'cancelled').finally(() => { inFlight = undefined })
     inFlight = run
