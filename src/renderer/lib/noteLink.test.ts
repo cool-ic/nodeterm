@@ -25,9 +25,9 @@ describe('classifyLink', () => {
   it('two context-capable terminals form a context link', () => {
     expect(classifyLink(term(true), term(true))).toBe('context')
   })
-  it('terminals that are not both context-capable form nothing', () => {
-    expect(classifyLink(term(true), term(false))).toBeNull()
-    expect(classifyLink(term(false), term(false))).toBeNull()
+  it('plain terminals share terminal context without an agent capability gate', () => {
+    expect(classifyLink(term(true), term(false))).toBe('context')
+    expect(classifyLink(term(false), term(false))).toBe('context')
   })
   it('sticky ↔ terminal forms a note link in either direction', () => {
     expect(classifyLink(sticky(), term(false))).toBe('note')
@@ -46,6 +46,7 @@ describe('planBridges', () => {
     n2: term(true),
     n3: term(true),
     p1: term(false),
+    editor: { kind: 'editor', contextCapable: false },
     s1: sticky()
   }
   const lookup = (id: string) => canvas[id] ?? null
@@ -61,10 +62,10 @@ describe('planBridges', () => {
   })
 
   it('skips a target that is not linkable, without losing the ones that are', () => {
-    const plan = planBridges('n1', ['p1', 'n2'], lookup, [])
+    const plan = planBridges('n1', ['editor', 'n2'], lookup, [])
     expect(plan.linked).toEqual(['n2'])
     expect(plan.skipped).toEqual([
-      { id: 'p1', why: 'not linkable (needs two context-capable agents, or a sticky + terminal)' }
+      { id: 'editor', why: 'not linkable (needs two terminals, or a sticky + terminal)' }
     ])
   })
 

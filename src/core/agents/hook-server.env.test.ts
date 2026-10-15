@@ -39,7 +39,7 @@ describe('hookServer.buildPtyEnv — canvas control gate', () => {
     const env = hookServer.buildPtyEnv('plain')
     expect(env.NODETERM_NODE_ID).toBe('plain')
     expect(env).not.toHaveProperty('NODETERM_AGENT_ID')
-    expect(env).not.toHaveProperty('NODETERM_CANVAS_CONTROL')
+    expect(env.NODETERM_CANVAS_CONTROL).toBe('1')
     expect(env).not.toHaveProperty('NODETERM_PERM_WAIT_SECS')
   })
 

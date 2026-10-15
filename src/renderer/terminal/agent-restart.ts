@@ -40,7 +40,8 @@ const EXIT_SEQUENCES: Record<string, string> = {
   grok: '/quit',
   gemini: '/quit',
   copilot: '/exit',
-  opencode: '/exit'
+  opencode: '/exit',
+  qoder: '/quit' // Qoder CLI 1.1.71: /exit aliases /quit; both preserve resumable history.
 }
 
 /** Agents quit with Ctrl-Cs rather than their typed exit, and how many — see `performExitPhase`.
@@ -330,6 +331,11 @@ export async function performExitPhase(d: {
       }
       d.io.write(CTRL_C)
     }
+  } else if (capabilityAgentId(d.agentId) === 'qoder') {
+    d.io.write(exit)
+    await new Promise((resolve) => setTimeout(resolve, CTRL_C_GAP_MS))
+    if (gone()) return 'not-eligible'
+    d.io.write('\r')
   } else {
     d.io.write(exit + '\r')
   }

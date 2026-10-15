@@ -15,6 +15,27 @@ export function locateClaude(sessionId: string, accountId?: string): Promise<str
   return resolveTranscriptPath(sessionId, accountId)
 }
 
+// Qoder's native JSONL session store. Match an exact UUID, never the newest file.
+export async function locateQoder(sessionId: string): Promise<string | undefined> {
+  return locateQoderIn(path.join(os.homedir(), '.qoder', 'projects'), sessionId)
+}
+
+export async function locateQoderIn(root: string, sessionId: string): Promise<string | undefined> {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) return undefined
+  try {
+    for (const dir of await fs.promises.readdir(root, { withFileTypes: true })) {
+      if (!dir.isDirectory()) continue
+      const file = path.join(root, dir.name, `${sessionId}.jsonl`)
+      try {
+        if (!(await fs.promises.lstat(file)).isFile()) continue
+        await fs.promises.access(file, fs.constants.R_OK)
+        return file
+      } catch { /* no matching session in this project */ }
+    }
+  } catch { /* store unavailable */ }
+  return undefined
+}
+
 // codex: ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<sessionId>.jsonl — walk the tree and
 // match a .jsonl filename containing the sessionId. Managed accounts are Claude-only, so the
 // codex/gemini locators ignore accountId (present only to satisfy the shared Locator type).

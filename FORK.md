@@ -28,6 +28,13 @@
 
 ## 改了哪些
 
+### 普通终端与 Codex / Qoder 入口统一
+
+普通 Terminal 也可以连接并读取终端输出；在本机启动 Codex/Qoder 后，经验证的 hook 会保存 agent 类型和对话 ID，供重启恢复使用。普通终端不再继承其他 tmux 会话的 agent 环境。macOS/zsh 下的 Codex 入口避免复用带着旧节点环境的默认 daemon；初始化文件由 nodeterm 单独管理，不改用户 dotfile，显式用户 alias/function 仍优先。
+
+本轮已验证两种 CLI × 两种入口的冷恢复、原对话回忆，以及 Qoder 的原地重启和上下文历史读取。其他 shell、远程主机和自定义 CLI 启动方式不套用这份验收结论。当前运行路径与限制见 [Qoder 专题](./docs/qoder-agent.md)。
+
+
 ### 完成信号自己走过来（T185）
 
 节点任务结束时跑 `report-outcome`，画布会代它给**开它的那个节点**发一条通知，成功和失败都发。通知带站点 id 和它自己写的一行说明。

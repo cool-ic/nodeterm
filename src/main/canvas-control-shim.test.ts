@@ -157,7 +157,7 @@ describe('canvas-control shim', () => {
     const before = received.length
     await expect(
       run('/bin/sh', [shim, 'list'], { env: { PATH: process.env.PATH ?? '' } })
-    ).rejects.toMatchObject({ stderr: expect.stringContaining('not a nodeterm agent node') })
+    ).rejects.toMatchObject({ stderr: expect.stringContaining('no nodeterm terminal capability') })
     expect(received.length).toBe(before)
   })
 

@@ -1,3 +1,4 @@
+import { NODE_SCOPE_ENV, ensureTerminalCliBin, ensureTerminalZsh } from './terminal-cli'
 import type { ChatPromptBlocked, ChatPromptResult, TextDeliveryResult } from '../shared/text-delivery'
 import { claudeScreenBlocksInput, readClaudeScreen } from '../shared/agents/claude-screen'
 import os from 'os'
@@ -427,6 +428,8 @@ function settleWithin(p: Promise<boolean>, ms: number): Promise<boolean> {
  * must not get these.
  */
 export const ACCOUNT_SCOPE_UPDATE_ENV: readonly string[] = [
+  ...NODE_SCOPE_ENV,
+  'ZDOTDIR', 'NODETERM_USER_ZDOTDIR',
   'CLAUDE_CONFIG_DIR',
   ...AUTH_ENV_STRIP,
   'CODEX_HOME',
@@ -4196,6 +4199,7 @@ export class PtyManager {
     // advertise it — without this, zsh themes and TUIs quietly clamp to the 256 palette and
     // the canvas terminals never match the user's real terminal colors (issue #78).
     const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>
+    for (const key of NODE_SCOPE_ENV) delete env[key]
     if (process.platform === 'win32') {
       // `process.env` commonly exposes this as `Path`. The copied object is case-sensitive, so a
       // later `env.PATH = ...` would leave BOTH names in node-pty's environment block. ConPTY uses
@@ -4267,6 +4271,25 @@ export class PtyManager {
         ? hookServer.buildPtyEnv(options.persistKey, options.agentId, permWaitSecs)
         : {}
     for (const [k, v] of Object.entries(hookEnv)) env[k] = v
+    // Hand-launched CLIs use the same node identity without borrowing a shared Codex daemon.
+    if (options.persistKey && !options.agentId && !options.sshRemote && process.platform !== 'win32') {
+      try {
+        const bin = ensureTerminalCliBin(platform().userDataDir, env[envPathKey(env)] ?? '')
+        if (bin) {
+          env[envPathKey(env)] = `${bin}${path.delimiter}${env[envPathKey(env)] ?? ''}`
+          const shell = options.shell || this.getSettings().defaultShell || env.SHELL || '/bin/zsh'
+          if (path.basename(shell) === 'zsh') {
+            const zdotdir = ensureTerminalZsh(platform().userDataDir, bin)
+            env.NODETERM_USER_ZDOTDIR = env.ZDOTDIR && env.ZDOTDIR !== zdotdir
+              ? env.ZDOTDIR : (env.NODETERM_USER_ZDOTDIR || os.homedir())
+            env.ZDOTDIR = zdotdir
+          }
+        }
+      } catch (error) {
+        console.warn('[pty] terminal CLI entry points unavailable', error)
+      }
+    }
+
 
     // Shared-identity agents (SHARED_IDENTITY_CAPABLE — never `agentId === 'codex'`) reach their
     // managed launcher by NAME, so its directory goes first on THIS session's PATH only. A plain

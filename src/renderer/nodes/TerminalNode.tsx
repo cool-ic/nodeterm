@@ -1795,6 +1795,8 @@ export function TerminalNode({
   // offer this node's in-place restart from the SAME derivation, and a second copy drifting from
   // this one yields a row whose closure refuses every click.
   const agentId = createdAgentId(data)
+  const latestAgentIdRef = useRef(agentId)
+  latestAgentIdRef.current = agentId
   /** Is an agent CLI believed to be running in this pane right now? The created agent, else one a
    *  hook event identified (a hand-launched CLI). Read through a ref by the release/park levers. */
   const readAgentProcess = (): boolean => {
@@ -5174,6 +5176,7 @@ export function TerminalNode({
       // another client destroyed — or ended under us with no replacement — is gone: nothing to park
       // (and nothing left to keep alive).
       const isRespawn = respawnNonceRef.current !== myNonce
+      if (latestAgentIdRef.current !== agentId) noParkIds.add(termKey)
       const co = getCo(termKey)
       if (sessionId && !isRespawn && !co.closed && !co.ended && !noParkIds.delete(termKey)) {
         // Park = "subscribed, but not viewing": report no size at all, so this window's (possibly
@@ -5265,7 +5268,7 @@ export function TerminalNode({
     // (which disposes rather than parks — see `noParkIds` above), coming back up runs the body
     // again for a fresh warm attach. It carries no information itself; it is the trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.respawnNonce, offscreenEpoch])
+  }, [data.respawnNonce, offscreenEpoch, agentId])
 
   // A respawn asked for while this node is offscreen-disposed must not be swallowed. The effect
   // above early-returns while down, so the bump alone would do nothing and the request (Refresh, a

@@ -942,7 +942,7 @@ export function buildCanvasControlInstructions(shimPath: string): string {
     '- `open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--run-now]` — open N plain terminals. `--cmd` requires verified node identity.',
     '- `open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--run-now]` — open N Claude sessions.',
     `- \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--yolo] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--resume <session-id>] [--run-now]\` — open`,
-    '  `--model performance` selects the Qoder model tier when `--agent qoder`. `--yolo` is Qoder-only and explicitly bypasses its permission checks; omit it for normal approvals.',
+    '  `--model auto` passes a Qoder model choice (names follow its current CLI catalog) when `--agent qoder`. `--yolo` is Qoder-only and explicitly bypasses its permission checks; omit it for normal approvals.',
     '  any agent CLI. `--group` parents the node(s) into a group frame; a worktree-bound group also',
     '  hands its worktree path down as the cwd. `--after <id,id>` opens the node ARMED: it does not',
     '  start until every listed station has finished a turn SUCCESSFULLY. It is',
@@ -1211,7 +1211,7 @@ export const VERBS_FOR_TEST: readonly ControlVerb[] = VERBS
 const CONTROL_SHIM_BODY = `# nodeterm canvas-control CLI (auto-generated — do not edit).
 
 if [ -z "$NODETERM_CANVAS_CONTROL" ]; then
-  echo "Canvas control is not available in this session (not a nodeterm agent node)." >&2
+  echo "Canvas control is not available in this session (no nodeterm terminal capability)." >&2
   exit 1
 fi
 
@@ -1515,7 +1515,7 @@ Verbs:
 - \`open-terminal [--count N] [--cwd P] [--cmd C] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--run-now]\` — open N plain terminals (default 1). \`--cmd\` requires verified node identity.
 - \`open-claude [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--run-now]\` — open N Claude sessions (default 1).
 - \`open-agent --agent ${agentChoices} [--count N] [--cwd P] [--prompt T | --prompt-file F] [--model M] [--yolo] [--group <id>] [--after <id,id>] [--after-success <id,id>] [--success-deadline <90m|12h|3d>] [--after-pr <N:checks|N:merged>] [--pr-deadline <90m|12h|3d>] [--project <id>] [--issue <owner/repo#N | #N>] [--resume <session-id>] [--run-now]\` — open N sessions of any agent CLI.
-  \`--model performance\` selects the Qoder model tier when \`--agent qoder\`. \`--yolo\` is Qoder-only and explicitly bypasses its permission checks; omit it for normal approvals.
+  \`--model auto\` passes a Qoder model choice (names follow its current CLI catalog) when \`--agent qoder\`. \`--yolo\` is Qoder-only and explicitly bypasses its permission checks; omit it for normal approvals.
   \`--group\` parents the node(s) into an existing group frame; a worktree-bound group also
   hands its worktree path down as the cwd.
   \`--after <id,id>\` opens the node **armed**: it does NOT start yet, and launches itself once

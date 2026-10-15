@@ -1,3 +1,4 @@
+import { NODE_SCOPE_ENV } from './terminal-cli'
 // ISSUE #419, PROVEN AGAINST A REAL TMUX: the shared server must not leak one node's managed
 // Claude/Codex account into another node's session.
 //
@@ -42,6 +43,7 @@ function tmux(args: string[], env?: Record<string, string>): string {
  *  repo's dev boxes run nodeterm sessions themselves) can never seed or satisfy an assertion. */
 function cleanEnv(): Record<string, string | undefined> {
   const e = { ...process.env }
+  for (const key of NODE_SCOPE_ENV) delete e[key]
   delete e.CLAUDE_CONFIG_DIR
   delete e.CODEX_HOME
   delete e.NODETERM_CODEX_ACCOUNT_ID
@@ -140,4 +142,15 @@ describe('managed-account isolation on a shared tmux server (issue #419)', () =>
     )
     expect(await waitFor(out)).toBe('CX=[/home/u/.codex] ID=[]\n')
   })
+})
+
+it('a plain terminal cannot inherit another node agent identity from the tmux server', async () => {
+  if (!tmuxOk) return
+  tmux(['-f', conf, 'new-session', '-d', '-s', 'identity-seed', 'sleep 30'])
+  tmux(['set-environment', '-g', 'NODETERM_AGENT_ID', 'codex'])
+  tmux(['set-environment', '-g', 'NODETERM_CANVAS_CONTROL', 'stale-grant'])
+  const out = path.join(tmp, 'plain-identity')
+  tmux(['new-session', '-d', '-s', 'identity-clean',
+    `printf 'agent=[%s] control=[%s]' "$NODETERM_AGENT_ID" "$NODETERM_CANVAS_CONTROL" > ${out}; sleep 5`])
+  expect(await waitFor(out)).toBe('agent=[] control=[]')
 })

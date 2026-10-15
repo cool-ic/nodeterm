@@ -39,6 +39,7 @@ describe('exitSequence', () => {
   it('knows the documented exit command for each restartable harness', () => {
     expect(exitSequence('claude')).toBe('/exit')
     expect(exitSequence('codex')).toBe('/quit')
+    expect(exitSequence('qoder')).toBe('/quit')
     // grok's documented primary is `/quit` (`/exit` is its alias).
     expect(exitSequence('grok')).toBe('/quit')
     // gemini's too (docs/reference/commands.md:325) — and BARE: `/quit --delete` would exit AND
@@ -1876,4 +1877,19 @@ describe('performExitPhase on a SLOW pane read (Windows session host)', () => {
     expect(settled).toBe(true)
     expect(await p).toBe('exit-timeout')
   })
+})
+
+it('Qoder submits its exit separately and waits for the shell to return', async () => {
+  vi.useFakeTimers()
+  try {
+    const write = vi.fn()
+    const result = performExitPhase({
+      agentId: 'qoder', sessionId: '11111111-2222-3333-4444-555555555555',
+      io: { write, onData: () => () => {} },
+      paneCommand: vi.fn().mockResolvedValueOnce('qodercli').mockResolvedValue('zsh')
+    })
+    await vi.runAllTimersAsync()
+    expect(await result).toBe('exited')
+    expect(write.mock.calls.map(c => c[0])).toEqual(['\x15', '/quit', '\r'])
+  } finally { vi.useRealTimers() }
 })

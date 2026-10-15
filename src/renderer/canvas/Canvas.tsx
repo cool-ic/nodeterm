@@ -1,3 +1,4 @@
+import { observedBindingPatch, verifyObservedBinding } from '@shared/agent-binding'
 import { PrepareUpdateDialog } from '../components/PrepareUpdateDialog'
 import type { PrepNode } from '../lib/updatePrep'
 import { reportTextDelivery } from '../lib/textDelivery'
@@ -15391,7 +15392,7 @@ export function Canvas() {
                   const target = ctlNodes().find((n) => n.id === args.node)
                   const ok = await api.pty.sendText(args.node,
                     args.text ?? '',
-                    target?.data.agentId === 'qoder' ? { agentId: 'qoder' } : undefined
+                    (target?.data.agentId ?? useAgentStatus.getState().byId[args.node]?.agentId) === 'qoder' ? { agentId: 'qoder' } : undefined
                   )
                   if (ok === 'pasted-not-submitted') thrown = TEXT_NOT_SUBMITTED
                   return ok === true ? ('sent' as const) : ('failed' as const)
@@ -16536,6 +16537,27 @@ export function Canvas() {
     const offStatus = api.onAgentStatus((e: NormalizedAgentEvent) => {
       const cs = useAgentStatus.getState()
       if (e.sessionId) cs.setSessionId(e.nodeId, e.sessionId)
+      const bindingData = () => nodesRef.current.find(n => n.id === e.nodeId)?.data ??
+        useProjects.getState().projects.flatMap(p => p.nodes).find(n => n.id === e.nodeId)
+      const bindingNode = bindingData()
+      if (bindingNode && !originOf(e.nodeId)?.projectIsSsh) {
+        void verifyObservedBinding(bindingNode, e, () => api.pty.paneOwner(e.nodeId), () =>
+          useAgentStatus.getState().byId[e.nodeId]?.sessionId === e.sessionId
+        ).then(binding => {
+          const current = bindingData()
+          if (!binding || !current || originOf(e.nodeId)?.projectIsSsh || !observedBindingPatch(current, e)) return
+          const store = useProjects.getState()
+          const owner = store.projects.find(p => p.nodes.some(n => n.id === e.nodeId))
+          if (nodesRef.current.some(n => n.id === e.nodeId)) {
+            setNodes(ns => ns.map(n => n.id === e.nodeId ? { ...n, data: { ...n.data, ...binding } } : n))
+            bumpDirty()
+          } else if (owner) {
+            const node = owner.nodes.find(n => n.id === e.nodeId)!
+            store.applyOwnNodeMutation(owner.id, { op: 'upsert', node: { ...node, ...binding } })
+            bumpDirty()
+          }
+        })
+      }
       // Which Claude account the posting session is ACTUALLY on — a hook-derived LABEL, captured
       // off any event that carries one, exactly like `sessionId` above: a plain terminal running
       // `CLAUDE_CONFIG_DIR=~/.claude-2 claude` announces its identity nowhere else.

@@ -5,11 +5,7 @@ import type { BridgeLink } from './types'
 export interface LinkEndpoint {
   /** Canvas node kind: 'terminal' | 'sticky' | 'editor' | … */
   kind: string
-  /**
-   * Terminal node whose agent is `CONTEXT_LINK_CAPABLE`. Deliberately not spelled out here: the
-   * list has gained two members since this comment was written (opencode, then grok) and named
-   * them wrong in between. Ask `canContextLink`; the list lives in `shared/agents/config.ts`.
-   */
+  /** Legacy adapter hint; terminal buffer links are available without an agent identity. */
   contextCapable: boolean
 }
 
@@ -77,7 +73,7 @@ export function gainedReaders(before: LinkEdge, after: LinkEdge): string[] {
 /** Decide what kind of link (if any) a new edge between two nodes forms. */
 export function classifyLink(a: LinkEndpoint, b: LinkEndpoint): LinkKind | null {
   const stickies = (a.kind === 'sticky' ? 1 : 0) + (b.kind === 'sticky' ? 1 : 0)
-  if (stickies === 0) return a.contextCapable && b.contextCapable ? 'context' : null
+  if (stickies === 0) return a.kind === 'terminal' && b.kind === 'terminal' ? 'context' : null
   if (stickies === 2) return null
   const other = a.kind === 'sticky' ? b : a
   return other.kind === 'terminal' ? 'note' : null
@@ -136,7 +132,7 @@ export function planBridges(
     if (!kind) {
       skipped.push({
         id: targetId,
-        why: 'not linkable (needs two context-capable agents, or a sticky + terminal)'
+        why: 'not linkable (needs two terminals, or a sticky + terminal)'
       })
       continue
     }

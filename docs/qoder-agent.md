@@ -1,5 +1,17 @@
 # Qoder CLI (`qoder`) as a nodeterm agent
 
+## Current local support (2026-10-15)
+
+Measured on Qoder CLI **1.1.71**, macOS/zsh, default `~/.qoder` configuration:
+- Explicit Qoder nodes and Qoder started in a plain terminal acquire the same verified, persisted agent/session binding.
+- App warm restart and loss of the disposable tmux sessions both preserved node/opener/links and resumed the original conversations; all test tokens were recalled.
+- The **Restart agent** menu now quits with `/quit`, submits Enter separately, and resumes the same session; verified through the real menu and a subsequent message.
+- Context-link `summary`/`transcript` locate the exact UUID JSONL under `~/.qoder/projects` and render Qoder message rows. Terminal output remains independently readable.
+- Model names follow Qoder's current catalog. These checks used `auto`; the old configured `performance` was rejected by 1.1.71. Do not assume historical tier names remain available.
+
+No claim is made here for alternate `--config-dir`, SSH/Windows Qoder, or the separate Cmd+M chat panel. The sections below retain the original adapter measurements where dated.
+
+
 Alibaba's Qoder CLI (measured on **1.1.67**, macOS arm64, on this host on **2026-10-10**) is a
 builtin agent id — the **minimal, native managed adaptation** (`docs/qoder-agent.md` is the record
 of what was measured; `src/shared/agents/config.ts`'s `qoder` entry is the decision): `AGENT_CONFIG.qoder`
@@ -184,7 +196,7 @@ process owns it, then send Enter in a separate PTY write. If the paste was accep
 could not be confirmed, `write` reports an error rather than `sent`; `send` awaits its normal
 turn-start receipt and reports `stalled` without blindly pasting a duplicate envelope.
 
-`open-agent --agent qoder --model performance` passes a model override to Qoder. Add `--yolo`
+`open-agent --agent qoder --model auto` passes a model override to Qoder. Add `--yolo`
 only when explicitly choosing to bypass Qoder's permission checks; the adapter maps it to the
 locally advertised `--dangerously-skip-permissions` flag and retains it for restart/resume.
 Neither choice changes the default for other Qoder nodes. An unknown model name can still fall
@@ -212,31 +224,20 @@ turn. The receipt reported `delivered` / `newTurn`; Qoder recalled its original 
 kept its session ID, node ID, layout and opener relation. Server Edition wiring and unknown/modal
 surfaces are covered by code/tests, not claimed as separately measured native UI runs.
 
-This is separate from transcript export: terminal context reading works, but Qoder summary and
-transcript retrieval still need their locator/parser integration; a restored context link alone
-does not establish that feature.
+Context-link history retrieval is now implemented and locally verified (see Current local support). It remains separate from the Cmd+M chat panel.
 
 | Leaf | Why it stays off |
 | --- | --- |
 | `SESSION_ID_CAPABLE` (minting `--session-id`) | minting needs a per-CLI capability probe (an unknown flag kills a launch); the hook already reports the id on every session |
 | permission-mode flag | `--permission-mode` exists with its own vocabulary (default, accept_edits, bypass_permissions, dont_ask, auto), and payloads spell it `dontAsk` — mapping our modes onto it unmeasured would be a guess |
-| chat panel (⌘M) | the transcript is a real JSONL we have not parsed |
+| chat panel (⌘M) | context-link parsing is implemented, but the chat-panel adapter is not wired |
 | context meter | no measured used/window pair anywhere we can read |
 | subagent cards | `SubagentStart`/`Stop` are not subscribed (see `QODER_HOOK_EVENTS`) |
 | SSH hosts | no `RemoteHooks` leg: `LOCAL_ONLY_HOOK_AGENTS`, so nothing may WAIT on a remote Qoder node |
 | `QODER_CONFIG_DIR` in the installer | the CLI never reads it as a config-root override (MEASURED) — see §2 |
 
-## 9. Not yet run (the honest list)
+## 9. Verification boundary
 
-- A real turn **on the employer's real `~/.qoder`** with our hook installed — the live payload
-  capture ran in a scratch config dir (its own `.auth`, so it was signed out; only `SessionStart`
-  and the idle `Notification` fired before the auth wall). Everything else is emitter-derived.
-- `--resume <id>` against a real session id (the grammar is pinned by tests; the flag's semantics
-  with our stored ids are not yet exercised live).
-- That a skill dropped into `~/.qoder/skills/<name>/SKILL.md` is actually **discovered** — the path
-  is measured (the binary's own `skillsDir`), the `SKILL.md` frontmatter requirement is measured,
-  discovery is not.
-- `SessionEnd`, `PreToolUse`/`PostToolUse`/`PostToolUseFailure` and `Stop`/`StopFailure` live
-  payloads (emitter-derived; the two live captures cover `SessionStart` + `Notification`).
-- `PermissionRequest` / `PermissionDenied` semantics (deliberately unsubscribed — see §4).
-- The trust dialog's exact behaviour for a **trusted** folder that later gains hooks.
+Local real turns with the installed hooks, skill discovery, SessionStart/resume, SessionEnd, PreToolUse/PostToolUse, Stop, and permission-prompt notification have been observed. Warm/cold restoration and history reads are covered above.
+
+Not yet accepted: PostToolUseFailure/StopFailure live event coverage, PermissionRequest/PermissionDenied decision semantics (unsubscribed), custom config roots, remote Qoder, and later hook additions to an already-trusted folder. A readable history or a green parser test does not certify these paths.

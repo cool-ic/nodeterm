@@ -22,15 +22,10 @@ import { DurableFactFile, type DurableFactSpec } from '../durable-state'
  *    ownership either.
  *
  * ── COLD STATE / RESTART (stated honestly) ──────────────────────────────────────────────────────
- * This ledger is IN-MEMORY and starts empty every run. After an app restart the tmux SERVER
- * usually survives, so the renderer's re-open of a node ATTACHES (`fresh === false`) and records
- * nothing — the pane is then UNPROVEN and messaging to it is REFUSED (fail-closed) until the
- * session is truly respawned (or the machine reboots, killing the tmux server, after which the
- * next open is a real fresh spawn and records correctly). We do NOT repopulate on attach: there is
- * no cheap cross-restart signal a hostile agent could not also write (a tmux session-env var is
- * settable from any pane's shell), and guessing the owner on attach is exactly how the attacker
- * would re-acquire ownership by opening the victim's id first. Fail-closed is the safe direction
- * and is pinned by a test (`ownerOf` empty ⇒ the delivery gate refuses).
+ * The runtime map starts empty. Fresh spawns persist a machine-local ownership row;
+ * reproveOnAttach restores it only when the claiming project entry id matches that row.
+ * An absent/mismatching row remains unproven. The implementation below is authoritative;
+ * attaching alone or copying project.json never establishes ownership.
  *
  * ── SCOPE ───────────────────────────────────────────────────────────────────────────────────────
  * This is scoped to tmux-pane messaging ownership but is intentionally feature-neutral: S8 PR 4's

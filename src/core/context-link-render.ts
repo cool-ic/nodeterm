@@ -88,6 +88,15 @@ export function linesFromClaude(raw: string): string[] {
   return res
 }
 
+/** Qoder JSONL stores message rows beside runtime/attachment metadata. */
+export function linesFromQoder(raw: string): string[] {
+  const row = parseJson(raw) as { type?: string; message?: { content?: unknown } } | undefined
+  if (!row || (row.type !== 'user' && row.type !== 'assistant')) return []
+  if (row.type === 'assistant' && typeof row.message?.content === 'string')
+    return [`assistant: ${row.message.content}`]
+  return linesFromClaude(raw)
+}
+
 /** One codex rollout line ({type:'response_item', payload}) -> 0..n display strings. */
 export function linesFromCodex(raw: string): string[] {
   const o = parseJson(raw) as { type?: string; payload?: Record<string, unknown> } | undefined
@@ -312,7 +321,7 @@ linesFromGrok.skipped = (buf: string): number => grokParse(buf).skipped
 export function renderTranscriptLines(agent: string | undefined, buf: string): string[] {
   if (agent === 'gemini') return linesFromGemini(buf)
   if (agent === 'grok') return linesFromGrok(buf)
-  const parse = agent === 'codex' ? linesFromCodex : linesFromClaude
+  const parse = agent === 'codex' ? linesFromCodex : agent === 'qoder' ? linesFromQoder : linesFromClaude
   const lines: string[] = []
   for (const raw of buf.split('\n')) {
     if (raw.trim()) lines.push(...parse(raw))
