@@ -102,7 +102,10 @@ export function restartEligibility(
     return { ok: false, reason: 'not-resumable' }
   // Quitting mid-turn would abandon work the agent is in the middle of; quitting a blocked
   // session would answer its dialog with the exit command (see BUSY_STATES).
-  if (BUSY_STATES.has(state ?? '')) return { ok: false, reason: 'working' }
+  const base = capabilityAgentId(agentId)
+  // Codex/Qoder waiting means an unanswered question.
+  const question = state === 'waiting' && (base === 'codex' || base === 'qoder')
+  if (BUSY_STATES.has(state ?? '') || question) return { ok: false, reason: 'working' }
   // Without a provider session id there is nothing to resume into.
   if (!sessionId) return { ok: false, reason: 'no-session' }
   return { ok: true }

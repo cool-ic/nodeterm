@@ -1418,7 +1418,7 @@ describe('summarizeOutcomes', () => {
 describe('planBulkRestart', () => {
   const cand = (over: Partial<BulkRestartCandidate> & { id: string }): BulkRestartCandidate => ({
     agentId: 'claude',
-    state: 'waiting',
+    state: 'done',
     sessionId: `sid-${over.id}`,
     wired: true,
     backgroundTask: false,
@@ -1892,4 +1892,12 @@ it('Qoder submits its exit separately and waits for the shell to return', async 
     expect(await result).toBe('exited')
     expect(write.mock.calls.map(c => c[0])).toEqual(['\x15', '/quit', '\r'])
   } finally { vi.useRealTimers() }
+})
+
+it('never writes a restart into a Codex or Qoder approval/question dialog', () => {
+  for (const agent of ['codex', 'qoder']) {
+    for (const state of ['working', 'blocked', 'waiting'])
+      expect(restartEligibility(agent, state, '11111111-2222-3333-4444-555555555555')).toEqual({ ok: false, reason: 'working' })
+    expect(restartEligibility(agent, 'done', '11111111-2222-3333-4444-555555555555')).toEqual({ ok: true })
+  }
 })
