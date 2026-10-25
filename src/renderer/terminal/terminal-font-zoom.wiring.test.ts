@@ -36,21 +36,21 @@ describe('terminal font zoom — settings', () => {
   it('ships OFF, so ⌘+/⌘−/⌘0 keep today’s behaviour until the user opts in', () => {
     expect(DEFAULT_SETTINGS.terminalFontZoomKeys).toBe(false)
   })
-  it('is a Switch in Settings → Terminal, and the size field uses the shared bounds', () => {
+  it('is a Switch in Settings → Terminal, and the size field keeps the shared minimum without a maximum', () => {
     expect(TERMINAL_SECTION).toContain('terminalFontZoomKeys')
     expect(TERMINAL_SECTION).toContain('min={TERMINAL_FONT_SIZE_MIN}')
-    expect(TERMINAL_SECTION).toContain('max={TERMINAL_FONT_SIZE_MAX}')
+    expect(TERMINAL_SECTION).not.toContain('TERMINAL_FONT_SIZE_MAX')
   })
 })
 
 describe('terminal font zoom — persistence', () => {
-  it('survives the flow → state → flow round trip', () => {
-    const states = flowToNodeStates([term({ terminalFontSize: 17 })])
-    expect(states[0].terminalFontSize).toBe(17)
-    expect(nodeStatesToFlow(states)[0].data.terminalFontSize).toBe(17)
+  it.each([17, 64, 400])('preserves %ipx through the flow → state → flow round trip', (size) => {
+    const states = flowToNodeStates([term({ terminalFontSize: size })])
+    expect(states[0].terminalFontSize).toBe(size)
+    expect(nodeStatesToFlow(states)[0].data.terminalFontSize).toBe(size)
   })
   it('drops a garbage hand-edited value on the way in and on the way out', () => {
-    const inState = { ...flowToNodeStates([term()])[0], terminalFontSize: 400 } as CanvasNodeState
+    const inState = { ...flowToNodeStates([term()])[0], terminalFontSize: Infinity } as CanvasNodeState
     expect(nodeStatesToFlow([inState])[0].data.terminalFontSize).toBeUndefined()
     expect(flowToNodeStates([term({ terminalFontSize: 'big' })])[0].terminalFontSize).toBeUndefined()
   })

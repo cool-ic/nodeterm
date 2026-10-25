@@ -2,7 +2,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   FONT_ZOOM_NODE_ATTR,
-  TERMINAL_FONT_SIZE_MAX,
   TERMINAL_FONT_SIZE_MIN,
   TERMINAL_FONT_ZOOM_EVENT,
   effectiveTerminalFontSize,
@@ -104,12 +103,11 @@ describe('terminalFontZoomAction', () => {
 })
 
 describe('normalizeTerminalFontSize / effectiveTerminalFontSize', () => {
-  it('accepts finite in-range numbers only (project.json is hand-editable)', () => {
+  it('accepts finite sizes at or above the minimum, including large persisted values', () => {
     expect(normalizeTerminalFontSize(14)).toBe(14)
     expect(normalizeTerminalFontSize(TERMINAL_FONT_SIZE_MIN)).toBe(TERMINAL_FONT_SIZE_MIN)
-    expect(normalizeTerminalFontSize(TERMINAL_FONT_SIZE_MAX)).toBe(TERMINAL_FONT_SIZE_MAX)
+    expect(normalizeTerminalFontSize(280)).toBe(280)
     expect(normalizeTerminalFontSize(TERMINAL_FONT_SIZE_MIN - 1)).toBeUndefined()
-    expect(normalizeTerminalFontSize(TERMINAL_FONT_SIZE_MAX + 1)).toBeUndefined()
     expect(normalizeTerminalFontSize('14')).toBeUndefined()
     expect(normalizeTerminalFontSize(NaN)).toBeUndefined()
     expect(normalizeTerminalFontSize(Infinity)).toBeUndefined()
@@ -121,7 +119,7 @@ describe('normalizeTerminalFontSize / effectiveTerminalFontSize', () => {
     expect(effectiveTerminalFontSize(13, undefined)).toBe(13)
     expect(effectiveTerminalFontSize(13, 16)).toBe(16)
     expect(effectiveTerminalFontSize(13, 'garbage')).toBe(13)
-    expect(effectiveTerminalFontSize(13, 99)).toBe(13)
+    expect(effectiveTerminalFontSize(13, 99)).toBe(99)
   })
 })
 
@@ -143,16 +141,25 @@ describe('nextTerminalFontSizeOverride', () => {
     expect(nextTerminalFontSizeOverride('reset', undefined, 13)).toBeUndefined()
   })
 
-  it('is a no-op at the Settings bounds (same 8–28 range as the global field)', () => {
-    expect(nextTerminalFontSizeOverride('increase', TERMINAL_FONT_SIZE_MAX, 13)).toBe(TERMINAL_FONT_SIZE_MAX)
+  it('keeps the minimum when shrinking', () => {
     expect(nextTerminalFontSizeOverride('decrease', TERMINAL_FONT_SIZE_MIN, 13)).toBe(TERMINAL_FONT_SIZE_MIN)
-    // Global itself at the bound, no override: nothing to store.
-    expect(nextTerminalFontSizeOverride('increase', undefined, TERMINAL_FONT_SIZE_MAX)).toBeUndefined()
+    expect(nextTerminalFontSizeOverride('decrease', undefined, TERMINAL_FONT_SIZE_MIN)).toBeUndefined()
   })
 
-  it('does not shrink a hand-edited out-of-range global on ⌘+', () => {
-    expect(nextTerminalFontSizeOverride('increase', undefined, 40)).toBeUndefined()
-    expect(nextTerminalFontSizeOverride('decrease', undefined, 40)).toBe(TERMINAL_FONT_SIZE_MAX)
+  it('grows past the old ceiling and preserves the size through save/restore, shrink and reset', () => {
+    let size: number | undefined = 27
+    for (let i = 0; i < 37; i++) size = nextTerminalFontSizeOverride('increase', size, 13)
+    expect(size).toBe(64)
+    const restored = normalizeTerminalFontSize(JSON.parse(JSON.stringify({ terminalFontSize: size })).terminalFontSize)
+    expect(effectiveTerminalFontSize(13, restored)).toBe(64)
+    expect(nextTerminalFontSizeOverride('increase', restored, 13)).toBe(65)
+    expect(nextTerminalFontSizeOverride('decrease', restored, 13)).toBe(63)
+    expect(nextTerminalFontSizeOverride('reset', restored, 13)).toBeUndefined()
+  })
+
+  it('steps normally from a global size above the old ceiling', () => {
+    expect(nextTerminalFontSizeOverride('increase', undefined, 40)).toBe(41)
+    expect(nextTerminalFontSizeOverride('decrease', undefined, 40)).toBe(39)
   })
 
   it('ignores a garbage stored override and steps from the global', () => {

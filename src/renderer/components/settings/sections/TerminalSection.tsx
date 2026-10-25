@@ -14,7 +14,6 @@ import { SegmentedPill } from '@renderer/ui/SegmentedPill'
 import { TERMINAL_RESET_KEYS } from '@renderer/lib/settingsReset'
 import { isMacPlatform } from '@shared/platform-utils'
 import {
-  TERMINAL_FONT_SIZE_MAX,
   TERMINAL_FONT_SIZE_MIN
 } from '@renderer/terminal/terminal-font-zoom'
 import {
@@ -219,7 +218,6 @@ export function TerminalSection({ isActive }: { isActive: boolean }): React.JSX.
                 className="w-16"
                 value={settings.fontSize}
                 min={TERMINAL_FONT_SIZE_MIN}
-                max={TERMINAL_FONT_SIZE_MAX}
                 onChange={(v) => update({ fontSize: v || 13 })}
               />
               <Select

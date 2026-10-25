@@ -155,6 +155,8 @@ used, an incompatible one is left running and reported, never killed.
 
 ## Three surfaces
 
+Terminal font zoom (⌘+/− on macOS, Ctrl+/− elsewhere) has an 8px minimum and no fixed maximum, including saved node overrides and the global font field. Keep reset-to-global and the shared canvas/card-modal size path intact.
+
 Qoder startup messaging has a narrow readiness path: a recorded opener may send to a local,
 verified SessionStart(source=resume) only after the same Qoder process shows three stable empty-composer frames.
 Keep that evidence per delivery; never publish a synthetic turn completion or weaken busy/approval gates.

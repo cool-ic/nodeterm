@@ -28,9 +28,8 @@
  * happen in one handler instead of three.
  */
 
-/** The same range the Settings → Terminal font-size field advertises (its min/max). */
+/** Minimum shared with Settings → Terminal. Font enlargement has no product-imposed ceiling. */
 export const TERMINAL_FONT_SIZE_MIN = 8
-export const TERMINAL_FONT_SIZE_MAX = 28
 
 export type TerminalFontZoomAction = 'increase' | 'decrease' | 'reset'
 
@@ -96,11 +95,11 @@ export function terminalFontZoomAction(
 /**
  * PURE. A stored override as a usable size, or `undefined`. The value comes out of a git-shared,
  * hand-editable project.json (and off a team-sync peer), so anything that is not a finite number
- * inside the Settings range is treated as "no override" rather than handed to xterm.
+ * at or above the minimum is treated as "no override" rather than handed to xterm.
  */
 export function normalizeTerminalFontSize(v: unknown): number | undefined {
   if (typeof v !== 'number' || !Number.isFinite(v)) return undefined
-  if (v < TERMINAL_FONT_SIZE_MIN || v > TERMINAL_FONT_SIZE_MAX) return undefined
+  if (v < TERMINAL_FONT_SIZE_MIN) return undefined
   return v
 }
 
@@ -115,10 +114,7 @@ export function effectiveTerminalFontSize(global: number, override: unknown): nu
  * - Steps by 1 from the EFFECTIVE size.
  * - Landing back on the global size clears the override instead of storing a copy of it, so a node
  *   the user nudged up and back down follows later global changes again.
- * - The result is clamped to the Settings range, but the clamp may only move the size in the
- *   direction asked for: at a bound the step is a no-op (the current override comes back
- *   unchanged), and ⌘+ can never SHRINK a terminal whose global size was hand-edited above the
- *   maximum (⌘− there lands it on the maximum).
+ * - Shrinking stops at the minimum; enlargement has no fixed upper bound.
  * - `reset` always clears.
  */
 export function nextTerminalFontSizeOverride(
@@ -130,10 +126,8 @@ export function nextTerminalFontSizeOverride(
   if (action === 'reset') return undefined
   const base = current ?? global
   const grow = action === 'increase'
-  const target = Math.min(
-    TERMINAL_FONT_SIZE_MAX,
-    Math.max(TERMINAL_FONT_SIZE_MIN, base + (grow ? 1 : -1))
-  )
+  const target = Math.max(TERMINAL_FONT_SIZE_MIN, base + (grow ? 1 : -1))
+  if (!Number.isFinite(target)) return current
   // The clamp may only ever move the size in the direction asked for; otherwise it is a no-op.
   if (grow ? target <= base : target >= base) return current
   return target === global ? undefined : target

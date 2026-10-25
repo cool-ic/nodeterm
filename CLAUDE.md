@@ -8129,7 +8129,7 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
 - **Per-terminal font size** (`renderer/terminal/terminal-font-zoom.ts`, issue #915). Opt-in
   `settings.terminalFontZoomKeys` (Settings → Terminal, default OFF). On, with a terminal focused:
   ⌘+ / ⌘− (Ctrl off-mac — exactly one primary, since Ctrl+− on mac is readline undo) step THAT
-  node's `data.terminalFontSize` by 1 within the global field's 8–28 range; ⌘0 clears it back to the
+  node's `data.terminalFontSize` by 1, with an 8px minimum and no fixed upper bound (also in the global field); ⌘0 clears it back to the
   global `fontSize`. + and − match on `e.key` (German `+` key), 0 on `e.code` like the canvas chord.
   Before #915 ⌘+ / ⌘− did NOTHING (no menu zoom roles, React Flow's key zoom is off; only
   webview guests zoom on them) and ⌘0 in a terminal was claimed by main and then refused. Off, or
