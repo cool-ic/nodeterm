@@ -6,12 +6,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fakePlatform } from './platform-fake'
 import { initPlatform, resetPlatformForTests } from './platform'
 import {
+  bootSimulatorWith,
   discoverProjects,
   flutterPidFile,
   launcherPath,
   listEntries,
   runStatus,
   setWatch,
+  simctlSetupError,
   signalRun,
   startRun,
   stopAllRunWatches,
@@ -129,6 +131,33 @@ describe('run-service', () => {
       members: ['Web', 'Attach']
     })
     expect(await startRun('../x', { projectDir: w, reloadOnSave: true })).toMatchObject({ ok: false })
+  })
+
+  it('switch mode writes a flutter attach launcher; refuses non-Flutter runs and apps that read appFlavor', async () => {
+    write('app/pubspec.yaml', PUBSPEC)
+    write('app/lib/main_dev.dart', 'void main() {}')
+    write('app/.vscode/launch.json', `{ "configurations": [
+      { "name": "Dev", "type": "dart", "request": "launch", "program": "lib/main_dev.dart", "args": ["--flavor", "dev", "--web-port=8080"] },
+      { "name": "Tool", "type": "node", "request": "launch", "program": "a.js" }
+    ] }`)
+    const app = path.join(root, 'app')
+    const r = await startRun('n8', { projectDir: app, launchConfig: 'Dev', deviceId: 'SIM-1', reloadOnSave: true }, { attach: true })
+    expect(r).toMatchObject({ ok: true, kind: 'process', hotReload: true })
+    const script = readFileSync(launcherPath('n8'), 'utf8')
+    expect(script).toContain(`'flutter' 'attach' '-t' 'lib/main_dev.dart' '-d' 'SIM-1' '--pid-file' '${flutterPidFile('n8')}'`)
+    expect(script).not.toContain('--flavor')
+    expect(script).not.toContain('--web-port')
+
+    expect(await startRun('n8', { projectDir: app, launchConfig: 'Tool', reloadOnSave: true }, { attach: true })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/not a Flutter run/)
+    })
+
+    write('app/lib/flavor.dart', "import 'package:flutter/services.dart'; final f = appFlavor;")
+    expect(await startRun('n8', { projectDir: app, launchConfig: 'Dev', deviceId: 'SIM-1', reloadOnSave: true }, { attach: true })).toEqual({
+      ok: false,
+      error: 'This app reads appFlavor, which flutter attach cannot set — rebuild to switch.'
+    })
   })
 
   describe('on a Windows core', () => {
@@ -286,5 +315,45 @@ describe('run-service', () => {
     write('app/lib/c.dart', 'void c() {}')
     await new Promise((r) => setTimeout(r, 700))
     expect(out.match(/RELOAD/g)).toHaveLength(1)
+  })
+})
+
+describe('bootSimulatorWith', () => {
+  const UDID = '12345678-1234-1234-1234-123456789ABC'
+  function recorder(fail?: string) {
+    const calls: string[] = []
+    const exec = async (file: string, args: string[]) => {
+      calls.push([file, ...args].join(' '))
+      if (fail) throw Object.assign(new Error('x'), { stderr: fail })
+    }
+    return { calls, exec }
+  }
+
+  it('opens Simulator.app after booting, as a run node always has', async () => {
+    const r = recorder()
+    expect(await bootSimulatorWith(UDID, {}, r.exec)).toBe(true)
+    expect(r.calls).toEqual([`/usr/bin/xcrun simctl boot ${UDID}`, '/usr/bin/open -a Simulator'])
+  })
+
+  it('stays headless when the caller is the Simulator node itself', async () => {
+    const r = recorder()
+    expect(await bootSimulatorWith(UDID, { openWindow: false }, r.exec)).toBe(true)
+    expect(r.calls).toEqual([`/usr/bin/xcrun simctl boot ${UDID}`])
+  })
+
+  it('refuses an id that is not a UDID, and a boot that failed', async () => {
+    const r = recorder()
+    expect(await bootSimulatorWith('../x', {}, r.exec)).toBe(false)
+    expect(r.calls).toEqual([])
+    expect(await bootSimulatorWith(UDID, {}, recorder('No such device').exec)).toBe(false)
+  })
+})
+
+describe('simctlSetupError', () => {
+  it('turns a missing or unselected Xcode into the fix, and nothing else', () => {
+    expect(simctlSetupError(Object.assign(new Error('spawn /usr/bin/xcrun ENOENT'), { code: 'ENOENT' }))).toMatch(/xcode-select --switch/)
+    expect(simctlSetupError({ message: 'Command failed', stderr: 'xcrun: error: unable to find utility "simctl", not a developer tool or in PATH' })).toMatch(/Install Xcode/)
+    expect(simctlSetupError({ message: 'Command failed', stderr: 'xcode-select: error: tool \'xcrun\' requires Xcode, but active developer directory is a command line tools instance' })).toMatch(/xcode-select/)
+    expect(simctlSetupError({ message: 'timeout' })).toBeNull()
   })
 })

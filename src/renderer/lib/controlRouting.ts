@@ -38,6 +38,7 @@ import {
 } from './pendingLaunch'
 import type { LaunchFailureReason } from '@shared/types'
 import { projectTravel } from './presenceTravel'
+import { geometryText, storedNodeGeometry, type NodeGeometry } from './nodeGeometry'
 import {
   projectCapabilityGrantedFor,
   type CapabilityAckMap
@@ -60,6 +61,14 @@ export interface StoredNode {
   agentId?: string
   /** The GitHub issue the session was started on — hostile until `formatIssueRef` says otherwise. */
   issueRef?: unknown
+  /** Persisted geometry (`CanvasNodeState`): an off-screen project's rows derive their place and
+   *  size from these (`storedNodeGeometry`). */
+  position?: { x: number; y: number }
+  size?: { width: number; height: number }
+  parentId?: string
+  collapsed?: boolean
+  /** Precomputed by the LIVE canvas (`liveNodeGeometry` — measured sizes); wins over the fields above. */
+  geometry?: NodeGeometry
 }
 
 /**
@@ -204,6 +213,15 @@ export function storedNodeListing(
   handovers: HandoverById = {}
 ) {
   const live = new Set(nodes.map((n) => n.id))
+  // Every row carries its geometry (issue #1288), so a script needs no flag to read it; the TEXT form
+  // shows it only behind `list --geometry on`. A row of the live canvas arrives with it measured; a
+  // stored row's is derived here from the persisted fields, parent chain included.
+  const placed = nodes.filter(
+    (n): n is StoredNode & { position: { x: number; y: number }; size: { width: number; height: number } } =>
+      !!n.position && !!n.size
+  )
+  const geometryOf = (n: StoredNode): NodeGeometry | undefined =>
+    n.geometry ?? (n.position && n.size ? storedNodeGeometry({ ...n, position: n.position, size: n.size }, placed) : undefined)
   const titleOf = (id: string): string => {
     const t = nodes.find((n) => n.id === id)?.title
     return t ? `${id} "${t}"` : id
@@ -268,12 +286,14 @@ export function storedNodeListing(
           handovers
         )
       : []
+    const geometry = geometryOf(n)
     const rateLimitedFor = rateLimitSecondsLeft(status?.rateLimited, now)
     return {
       id: n.id, kind: n.kind ?? 'terminal', title: n.title ?? '',
       // T207: does this row belong to a messaging participant? The trust column needs to know
       // which rows may carry it (plain terminals never do).
       ...(n.agentId ? { agent: true } : {}),
+      ...(geometry ?? {}),
       ...(issue ? { issue } : {}),
       ...(status?.lastTurnError ? { lastTurnErrored: true } : {}),
       ...(status?.lastTurnInterrupted && !status.lastTurnError ? { lastTurnInterrupted: true } : {}),
@@ -347,6 +367,18 @@ const launchLabels = {
   'blocked-failure': 'BLOCKED BY FAILURE (will not start on its own; run it with `run`)'
 } as const
 
+/** The `--geometry on` suffix of one row (`storedNodeListing` spreads the geometry flat), or '' for a
+ *  row that has none. */
+function rowGeometryText(n: ReturnType<typeof storedNodeListing>[number]): string {
+  const g = n as Partial<NodeGeometry>
+  if (typeof g.x !== 'number' || typeof g.y !== 'number' || typeof g.width !== 'number' || typeof g.height !== 'number') {
+    return ''
+  }
+  return geometryText({ x: g.x, y: g.y, width: g.width, height: g.height, parent: g.parent ?? null, collapsed: g.collapsed, expandedHeight: g.expandedHeight })
+}
+
+/** `list`'s text answer. `geometry` (`list --geometry on`) adds each node's place and size; off by
+ *  default so the line an agent reads most stays short. */
 /** T216 (b): a failed launch names the gate that refused it and the way out, in the same shape
  *  as the expired/blocked labels. A record with no gate (older binary, or a refusal with none
  *  attributable) still says so plainly, and still names the escape. */
@@ -410,9 +442,11 @@ export function controlListingText(
    *  A `failure` prints 「信任：读取失败（…）」 on every AGENT row; a successful lookup that has no
    *  record for an agent row prints 「未证明（快照无记录）」. Plain terminals get no column: they are
    *  not messaging participants. */
-  trust?: TrustLookup
+  trust?: TrustLookup,
+  opts: { geometry?: boolean } = {}
 ): string {
   return rows.map((n) => `${n.id} [${n.kind}] ${n.title}` +
+    (opts.geometry ? rowGeometryText(n) : '') +
     (n.issue ? ` — issue ${n.issue}` : '') +
     (n.launchState ? ` — ${n.launchState === 'failed' ? failedLaunchLabel(n.failReason, n.failBytes) : launchLabels[n.launchState]}` : '') +
     (n.prWait ? ` — waits on ${n.prWait}` : '') +

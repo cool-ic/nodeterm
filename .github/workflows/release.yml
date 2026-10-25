@@ -351,6 +351,19 @@ jobs:
   # window (mirror sync / CDN delay); ADVISORY files only warn. latest.yml is advisory until the
   # mirror is confirmed to serve it — move it to STRICT then. It is checked only when release-win
   # itself succeeded (that job is best-effort and may finish later or need a rerun).
+  #
+  # The budget is ONE deadline for the whole job, not a retry count per file, and that is the
+  # v0.4.4 lesson. Measured on run 39079366383: publish promoted at 00:25:02, this job started at
+  # 00:25:03 — one second later — and the mirror did not serve 0.4.4 until somewhere inside
+  # 00:29:43…00:30:14, i.e. ~5 minutes behind the promote, for every file AT ONCE. Under a per-file
+  # count the first STRICT file absorbs that entire wait alone, and it ran out ~30 s short: the job
+  # failed on latest-mac.yml and then passed latest-linux.yml and latest.yml seconds later, which
+  # reads as a mac-specific cache problem and is nothing of the kind. A shared deadline charges the
+  # one lag once — the first file waits, the rest are free — and it bounds a genuinely dead mirror
+  # to BUDGET_MINUTES instead of BUDGET_MINUTES × files. If STRICT spends the whole budget then
+  # ADVISORY gets exactly one attempt, deliberately: the mirror is demonstrably behind and a second
+  # full wait buys a warning nobody is waiting for. Do NOT "fix" a red run here by reordering the
+  # file list — the lag is global, so whichever file is checked first is the one that fails.
   verify-feed:
     runs-on: ubuntu-latest
     needs: [publish, release-win]
@@ -362,21 +375,36 @@ jobs:
           STRICT: latest-mac.yml latest-linux.yml
           ADVISORY: latest.yml
           WIN_RESULT: ${{ needs.release-win.result }}
+          # ~2.4× the 5 min lag measured on v0.4.4, and a cap on the JOB, not on each file.
+          BUDGET_MINUTES: 12
+          INTERVAL: 30
         run: |
           want="${GITHUB_REF_NAME#v}"
+          # One deadline for every file, taken once up front — see the comment above the job.
+          deadline=$(( $(date +%s) + ${BUDGET_MINUTES:-12} * 60 ))
           fail=0
           check() {
-            f="$1"; level="$2"; n=1; got=""
-            while [ "$n" -le 10 ]; do
+            f="$1"; level="$2"; got=""
+            while :; do
+              # `|| true` is load-bearing: GitHub runs this step under `bash -eo pipefail`, so a
+              # mirror that 404s makes `curl -f` exit non-zero, pipefail hands that to the
+              # assignment and `-e` kills the whole step on the FIRST attempt — no retry, no
+              # ::error::, no ::warning::, exit 22 and an empty log. A MISSING file is the case this
+              # job was written for (latest.yml 404'd on the mirror for v0.4.3) and the one the
+              # '<missing>' default below was always meant to report; advisory also has to mean
+              # advisory when the file is absent, not just when it is stale. It covers the EPIPE
+              # from `head -n 1` closing the pipe early for the same reason.
               got=$(curl -fsSL --max-time 20 "$FEED/$f" 2>/dev/null \
-                | sed -n 's/^version:[[:space:]]*//p' | head -n 1 | tr -d "\"' \r")
+                | sed -n 's/^version:[[:space:]]*//p' | head -n 1 | tr -d "\"' \r" || true)
               if [ "$got" = "$want" ]; then
                 echo "$FEED/$f serves $got"
                 return 0
               fi
-              echo "attempt $n: $FEED/$f serves '${got:-<missing>}', want $want; retrying in 30s…"
-              n=$((n + 1))
-              sleep 30
+              # Every file gets at least one attempt, however little budget is left.
+              left=$(( deadline - $(date +%s) ))
+              if [ "$left" -le 0 ]; then break; fi
+              echo "$FEED/$f serves '${got:-<missing>}', want $want; retrying in ${INTERVAL}s (${left}s of budget left)…"
+              sleep "$INTERVAL"
             done
             echo "::$level::$FEED/$f serves version '${got:-<missing>}', expected $want"
             if [ "$level" = error ]; then fail=1; fi

@@ -81,8 +81,40 @@ describe('release.yml verify-feed', () => {
     expect(job).toMatch(/s\/\^version:/)
   })
 
-  it('retries for mirror delay, fails only on strict files, and never gates publish', () => {
-    expect(job).toMatch(/while \[ "\$n" -le 10 \]/)
+  // The retry budget is ONE deadline for the whole job. A count per file is what made a healthy
+  // v0.4.4 go red: the mirror lags the promote by ~5 min for EVERY file at once, so the first
+  // STRICT file spent the entire window alone and ran out ~30 s short, while the files checked
+  // after it passed for free. The failing file was simply the one checked first — which reads as
+  // a mac-specific cache problem and is nothing of the kind.
+  it('retries for mirror delay on one budget shared by every file, not a count per file', () => {
+    expect(job).toMatch(/BUDGET_MINUTES: \d+/)
+    expect(job).toContain('deadline=$(( $(date +%s) + ${BUDGET_MINUTES:-12} * 60 ))')
+    expect(job).not.toMatch(/while \[ "\$n" -le \d+ \]/)
+    // Read inside the loop, so the wait is shared rather than restarted for each file.
+    expect(job).toContain('left=$(( deadline - $(date +%s) ))')
+  })
+
+  it('gives every file one attempt however little budget is left', () => {
+    const loop = job.slice(job.indexOf('while :; do'), job.indexOf('\n            done'))
+    expect(loop).not.toBe('')
+    // The fetch precedes the deadline test, so a file with no budget left still reports what the
+    // mirror serves instead of being skipped with no annotation.
+    expect(loop.indexOf('curl -fsSL')).toBeLessThan(loop.indexOf('left=$(( deadline'))
+  })
+
+  // GitHub runs the step under `bash -eo pipefail`. Without `|| true`, a mirror that 404s makes
+  // `curl -f` exit 22, pipefail hands that to the assignment and `-e` kills the step on the FIRST
+  // attempt: no retry, no ::error::, no ::warning::, exit 22 and nothing in the log naming the
+  // file. A missing file is the case this job was written for (latest.yml 404'd on the mirror for
+  // v0.4.3), and ADVISORY has to mean advisory when a file is absent, not only when it is stale.
+  it('treats a missing feed file as a retry, not a dead step', () => {
+    const read = job.split('\n').find((l) => l.includes('tr -d'))
+    expect(read).toBeDefined()
+    expect(read).toContain('|| true)')
+    expect(job).toContain('${got:-<missing>}')
+  })
+
+  it('fails only on strict files and never gates publish', () => {
     expect(job).toContain('::$level::')
     expect(job).toContain('exit "$fail"')
     const publish = commands(jobBlock(text, 'publish'))

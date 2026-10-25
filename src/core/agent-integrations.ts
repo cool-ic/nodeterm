@@ -12,7 +12,7 @@
 //   undecided → nothing at all, in either direction. A new install writes nothing until asked.
 //
 // The Server Edition's `installHooks: false` is a hard veto that outranks every choice.
-import { existsSync, readdirSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import os from 'os'
 import path from 'path'
 import {
@@ -32,6 +32,7 @@ import {
   installClaudeHooksInto,
   removeClaudeHooksFrom
 } from './agents/hooks/claude'
+import { ensureCodexHooksCurrent, ensureCodexHooksForAccounts } from './agents/hooks/codex'
 import { copilotHomeDir } from './agents/hooks/copilot'
 import { managedHookScriptPath } from './agents/hooks/install-helper'
 import { opencodeConfigDir } from './agents/hooks/opencode'
@@ -59,23 +60,57 @@ export function agentHooksDir(home: string = os.homedir()): string {
 }
 
 /**
- * Did a build from before this feature already integrate with this machine's agents? Evidence is
- * our OWN files only (never a guess from the user's config): the managed hook scripts dir every
- * install created, or our canvas/context shims under userData. True ⇒ grandfather as enabled.
+ * Written to userData by the first boot that found no evidence of an existing install. Its
+ * presence means "this install was new to nodeterm when it started", so no later boot may
+ * grandfather it — whatever has appeared on disk since (issue #1149). A marker FILE rather than a
+ * settings key: `SettingsStore.init` answers an unreadable settings.json with the defaults, and a
+ * boot-time save of a "not answered yet" record would then overwrite the user's file on every such
+ * boot.
+ */
+export const FRESH_INSTALL_MARKER = 'integration-consent-fresh-install'
+
+/**
+ * Did a build from before this feature already integrate with this machine's agents? Called once
+ * per boot, before any install, and DECIDES that once: the first boot that finds no evidence
+ * leaves `FRESH_INSTALL_MARKER` in userData, and every later boot of that install answers false.
+ *
+ * Evidence is our OWN files only (never a guess from the user's config): the managed hook scripts
+ * dir, which every pre-consent install filled at boot and which nothing now writes without an
+ * `'enabled'` choice. True ⇒ grandfather as enabled.
+ *
+ * NOT evidence: the canvas/context shims under userData (`canvas-control/nodeterm.sh`,
+ * `context-links/context.sh`). Both shells write them on EVERY boot, consent or not, so counting
+ * them grandfathered every fresh install on its second boot (issue #1149: a systemd restart, the
+ * update timer, a desktop quit before the first-run question was answered). The marker also
+ * covers hook scripts a SIBLING install (the desktop and the Server Edition share
+ * `~/.nodeterm/agent-hooks`) wrote under its own consent after this install's first boot.
  */
 export function detectExistingIntegrations(userDataDir: string, home: string = os.homedir()): boolean {
-  const nonEmpty = (d: string): boolean => {
-    try {
-      return readdirSync(d).length > 0
-    } catch {
-      return false
+  const marker = path.join(userDataDir, FRESH_INSTALL_MARKER)
+  let evidence = false
+  try {
+    evidence = readdirSync(agentHooksDir(home)).length > 0
+  } catch {
+    evidence = false
+  }
+  if (evidence) return !existsSync(marker)
+  // No evidence: the answer is false whether or not an earlier boot already left the marker, so the
+  // exclusive create is the only check needed (an existing marker is EEXIST).
+  try {
+    mkdirSync(userDataDir, { recursive: true })
+    writeFileSync(
+      marker,
+      `First boot ${new Date().toISOString()}: no earlier nodeterm agent integration was found, so ` +
+        'this install is never grandfathered into one. Agent integrations are enabled only from ' +
+        'the first-run question or Settings → Agents (issue #1149).\n',
+      { flag: 'wx', mode: 0o600 }
+    )
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      console.warn('[integrations] could not record the fresh-install marker', error)
     }
   }
-  return (
-    nonEmpty(agentHooksDir(home)) ||
-    existsSync(path.join(userDataDir, 'canvas-control', 'nodeterm.sh')) ||
-    existsSync(path.join(userDataDir, 'context-links', 'context.sh'))
-  )
+  return false
 }
 
 /**
@@ -115,6 +150,8 @@ export interface IntegrationLifecycleDeps {
   /** Test seams. */
   installHooks?: (agents: ReadonlySet<string>) => void
   removeHooks?: (agents: ReadonlySet<string>) => void
+  ensureCodexHome?: (home: string) => void
+  ensureCodexAccounts?: (userDataDir: string, accounts: ReadonlyArray<{ id: string }>) => void
   home?: () => string
 }
 
@@ -167,6 +204,11 @@ export function skillRootsFor(
     // shared with the hook installer so the two can never disagree about the root.
     case 'qoder':
       return [path.join(qoderConfigDir(), 'skills')]
+    // cursor-agent's bundle loads `~/.cursor/skills` before `~/.claude/skills` (docs/cursor-agent.md),
+    // so its own dir keeps canvas control working when claude is declined, and ahead of the tail
+    // its long-skill-list truncation drops.
+    case 'cursor':
+      return [path.join(home, '.cursor', 'skills')]
     default:
       return []
   }
@@ -216,7 +258,8 @@ const HOOK_SCRIPTS: Partial<Record<IntegrationAgentId, string[]>> = {
   grok: ['grok.sh', 'grok-hook.cmd'],
   copilot: ['copilot.sh', 'copilot-hook.cmd'],
   antigravity: ['antigravity.sh', 'antigravity-hook.cmd'],
-  qoder: ['qoder.sh']
+  qoder: ['qoder.sh'],
+  cursor: ['cursor.sh']
 }
 
 export interface IntegrationLifecycle {
@@ -226,6 +269,10 @@ export interface IntegrationLifecycle {
   onSettingsChanged(settings: Settings): void
   /** For a managed/linked Claude account dir just added: install there if claude is enabled. */
   installIntoClaudeAccount(configDir: string): void
+  /** Right before a LOCAL Codex session spawns under `codexHome`: repair its hook install if it
+   *  drifted — only when codex is enabled (never for a declined or undecided agent, never under the
+   *  veto). Never throws. */
+  ensureCodexHooksForLaunch(codexHome: string): void
   /** The last report (for Settings). */
   lastReport(): IntegrationReport | null
   /** The ownership receipts (also used for skills written on SSH hosts). */
@@ -242,6 +289,8 @@ export function createIntegrationLifecycle(deps: IntegrationLifecycleDeps): Inte
   const receipts = new ReceiptStore(() => deps.userDataDir())
   const installHooks = deps.installHooks ?? installManagedAgentHooks
   const removeHooks = deps.removeHooks ?? removeManagedAgentHooks
+  const ensureCodexHome = deps.ensureCodexHome ?? ensureCodexHooksCurrent
+  const ensureCodexAccounts = deps.ensureCodexAccounts ?? ensureCodexHooksForAccounts
   let last: IntegrationReport | null = null
   let lastSig = ''
 
@@ -296,6 +345,21 @@ export function createIntegrationLifecycle(deps: IntegrationLifecycleDeps): Inte
       // Shared system skills (issue #643) is its own explicit, per-account opt-in, independent of
       // this consent (it links INTO the account dir, never writes the user's skills).
       if (a.shareSystemSkills) void applySkillShare(dir, true)
+    }
+    // Codex accounts: each local managed home is its own CODEX_HOME. Its hooks.json/config.toml
+    // normally symlink to the system ones (just installed above), but a link never made or since
+    // replaced by a real file leaves that account's sessions with no trusted hooks. Drift-gated, so
+    // a linked home costs reads only. Enabled only — a declined codex is cleaned in the system home
+    // by `removeHooks`; a private copy inside an account home is the account's own file and is left.
+    if (enabled.includes('codex')) {
+      try {
+        ensureCodexAccounts(
+          deps.userDataDir(),
+          (settings.codexAccounts ?? []).filter((a) => !a.host && !a.pending)
+        )
+      } catch (e) {
+        console.warn('[integrations] codex account hook check failed', e)
+      }
     }
     // A $CLAUDE_CONFIG_DIR that moved the system dir leaves the legacy ~/.claude behind.
     const legacyClaude = path.join(home, '.claude')
@@ -378,6 +442,15 @@ export function createIntegrationLifecycle(deps: IntegrationLifecycleDeps): Inte
         }
       } catch (e) {
         console.warn('[integrations] account install failed', configDir, e)
+      }
+    },
+    ensureCodexHooksForLaunch(codexHome) {
+      if (deps.veto) return
+      try {
+        if (integrationsOf(deps.settings()).agents?.codex !== 'enabled') return
+        ensureCodexHome(codexHome)
+      } catch (e) {
+        console.warn('[integrations] codex launch hook check failed', codexHome, e)
       }
     },
     lastReport: () => last,

@@ -28,7 +28,7 @@ export type LaunchFailure = LaunchRefusal | 'cancelled'
  * length. The union is the single source for the gate-bearing shape — consumers narrow to
  * `LaunchRefusal` rather than widening `gate` back to `string`.
  */
-export type LaunchOutcome = Exclude<DeliveryOutcome, 'line-too-long'> | 'deferred' | LaunchRefusal
+export type LaunchOutcome = Exclude<DeliveryOutcome, 'line-too-long'> | 'deferred' | 'elsewhere' | LaunchRefusal
 export type Writer = (command: string, manual: boolean) => Promise<LaunchOutcome>
 
 /** T216 (c): gate 1 is the most transient refusal and nothing has been typed yet, so the
@@ -78,6 +78,7 @@ export function createLaunchWriter(opts: {
   execute?(command: string, manual: boolean): Promise<DeliveryOutcome | 'fallback'>
 }): Writer {
   let attempted = false
+  let elsewhere = false
   let submitted = false
   let inFlight: Promise<LaunchOutcome> | undefined
   let disposed = false
@@ -98,6 +99,9 @@ export function createLaunchWriter(opts: {
   return (command, manual) => {
     if (submitted) return Promise.resolve('submitted') // stale UI/save; never paste twice
     if (inFlight) return inFlight
+    // Another viewer owns this launch: an automatic retry stands down again rather than reading
+    // as a failure. Run now (manual) still goes through, as everywhere else.
+    if (!manual && elsewhere && !disposed) return Promise.resolve('elsewhere')
     if (disposed || (!manual && attempted)) return Promise.resolve('cancelled')
     // The settled type is spelled out so the gate-4 refusal keeps `gate` as a
     // `LaunchFailureReason` instead of widening to `string`; `run` (not `inFlight`) is returned
@@ -108,6 +112,10 @@ export function createLaunchWriter(opts: {
       if (ready) return ready
       const claim = await opts.claimAttempt(manual, command)
       if (claim === 'deferred' && !disposed) return 'deferred' as const
+      if (claim === 'elsewhere' && !disposed) {
+        elsewhere = true
+        return 'elsewhere' as const
+      }
       if (disposed) return { gate: 'torn-down' } as const
       if (!claim) return { gate: 'hold-not-committed' } as const
       attempted = true
@@ -164,6 +172,12 @@ export function deliverInitialLaunch(command: string, opts: {
   opts.whenReady(() => {
     void opts.write(command, false).then((outcome) => {
       if (outcome === 'deferred') return // no input/claim; retain never-attempted intent
+      if (outcome === 'elsewhere') {
+        // Another viewer of this project claimed and is typing it (#1173). Drop only the live
+        // alias; the durable record converges from that viewer over the canvas sync.
+        opts.update({ initialCommand: undefined })
+        return
+      }
       // The gate name rides the durable hold too: LAUNCH FAILED is found mostly on off-screen
       // nodes and after restarts, where only the persisted record can still answer "why".
       // Only a `LaunchRefusal` (an object) carries a gate — `submitted`/`cancelled` name none, and

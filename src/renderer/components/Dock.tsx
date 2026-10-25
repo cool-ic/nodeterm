@@ -86,16 +86,22 @@ function RailMenu({
   open,
   anchor,
   className,
-  children
+  children,
+  onElement
 }: {
   open: boolean
   anchor: RailMenuAnchor
   className?: string
   children: ReactNode
+  onElement?: (el: HTMLDivElement | null) => void
 }): JSX.Element | null {
+  const menuRef = useCallback((el: HTMLDivElement | null) => {
+    anchor.menuRef(el)
+    onElement?.(el)
+  }, [anchor.menuRef, onElement])
   if (!open) return null
   return createPortal(
-    <div ref={anchor.menuRef} className={className ? `dock-menu ${className}` : 'dock-menu'} style={anchor.style ?? undefined}>
+    <div ref={menuRef} className={className ? `dock-menu ${className}` : 'dock-menu'} style={anchor.style ?? undefined}>
       {children}
     </div>,
     document.body
@@ -104,6 +110,9 @@ function RailMenu({
 
 /** T226: which single-column track this dock renders — the left one (create + history) or the
  *  right one (view + status). Each instance owns only its own menus' open state. */
+/** How long a flyout stays open after the pointer leaves its row (see `closeFlyoutSoon`). */
+const FLYOUT_CLOSE_DELAY_MS = 200
+
 interface DockProps {
   group: 'create' | 'view'
   dirty: boolean
@@ -117,10 +126,13 @@ interface DockProps {
   /** Opens the Spawn-a-team dialog (issue #78) — the conductor lands at the Dock's default spot. */
   onSpawnTeam: () => void
   onAddDino: () => void
+  onAddWhiteboard: () => void
   onAddTrigger: () => void
   onAddFiles: () => void
   /** A run node (a launch.json configuration) rooted in the project folder. */
   onAddRun: () => void
+  /** A Simulator node (macOS desktop). */
+  onAddSimulator: () => void
   onAddAgent: (agentId: AgentId, accountId?: string) => void
   onOpenFile: () => void
   onAddRemote: () => void
@@ -173,9 +185,11 @@ export function Dock({
   onAddSticky,
   onSpawnTeam,
   onAddDino,
+  onAddWhiteboard,
   onAddTrigger,
   onAddFiles,
   onAddRun,
+  onAddSimulator,
   onAddAgent,
   onOpenFile,
   onAddRemote,
@@ -214,6 +228,32 @@ export function Dock({
   // ≥1 inheriting custom agent (one with a `baseAgent` matching it); otherwise it stays a flat
   // button, byte-identical to before this nesting existed.
   const [openSub, setOpenSub] = useState<BuiltinAgentId | null>(null)
+  // The add menu scrolls its rows when the window is too short to show them all, and a scroller
+  // clips anything that pokes out of it. So the flyout is portaled into the menu box (outside the
+  // scrolling list) and placed beside its row. It stays a React child of the row, so moving the
+  // pointer from the row into the flyout is not a mouseleave.
+  const [addMenuEl, setAddMenuEl] = useState<HTMLDivElement | null>(null)
+  const [subPos, setSubPos] = useState<{ top: number; left: number } | null>(null)
+  // Leaving the row closes its flyout after a short delay, not at once: the list's scrollbar sits
+  // between the row and the flyout (always on Windows/Linux, while visible on macOS), and crossing
+  // it is a mouseleave. Entering the row or its flyout again cancels the close.
+  const closeTimer = useRef<number | undefined>(undefined)
+  const cancelFlyoutClose = (): void => window.clearTimeout(closeTimer.current)
+  const closeFlyoutSoon = (aid: BuiltinAgentId): void => {
+    cancelFlyoutClose()
+    closeTimer.current = window.setTimeout(
+      () => setOpenSub((cur) => (cur === aid ? null : cur)),
+      FLYOUT_CLOSE_DELAY_MS
+    )
+  }
+  const openFlyout = (aid: BuiltinAgentId, row: HTMLElement): void => {
+    cancelFlyoutClose()
+    // The row's offsetParent is the menu box (the list is not positioned), and offsetTop ignores
+    // the list's scroll, so subtract it. The 6px matches the flyout's own top padding.
+    const scrolled = row.parentElement?.scrollTop ?? 0
+    setSubPos({ top: row.offsetTop - scrolled - 6, left: row.offsetLeft + row.offsetWidth })
+    setOpenSub(aid)
+  }
   // The registry's first effective `speech.dictation` binding, `''` when the user unbound it.
   // The selector returns a STRING, so zustand's default equality keeps an unrelated settings
   // write from re-rendering the dock.
@@ -299,9 +339,11 @@ export function Dock({
     sticky: onAddSticky,
     spawnTeam: onSpawnTeam,
     dino: onAddDino,
+    whiteboard: onAddWhiteboard,
     trigger: onAddTrigger,
     files: onAddFiles,
     run: onAddRun,
+    simulator: onAddSimulator,
     openFile: onOpenFile,
     newFile: onNewFile,
     worktree: onAddWorktree
@@ -309,7 +351,8 @@ export function Dock({
   const contentRows = contentAddItemsToDockRows(CONTENT_ADD_ITEMS, dockAddHandlers, {
     hasCwd,
     isSshProject,
-    isWindowsCore
+    isWindowsCore,
+    isRelayTab: !!activeProject?.remote
   })
 
   return (
@@ -328,128 +371,137 @@ export function Dock({
         )}
 
       <div className="dock">
-        <RailMenu open={menuOpen} anchor={addMenuAnchor}>
-            <button onClick={pick(onAddTerminal)}>
-              <TerminalIcon />
-              <span>Terminal</span>
-            </button>
-            <button onClick={pick(onAddRemote)}>
-              <TerminalIcon />
-              <span>Remote…</span>
-            </button>
-            {BUILTIN_AGENT_IDS.filter((aid) => !disabledAgents.includes(aid)).flatMap((aid) => {
-              const inheriting = inheritingByBase.get(aid) ?? []
-              // No inheriting customs → the builtin stays a flat button (with Claude's account
-              // rows), byte-identical to before nesting existed.
-              if (inheriting.length === 0) {
-                const base = (
-                  <button key={aid} title={AGENT_CONFIG[aid].notice} onClick={pick(() => onAddAgent(aid))}>
-                    <AgentIcon agentId={aid} size={18} />
-                    <span>{AGENT_CONFIG[aid].label}</span>
-                  </button>
-                )
-                if (aid !== 'claude') return [base]
-                // SSH project with no accounts on its host: a disabled row saying where this
-                // host's accounts come from (local accounts are correctly invisible here).
-                const acctHint = sshAccountsHint(activeProject, localAccounts)
-                if (acctHint) {
+        <RailMenu open={menuOpen} anchor={addMenuAnchor} className="dock-add-menu" onElement={setAddMenuEl}>
+            <div
+              className="dock-menu__list nowheel"
+              onScroll={() => {
+                cancelFlyoutClose()
+                setOpenSub(null)
+              }}
+            >
+              <button onClick={pick(onAddTerminal)}>
+                <TerminalIcon />
+                <span>Terminal</span>
+              </button>
+              <button onClick={pick(onAddRemote)}>
+                <TerminalIcon />
+                <span>Remote…</span>
+              </button>
+              {BUILTIN_AGENT_IDS.filter((aid) => !disabledAgents.includes(aid)).flatMap((aid) => {
+                const inheriting = inheritingByBase.get(aid) ?? []
+                // No inheriting customs → the builtin stays a flat button (with Claude's account
+                // rows), byte-identical to before nesting existed.
+                if (inheriting.length === 0) {
+                  const base = (
+                    <button key={aid} title={AGENT_CONFIG[aid].notice} onClick={pick(() => onAddAgent(aid))}>
+                      <AgentIcon agentId={aid} size={18} />
+                      <span>{AGENT_CONFIG[aid].label}</span>
+                    </button>
+                  )
+                  if (aid !== 'claude') return [base]
+                  // SSH project with no accounts on its host: a disabled row saying where this
+                  // host's accounts come from (local accounts are correctly invisible here).
+                  const acctHint = sshAccountsHint(activeProject, localAccounts)
+                  if (acctHint) {
+                    return [
+                      base,
+                      <button key={`${aid}-acct-hint`} disabled title={acctHint}>
+                        <AgentIcon agentId={aid} size={18} />
+                        <span>No accounts on this host yet</span>
+                      </button>
+                    ]
+                  }
+                  // Claude picks up one flat entry per logged-in local account.
+                  if (localAccounts.length === 0) return [base]
                   return [
                     base,
-                    <button key={`${aid}-acct-hint`} disabled title={acctHint}>
-                      <AgentIcon agentId={aid} size={18} />
-                      <span>No accounts on this host yet</span>
-                    </button>
+                    ...localAccounts.map((a) => (
+                      <button key={`${aid}-${a.id}`} onClick={pick(() => onAddAgent(aid, a.id))}>
+                        <AgentIcon agentId={aid} size={18} />
+                        <span>
+                          Claude — {a.label}
+                          {a.id === defaultAccountId ? ' ✓' : ''}
+                        </span>
+                      </button>
+                    ))
                   ]
                 }
-                // Claude picks up one flat entry per logged-in local account.
-                if (localAccounts.length === 0) return [base]
+                // Has inheriting customs → render as a flyout submenu. The parent button still
+                // launches the base harness in one click (preserving today's behavior); hovering it
+                // reveals the base's variants — its account rows (Claude) and the inheriting customs.
+                const acctHint = sshAccountsHint(activeProject, localAccounts)
                 return [
-                  base,
-                  ...localAccounts.map((a) => (
-                    <button key={`${aid}-${a.id}`} onClick={pick(() => onAddAgent(aid, a.id))}>
+                  <div
+                    key={aid}
+                    className="dock-menu__has-sub"
+                    onMouseEnter={(e) => openFlyout(aid, e.currentTarget)}
+                    onMouseLeave={() => closeFlyoutSoon(aid)}
+                  >
+                    <button title={AGENT_CONFIG[aid].notice} onClick={pick(() => onAddAgent(aid))}>
                       <AgentIcon agentId={aid} size={18} />
-                      <span>
-                        Claude — {a.label}
-                        {a.id === defaultAccountId ? ' ✓' : ''}
-                      </span>
+                      <span>{AGENT_CONFIG[aid].label}</span>
+                      <span className="dock-menu__chevron">▸</span>
                     </button>
-                  ))
+                    {openSub === aid && addMenuEl && createPortal(
+                      <div className="dock-menu__sub" style={subPos ?? undefined}>
+                        {aid === 'claude' && localAccounts.length > 0 && (
+                          <>
+                            <div className="dock-menu__sub-label">Accounts</div>
+                            {localAccounts.map((a) => (
+                              <button
+                                key={a.id}
+                                onClick={pick(() => onAddAgent(aid, a.id))}
+                              >
+                                <AgentIcon agentId={aid} size={18} />
+                                <span>
+                                  {a.label}
+                                  {a.id === defaultAccountId ? ' ✓' : ''}
+                                </span>
+                              </button>
+                            ))}
+                          </>
+                        )}
+                        {aid === 'claude' && acctHint && (
+                          <button disabled title={acctHint}>
+                            <AgentIcon agentId={aid} size={18} />
+                            <span>No accounts on this host yet</span>
+                          </button>
+                        )}
+                        <div className="dock-menu__sub-label">Custom</div>
+                        {inheriting.map((c) => (
+                          <button key={c.id} onClick={pick(() => onAddAgent(c.id))}>
+                            <AgentIcon agentId={c.id} size={18} />
+                            <span>{c.label}</span>
+                          </button>
+                        ))}
+                      </div>,
+                      addMenuEl
+                    )}
+                  </div>
                 ]
-              }
-              // Has inheriting customs → render as a flyout submenu. The parent button still
-              // launches the base harness in one click (preserving today's behavior); hovering it
-              // reveals the base's variants — its account rows (Claude) and the inheriting customs.
-              const acctHint = sshAccountsHint(activeProject, localAccounts)
-              return [
-                <div
-                  key={aid}
-                  className="dock-menu__has-sub"
-                  onMouseEnter={() => setOpenSub(aid)}
-                  onMouseLeave={() => setOpenSub((cur) => (cur === aid ? null : cur))}
+              })}
+              {baselessCustoms.map((c) => (
+                <button key={c.id} onClick={pick(() => onAddAgent(c.id))}>
+                  <AgentIcon agentId={c.id} size={18} />
+                  <span>{c.label}</span>
+                </button>
+              ))}
+              {contentRows.map((row) => (
+                <button
+                  key={row.kind}
+                  disabled={row.disabled}
+                  title={row.hint}
+                  onClick={pick(row.onClick)}
                 >
-                  <button title={AGENT_CONFIG[aid].notice} onClick={pick(() => onAddAgent(aid))}>
-                    <AgentIcon agentId={aid} size={18} />
-                    <span>{AGENT_CONFIG[aid].label}</span>
-                    <span className="dock-menu__chevron">▸</span>
-                  </button>
-                  {openSub === aid && (
-                    <div className="dock-menu__sub">
-                      {aid === 'claude' && localAccounts.length > 0 && (
-                        <>
-                          <div className="dock-menu__sub-label">Accounts</div>
-                          {localAccounts.map((a) => (
-                            <button
-                              key={a.id}
-                              onClick={pick(() => onAddAgent(aid, a.id))}
-                            >
-                              <AgentIcon agentId={aid} size={18} />
-                              <span>
-                                {a.label}
-                                {a.id === defaultAccountId ? ' ✓' : ''}
-                              </span>
-                            </button>
-                          ))}
-                        </>
-                      )}
-                      {aid === 'claude' && acctHint && (
-                        <button disabled title={acctHint}>
-                          <AgentIcon agentId={aid} size={18} />
-                          <span>No accounts on this host yet</span>
-                        </button>
-                      )}
-                      <div className="dock-menu__sub-label">Custom</div>
-                      {inheriting.map((c) => (
-                        <button key={c.id} onClick={pick(() => onAddAgent(c.id))}>
-                          <AgentIcon agentId={c.id} size={18} />
-                          <span>{c.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ]
-            })}
-            {baselessCustoms.map((c) => (
-              <button key={c.id} onClick={pick(() => onAddAgent(c.id))}>
-                <AgentIcon agentId={c.id} size={18} />
-                <span>{c.label}</span>
+                  {row.icon}
+                  <span>{row.label}</span>
+                </button>
+              ))}
+              <button onClick={pick(onConnectRemote)}>
+                <RemoteIcon />
+                <span>New Remote Connection</span>
               </button>
-            ))}
-            {contentRows.map((row) => (
-              <button
-                key={row.kind}
-                disabled={row.disabled}
-                title={row.hint}
-                onClick={pick(row.onClick)}
-              >
-                {row.icon}
-                <span>{row.label}</span>
-              </button>
-            ))}
-            <button onClick={pick(onConnectRemote)}>
-              <RemoteIcon />
-              <span>New Remote Connection</span>
-            </button>
+            </div>
         </RailMenu>
 
         {group === 'create' && (

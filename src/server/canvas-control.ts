@@ -7,6 +7,7 @@ import {
   deliverStationNotice,
   messagingEnabledVia,
   onMessagingAgentEvent,
+  ptyPaneProbeDeps,
   restoreDeliveryQueue,
   type AgentMessagingDeps
 } from '../core/agents/agent-messaging'
@@ -216,8 +217,7 @@ export async function initServerCanvasControl(
   factoryRef = factory
 
   const messaging: AgentMessagingDeps = {
-    capturePane: async (nodeId) => (await deps.ptyManager.captureSession(nodeId)) || null,
-    paneOwner: (nodeId) => deps.ptyManager.paneOwner(nodeId),
+    ...ptyPaneProbeDeps(deps.ptyManager),
     // Server delivery has no renderer/xterm echo stream. Capture the headless pane instead and
     // separate paste from Enter so a fresh TUI cannot swallow the first submit keystroke.
     sendEnvelope: (nodeId, envelope) =>

@@ -132,6 +132,15 @@ export interface DeliveryDeps {
   /** Kernel truth about the target's pane. Unbounded by contract — this module bounds it. */
   paneOwner(nodeId: string): Promise<PaneOwner | null>
   /**
+   * How long THIS target's pane read may take before it is abandoned as unreadable. Optional:
+   * absent ⇒ `PANE_PROBE_TIMEOUT_MS`, i.e. byte-identical to before this existed.
+   *
+   * It is per TARGET, not global, because the backends differ by an order of magnitude and the 2s
+   * default encodes an ssh-specific hazard (see `WINDOWS_PANE_PROBE_TIMEOUT_MS`). A Windows
+   * session-host pane is read by enumerating the process table and simply cannot answer in 2s.
+   */
+  paneProbeTimeoutMs?(nodeId: string): number
+  /**
    * Did the target's pane request bracketed paste? UNIMPLEMENTED — nothing wires this yet, and
    * `PtyManager.bracketPasteRequested` (which read `#{bracket_paste_flag}`, a tmux-3.7+ format) was
    * deleted when `sendText` stopped needing to ask. See the long note at the refusal that uses it.
@@ -143,9 +152,10 @@ export interface DeliveryDeps {
    * must carry no ESC byte of ours, because tmux ≥ 3.7 passes paste-buffer content through vis(3),
    * which renders an embedded frame as literal `^[` text (issue #453). Resolves false only when
    * the envelope did not reach the pane; a post-paste submit failure remains eligible for the
-   * receipt watch's honest `stalled` outcome.
+   * receipt watch's honest `stalled` outcome. `'dialog'`: nothing was written because the agent's
+   * own dialog owns the keyboard (`PtyManager.sendEnvelope`, Cursor).
    */
-  sendEnvelope(nodeId: string, envelope: string, expected?: PaneOwner): Promise<boolean>
+  sendEnvelope(nodeId: string, envelope: string, expected?: PaneOwner): Promise<boolean | 'dialog'>
   /**
    * T234 — the three-state session probe, asked only after a pane WRITE reported failure. A write
    * that did not go out is not evidence of anything about the target by itself (the incident that
@@ -351,6 +361,7 @@ export type WriteVerdict =
 
 export type EnvelopeWrite =
   | { wrote: true; attempts: number }
+  | { wrote: 'dialog'; attempts: number }
   | { wrote: false; attempts: number; verdict: WriteVerdict; reason: WriteFailureReason }
 
 export const WRITE_RETRY_DELAYS_MS = [2000, 5000, 15000] as const
@@ -394,7 +405,9 @@ export async function writeEnvelope(
 ): Promise<EnvelopeWrite> {
   const wait = deps.wait ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   for (let attempt = 1; ; attempt++) {
-    if (await deps.sendEnvelope(nodeId, envelope, owner)) return { wrote: true, attempts: attempt }
+    const wrote = await deps.sendEnvelope(nodeId, envelope, owner)
+    if (wrote === 'dialog') return { wrote: 'dialog', attempts: attempt }
+    if (wrote) return { wrote: true, attempts: attempt }
     // The bytes did not go out. `shellTearingDown` first: it is a local flag, and it is the one
     // answer that is certainly not about the target.
     if (deps.shellTearingDown?.() === true)
@@ -552,7 +565,8 @@ export async function deliverAgentMessage(
     // ssh-controlmaster-fallback). This module probes AT MOST TWICE per delivery and never loops;
     // any caller that wants to retry an `unknown` needs backoff plus a per-target cap BEFORE its
     // second attempt, not after the incident.
-    const before = await probeWithin(() => deps.paneOwner(req.targetNodeId), PANE_PROBE_TIMEOUT_MS)
+    const probeMs = deps.paneProbeTimeoutMs?.(req.targetNodeId) ?? PANE_PROBE_TIMEOUT_MS
+    const before = await probeWithin(() => deps.paneOwner(req.targetNodeId), probeMs)
     if (readyOwner && !samePane(readyOwner, before, 'qoder', req.targetBinaries))
       return refuse({ kind: 'targetNotIdleUnknown', reason: 'Qoder changed process after startup readiness check' })
     const verdict = isAgentPane(before, req.targetAgentId, req.targetBinaries)
@@ -637,6 +651,10 @@ export async function deliverAgentMessage(
     // demonstrably landed. See `watchForReceipt`: that miss is what makes an LLM send it twice.
     const watch = watchForReceipt(req.targetNodeId, deps.subscribeEvents)
     const attempt = await writeEnvelope(deps, req.targetNodeId, payload, owner)
+    if (attempt.wrote === 'dialog') {
+      watch.cancel()
+      return refuse({ kind: 'targetBusy', state: 'blocked' })
+    }
     // T234: a write that did not go out is NOT a death certificate (see `writeEnvelope`). What it
     // means is the host's verdict, and only ONE of the three is a death: a confirmed-absent
     // session. A shell in teardown, or a probe that could not answer, is a HOLD — the queue keeps
@@ -664,7 +682,7 @@ export async function deliverAgentMessage(
     // stranger's shell. The post-check CANNOT un-send the bytes; the residual window is unchanged.
     // What it buys is that the sender is TOLD and the trace records it, and that
     // `deliveredToReplacedTarget` is never reported as success.
-    const after = await probeWithin(() => deps.paneOwner(req.targetNodeId), PANE_PROBE_TIMEOUT_MS)
+    const after = await probeWithin(() => deps.paneOwner(req.targetNodeId), probeMs)
     if (!samePane(owner, after, req.targetAgentId, req.targetBinaries)) {
       watch.cancel()
       const t = await trace('deliveredToReplacedTarget')

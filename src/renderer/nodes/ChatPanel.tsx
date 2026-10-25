@@ -39,8 +39,10 @@ import {
   TURN_END_RELOAD_DELAYS_MS,
   chatActivity,
   planLiveReload,
+  screenPollTickAllowed,
   shouldPollScreen,
-  turnEndReloadCarries
+  turnEndReloadCarries,
+  windowFocusHint
 } from '../lib/chatLive'
 import { sentCommand } from '@shared/chat-command'
 import { isInteractiveBuiltin } from '@shared/chat-catalog'
@@ -51,6 +53,7 @@ import { AnswerControlsUpdating, PlanAnswerControls, QuestionAnswerControls } fr
 import type { PermissionAnswer } from '@shared/agents/permission-answer'
 import { ChatComposer } from './ChatComposer'
 import { ChatTurnActions } from './ChatTurnActions'
+import { useCodeBlockCopy } from './CodeBlockCopy'
 import { assistantTurnEnds } from '../lib/chatThread'
 import { FALLBACK_SESSION_NOTE, transcriptReadCwd } from '../lib/transcriptSession'
 
@@ -58,9 +61,17 @@ import { FALLBACK_SESSION_NOTE, transcriptReadCwd } from '../lib/transcriptSessi
 // turn-finish reload, each keystroke re-render). Text is stable per message, so cache per text.
 // `breaks`: a single newline is a line break, as Claude Code's own TUI renders it — without it a
 // multi-line prompt, or a reply quoting one line by line (`> a` / `> b`), collapsed onto one line.
+// Every code block gets a Copy button in its top-right corner (useCodeBlockCopy).
 export const MarkdownText = memo(function MarkdownText({ text }: { text: string }) {
   const html = useMemo(() => renderMarkdown(text, { breaks: true }), [text])
-  return <div className="term-chat__text" dangerouslySetInnerHTML={{ __html: html }} />
+  const ref = useRef<HTMLDivElement>(null)
+  const copyButtons = useCodeBlockCopy(ref, html)
+  return (
+    <>
+      <div ref={ref} className="term-chat__text" dangerouslySetInnerHTML={{ __html: html }} />
+      {copyButtons}
+    </>
+  )
 })
 
 interface ChatPanelProps {
@@ -674,20 +685,29 @@ export function ChatPanel({
 
   // Re-read the pane's screen while the view is visible (see `screenBlock`). A read that fails or
   // finds a blank screen changes nothing: unknown is not evidence either way.
+  // Ticks are skipped while the window is unfocused (`screenPollTickAllowed`: ~30 tmux spawns a
+  // minute per chat view otherwise), and coming back — `focus`, or the page turning
+  // visible — re-reads at once, so a dialog that opened meanwhile is on screen before anyone types.
   useEffect(() => {
     if (!pollScreen) {
       setScreenBlock((b) => (b?.live === true ? null : b))
       return
     }
     let cancelled = false
+    // A focus re-tick can land while the interval's read is still out; one read at a time.
+    let inFlight = false
     const tick = async (): Promise<void> => {
       const el = msgsRef.current
-      if (el === null || el.clientHeight === 0 || document.hidden) return
+      if (el === null || el.clientHeight === 0 || inFlight) return
+      if (!screenPollTickAllowed({ hidden: document.hidden, focused: windowFocusHint(document) })) return
       let screen: string
+      inFlight = true
       try {
         screen = await api.pty.capture(nodeId)
       } catch {
         return
+      } finally {
+        inFlight = false
       }
       if (cancelled) return
       const read = readClaudeScreen(screen)
@@ -698,9 +718,14 @@ export function ChatPanel({
     }
     void tick()
     const t = setInterval(() => void tick(), CHAT_SCREEN_POLL_MS)
+    const onReturn = (): void => void tick()
+    window.addEventListener('focus', onReturn)
+    document.addEventListener('visibilitychange', onReturn)
     return () => {
       cancelled = true
       clearInterval(t)
+      window.removeEventListener('focus', onReturn)
+      document.removeEventListener('visibilitychange', onReturn)
     }
   }, [pollScreen, api, nodeId])
 

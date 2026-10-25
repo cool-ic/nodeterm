@@ -1,12 +1,15 @@
-import type { ChatPromptResult, TextDeliveryResult } from './text-delivery'
+import type { ChatPromptResult, EmptyPromptResult, TextDeliveryResult } from './text-delivery'
 import type { PushWebhookMinted, PushWebhookResult, PushWebhookTokenInfo } from './push-webhook'
 import type { IdentitySeedEntry } from './agent-identity-seed'
+import type { WhiteboardFile, WhiteboardSaveResult } from './whiteboard'
 import type { PrWaitHold } from './pr-wait'
 import type { SessionBackend } from './session-backend'
 import type { AgentIntegrationsSettings } from './agent-integrations'
+import type { NodeSize, SizableNodeKind } from './default-node-size'
 // Types shared across the main, preload, and renderer processes.
 
 import { TABBAR_HEIGHT_PX } from './window-chrome-metrics'
+import { DEFAULT_MARKDOWN_FONT_FAMILY, DEFAULT_MARKDOWN_FONT_SIZE } from './markdown-font'
 import { DEFAULT_WORKTREE_PATH_TEMPLATE } from './worktree'
 import type { CloneProgress } from './clone-url'
 import type { KeybindingOverrides, TerminalShortcutPolicy } from './keybindings'
@@ -213,11 +216,29 @@ export interface PtyCreateOptions {
    */
   requireRemote?: boolean
   /**
+   * The ONE way a terminal may run on THIS machine while it sits on an SSH project's canvas: the
+   * local-account login node Settings → Accounts drops onto whatever canvas is active. Core refuses
+   * every other local spawn whose `ownerProjectId` is an SSH project (`PtyManager.setSshProjectCheck`,
+   * issue #1186) — the node fields that route a node remotely come from a shared file, and a node
+   * that lacks them must never become a local shell. Set only from an in-memory, never-persisted
+   * renderer mark (`renderer/lib/localOnSshCanvas.ts`), never from node data.
+   */
+  localOnSshCanvas?: boolean
+  /**
    * Hosted-relay VIEWERS may watch a terminal but never start one: refuse a create that would spawn
    * a NEW session (`unavailable: 'join-only'`), while a co-attach join or a warm tmux reattach still
    * proceeds. Set only by the relay access policy (src/core/relay/access-policy.ts).
    */
   joinOnly?: boolean
+  /**
+   * The opposite of `joinOnly`: this create may only SPAWN a brand-new session. A co-attach join, a
+   * reattach to a live tmux / session-host / Zellij session under this node's name, and a create
+   * whose existence probe cannot answer are all refused (`unavailable: 'new-only'`), so the caller's
+   * `fresh: true` means "this create made the session". Set only by the relay scoped-guest policy
+   * (src/core/relay/scoped-guest-policy.ts) for a node id the guest introduced itself: naming a node
+   * id must never be a way to take over a session somebody else is running under it.
+   */
+  newOnly?: boolean
   /**
    * `false`: this view never constrains the shared pty's size (a viewer's small window must not
    * shrink everyone's terminal). It is still a subscriber and is told the authoritative size.
@@ -232,6 +253,11 @@ export interface PaneCursor {
   y: number
   visible: boolean
 }
+
+/** Outcome of typing keys into a node's pane by id (`PtyApi.sendPaneKeys`). Never a rejection. */
+export type PaneKeysResult =
+  | { ok: true }
+  | { ok: false; reason: 'not-connected' | 'unsupported-backend' | 'no-ssh' | 'failed' }
 
 /**
  * Result of creating a PTY session. `fresh` distinguishes a tmux session that had to be
@@ -395,9 +421,15 @@ export interface PtyCreateResult {
    * `PtyCreateOptions.requireRemote` for what used to happen instead. The renderer shows the
    * "not connected" overlay and re-spawns the node once the project's master is back.
    *
-   * Only ever set for a create that would have SPAWNED: a co-attach to a live session for this
-   * node id still joins (the session is already running wherever it runs), so a second view of a
-   * healthy remote terminal is unaffected.
+   * `'ssh'` is only ever set for a create that would have SPAWNED: a co-attach to a live session
+   * for this node id on the requested remote still joins, so a second view of a healthy remote
+   * terminal is unaffected.
+   *
+   * `'held-elsewhere'`: a `requireRemote` create found a live session for this node id held by this
+   * process, but NOT on the requested remote — it is local, or its endpoint (host, user, port)
+   * differs from the create's `sshRemote`. The join is refused and nothing was started; the held
+   * session is left untouched. A create with no `sshRemote` (master down) still joins a held
+   * remote session. Not a lost connection: retrying would refuse again.
    *
    * `'codex-account'` is the S6 fail-closed twin: a LOCAL Codex node that explicitly selected a
    * managed account whose home is missing refuses rather than spawning against the system login
@@ -407,8 +439,12 @@ export interface PtyCreateResult {
    * `'join-only'`: `PtyCreateOptions.joinOnly` was set (a hosted-relay viewer) and no running
    * session could be confirmed to join or reattach to — either it is gone, or its existence could
    * not be checked — so nothing was started. Not a lost connection.
+   *
+   * `'new-only'`: `PtyCreateOptions.newOnly` was set (a relay guest's create for a node it
+   * introduced) and a session already exists under this node's name, or its existence could not be
+   * checked. Nothing was joined or started, and the existing session was left untouched.
    */
-  unavailable?: 'ssh' | 'codex-account' | 'join-only'
+  unavailable?: 'ssh' | 'codex-account' | 'join-only' | 'held-elsewhere' | 'new-only'
 }
 
 /** Payload of `pty:recycled` — see IPC.ptyRecycled and `recycleAction` in the renderer. */
@@ -421,7 +457,7 @@ export interface RecycledInfo {
 // 'subagent' and 'loop' are render-only (ephemeral hook-driven viz) and never persisted.
 // 'trigger' is a first-class PERSISTED kind (issue #493) — the canvas-owned schedule node; its
 // spec rides `CanvasNodeState.trigger` and is sanitized on every load path (@shared/trigger).
-export type NodeKind = 'terminal' | 'sticky' | 'group' | 'editor' | 'diff' | 'video' | 'web' | 'browser' | 'files' | 'subagent' | 'loop' | 'dino' | 'trigger'
+export type NodeKind = 'terminal' | 'sticky' | 'group' | 'editor' | 'diff' | 'video' | 'web' | 'browser' | 'files' | 'subagent' | 'loop' | 'dino' | 'trigger' | 'simulator' | 'whiteboard'
 
 /** Persisted state of a single canvas node (terminal, sticky note, group frame, or editor). */
 /**
@@ -541,6 +577,10 @@ export interface CanvasNodeState {
   collapsed?: boolean
   /** Agent nodes only: when true, this node's subagent/loop fan-out cards are hidden. */
   hideFanout?: boolean
+  /** Terminal nodes: the ⌘M view (chat / markdown) is open. Persisted, so leaving a project and
+   *  coming back (or a reload) reopens the node the way the user left it instead of on the raw
+   *  terminal. Absent = closed. */
+  mdMode?: boolean
   /**
    * A user-chosen icon shown wherever this node is listed (canvas header, kanban card, sessions
    * sidebar): one emoji/character, or an image file. Absent = the node draws exactly as it did
@@ -617,6 +657,10 @@ export interface CanvasNodeState {
    * `normalizeRunConfig` (@shared/run-config) on every load AND save.
    */
   runConfig?: import('./run-config').RunNodeConfig
+  /** Run nodes: a simulator shown inside the node. Read through `normalizeInlineSimulatorConfig`. */
+  runSimulator?: import('./simulator').InlineSimulatorConfig
+  /** simulator-only: which iOS simulator the node shows. Read through `normalizeSimulatorConfig`. */
+  simulator?: import('./simulator').SimulatorNodeConfig
   // sticky-only
   text?: string
   /**
@@ -626,6 +670,15 @@ export interface CanvasNodeState {
    */
   textUpdatedAt?: number
   textUpdatedBy?: string
+  /**
+   * whiteboard-only: the board this node shows until it saves its own — set on a duplicate or a
+   * reopen (which get a NEW id) so the copy needs no file copy and no board file is ever deleted.
+   * A node id, never a path: the core resolves it inside this project (core/whiteboards.ts).
+   */
+  whiteboardSource?: string
+  /** whiteboard-only: epoch ms of the last editing session that changed the board. Written once
+   *  per session (never per stroke) — what a linked agent's "the board changed" keys on. */
+  boardRev?: number
   // dino-only: best score reached in the T-Rex Runner game.
   highScore?: number
   // editor / diff
@@ -645,6 +698,10 @@ export interface CanvasNodeState {
    * through untouched on Server Edition / mobile, where a browser node renders with no <webview>.
    */
   partition?: string
+  /** browser-only: popped out of a run node's browser panel — that run node's id. */
+  dockTo?: string
+  /** Run nodes: the browser panel inside the node. Read through `normalizeRunBrowserConfig`. */
+  runBrowser?: import('./run-preview').RunBrowserConfig
   /** diff-only: true = staged diff (HEAD vs index), false = unstaged (index vs working). */
   diffStaged?: boolean
   /** diff-only: when set, the diff shows parent (<oid>^) vs commit (<oid>) for a file from history. */
@@ -1124,6 +1181,13 @@ export interface Project {
   icon?: ProjectIcon
   /** Default working directory for new terminals created in this project. */
   cwd?: string
+  /**
+   * MACHINE-LOCAL: this folder project's canvas lives in app data (`userData/inline-projects/<id>.json`),
+   * not in `<cwd>/.nodeterm/project.json`, and nothing is written into the folder (issue #1145).
+   * Only meaningful beside a local `cwd`; never written to any shared file. See the
+   * folder-data-ref kind in core/workspace-files.ts (`IndexEntryV3.dataFile`).
+   */
+  storeInAppData?: boolean
   /** When set, this is an SSH project: its terminals run on `server` in `remoteCwd` (remote tmux). */
   ssh?: { server: import('./ssh').SshConnection; remoteCwd: string }
   viewport: Viewport
@@ -1390,17 +1454,23 @@ export interface PtyApi {
    *  (`readsScreenDialogs`), refused BEFORE anything is written when the agent's own dialog owns the
    *  keyboard (`ChatPromptBlocked`) — such dialogs fire no hook. Otherwise the `sendText` contract. */
   sendChatPrompt(persistKey: string, text: string, agentId: string): Promise<ChatPromptResult>
+  /** Type `text` + Enter ONLY into an empty composer of an agent whose composer can be read
+   *  (issue #1144 — the app's own link notes). Refused, with the reason, before anything is written
+   *  when the composer holds a draft, a dialog owns the keyboard, or emptiness cannot be proven. */
+  sendToEmptyPrompt(persistKey: string, text: string, agentId: string): Promise<EmptyPromptResult>
   /** Is tmux available on this host (else the silent plain-shell fallback), plus a suggested
    *  install command for the "tmux not found" banner. */
   tmuxStatus(): Promise<TmuxStatus>
   /** The command currently in the foreground of a node's tmux pane (e.g. 'claude', 'zsh'), by
    *  node persistKey. null when it is unknown — no session, no tmux, or the query failed — which
    *  callers must read as "not observed", never as evidence of a particular command. */
-  paneCommand(persistKey: string): Promise<string | null>
+  paneCommand(persistKey: string, opts?: { resolveUnmounted?: boolean }): Promise<string | null>
   /** The live working directory of a node's pane (`#{pane_current_path}`). null when unknown —
    *  no session, no tmux, the session-host backend, a failed query, or a surface that does not
    *  serve it (relay tabs) — and never a rejection. Used as the second cwd for file links. */
   paneCwd(persistKey: string): Promise<string | null>
+  /** Type raw keys into a node's tmux pane by node id; no mounted terminal needed. Never rejects. */
+  sendPaneKeys(nodeId: string, data: string): Promise<PaneKeysResult>
   /**
    * Desktop only (#925). Spawn-or-attach a node's session with no viewer and deliver `command`
    * through the echo-verified writer, then release the synthetic client (the tmux session keeps
@@ -1415,7 +1485,7 @@ export interface PtyApi {
    *  foreground process group — so a caller can ask WHO owns the pane rather than what tmux calls
    *  it. `null` is "could not read", never evidence that the pane is free (see `isAgentPane`'s
    *  three-valued verdict, which is what consumers should decide on). */
-  paneOwner(persistKey: string): Promise<PaneOwner | null>
+  paneOwner(persistKey: string, opts?: { resolveUnmounted?: boolean }): Promise<PaneOwner | null>
   /**
    * Execute a semantic agent launch in a node's live LOCAL Windows session-host pane: the core
    * encodes it for the pane's own shell (pwsh / Windows PowerShell / cmd) and the host types it
@@ -1477,11 +1547,28 @@ export interface WorkspaceApi {
    *  round trips (the mirror is owed and rides the next ordinary save). For a write-ahead barrier
    *  that must be durable here but must not wait on a remote host — see WorkspaceStore.save. */
   save(workspace: Workspace, opts?: WorkspaceSaveOptions): Promise<void>
+  /**
+   * Ask the core to claim one held launch (node id + command) before any viewer types it
+   * (issue #1173): `claimed` = this viewer delivers it, `elsewhere` = another viewer of the same
+   * project already claimed it, type nothing. A manual Run now is never refused. Optional: a
+   * client without it (an older core, a test double) keeps the per-viewer barrier alone.
+   */
+  claimLaunch?(nodeId: string, command: string, manual: boolean): Promise<'claimed' | 'elsewhere'>
   /** Reads <folder>/.nodeterm/project.json and returns the assembled Project (cwd resolved), or null. */
   probeFolder(folder: string): Promise<Project | null>
   /** Whether <folder>/.nodeterm/project.json is `present`, definitely `absent`, or `unreadable`
    *  (any non-ENOENT error). Never guesses absence from a failed read — see issue #385. */
   projectFileState(folder: string): Promise<'present' | 'absent' | 'unreadable'>
+  /** "Store in app data", second half (issue #1145): once the move's save has landed, carry the
+   *  folder's settings into app data and remove its `.nodeterm` files (git-tracked ones only with
+   *  `removeTracked`). See `WorkspaceStore.releaseFolderFiles`. */
+  releaseFolderFiles(projectId: string, removeTracked: boolean): Promise<import('./project-storage').ReleaseFolderFilesResult>
+  /** "Store in folder", first half (issue #1145): refuse a folder that already holds a canvas or
+   *  settings, else carry this project's settings in. See `WorkspaceStore.prepareFolderStorage`. */
+  prepareFolderStorage(projectId: string): Promise<import('./project-storage').PrepareFolderStorageResult>
+  /** Where the store has this project's canvas right now (issue #1145): asked after a move's save,
+   *  which can land while the folder write in it did not. See `WorkspaceStore.projectStorage`. */
+  projectStorage(projectId: string): Promise<import('./project-storage').ProjectStorageKind>
   /** Fired once after an on-disk migration: `v2` = a v2→v3 migration wrote .nodeterm/ dirs into the
    *  project folders; `exec` = the custom shell / advanced ssh args of already-open projects moved
    *  out of the shared project file into this machine's own workspace index (@shared/node-exec). */
@@ -1660,6 +1747,23 @@ export interface FilesApi {
    * Resolves null when it could not be written; callers drop that file like a failed drop.
    */
   saveCanvasImage(projectId: string, name: string, dataBase64: string): Promise<string | null>
+  /**
+   * Save a whiteboard node's scene (Excalidraw JSON) and the picture it shows at rest. The core
+   * derives the file from (projectId, nodeId) — beside project.json, or its own data dir. Resolves
+   * `{ok: true, path, rev}`, a conflict when the board on disk is no longer `expectedRev` (nothing
+   * written), or null when it could not be written. A core on an older build answers the bare path
+   * string and ignores `expectedRev`. See core/whiteboards.ts.
+   */
+  saveWhiteboard(
+    projectId: string,
+    nodeId: string,
+    scene: string,
+    thumbnailBase64?: string,
+    expectedRev?: string | null
+  ): Promise<WhiteboardSaveResult | string | null>
+  /** Read a whiteboard back; `sourceId` is the board a copied node falls back to until it saves.
+   *  `withScene: false` reads only the picture and revision (a board at rest). */
+  readWhiteboard(projectId: string, nodeId: string, sourceId?: string, withScene?: boolean): Promise<WhiteboardFile | null>
   /**
    * Store a custom sound for an agent alert (issue #289). The core validates kind, extension,
    * size and magic bytes, then writes a FIXED per-kind file under its own data dir — the picked
@@ -1919,10 +2023,27 @@ export interface Settings {
    *  the default for anything that is not a finite number. Machine-local: it is one person's
    *  chrome, not a canvas fact. */
   tabBarHeight: number
+  /** How solid sticky notes / group frames are behind their colour tint, 0–100 (Settings →
+   *  Appearance, issue #1113). 0 = see-through, the original look. Hand-editable; read through
+   *  `resolveCanvasBacking` (@shared/canvas-backing). Machine-local. */
+  stickyNoteBacking: number
+  groupFrameBacking: number
+  /** Font of the rendered-Markdown reading views — the ⌘M output and chat views and the editor's
+   *  Markdown preview (Settings → Appearance). A CSS font stack. Hand-editable; read through
+   *  `resolveMarkdownFontFamily` (@shared/markdown-font). Code inside Markdown follows the
+   *  terminal `fontFamily` instead. Machine-local, like the terminal font. */
+  markdownFontFamily: string
+  /** Body size (CSS px) of the same views; headings scale from it, code is 0.92 of it. Read
+   *  through `resolveMarkdownFontSize`, which clamps to 8–28 and answers 13 for garbage. */
+  markdownFontSize: number
   /** Default size (px) for NEW terminal/agent nodes on the canvas. Existing nodes keep
    *  whatever size they were saved with; other node kinds keep their own defaults. */
   defaultNodeWidth: number
   defaultNodeHeight: number
+  /** Default size (px) for NEW nodes of every other kind the add menus create, keyed by kind; a
+   *  kind with no entry opens at its built-in size. Read through `defaultNodeSize` (renderer) /
+   *  `resolveDefaultNodeSize` (@shared/default-node-size), which clamp hand edits. Machine-local. */
+  defaultNodeSizes: Partial<Record<SizableNodeKind, NodeSize>>
   /** Sessions sidebar: the DEFAULT for a project row the user never toggled — on (historical)
    *  keeps the active project expanded and collapses the others, off leaves everything expanded.
    *  Explicit toggles live in `sidebarCollapsedItems` and always win. */
@@ -1952,6 +2073,11 @@ export interface Settings {
    *  (`$reponame` and `$defaultFolderName` aliases) plus `$branch`; both `$x` and `${x}` forms.
    *  A missing branch token is appended automatically. */
   worktreePathTemplate: string
+  /** Issue #1145. Where a folder project created from now on keeps its canvas: `'folder'` (the
+   *  default — `<cwd>/.nodeterm/project.json`, git-shareable) or `'appData'` (nothing written into
+   *  the folder; see `Project.storeInAppData`). A folder that already has a project.json is adopted
+   *  as it is, in its folder, whatever this says. Existing projects move from the tab menu. */
+  newProjectStorage: import('./project-storage').NewProjectStorage
   /** ms to dwell over a terminal before it takes pointer focus (pan-across guard). */
   panHoverDelay: number
   /** Issue #757. Whether a terminal node's keyboard focus follows the POINTER (the long-standing
@@ -1983,6 +2109,13 @@ export interface Settings {
    *  the lock is one person's view state. Machine-local on Desktop; in the Server Edition this
    *  setting is the server's while the lock is per browser profile. */
   rememberCanvasLock: boolean
+  /** Whether `nodeterm://` links from other apps are handled (docs/superpowers/specs/
+   *  2026-10-13-open-link-design.md). OFF by default: a link can come from any web page, script
+   *  or app, so taking them is something a person turns on. On, a `nodeterm://open` link shows a
+   *  confirm sheet and opens ONE agent or terminal node only after a click; `nodeterm://pair` and
+   *  `nodeterm://join` pre-fill the code prompt. Off, a link opens nothing and a notice says where
+   *  to turn it on. Machine-local (settings.json); read by main on every link. */
+  allowOpenLinks: boolean
   /** Open Markdown files (.md, .markdown, …) in rendered preview instead of the code editor.
    *  Only picks the view an editor node OPENS in — the node's Preview/Edit toggle (and the
    *  markdown-toggle chord) still switches either way. Default ON since the release after
@@ -2424,8 +2557,13 @@ export const DEFAULT_SETTINGS: Settings = {
   snapToGrid: false,
   autoAlignGrid: false,
   tabBarHeight: TABBAR_HEIGHT_PX,
+  stickyNoteBacking: 0,
+  groupFrameBacking: 0,
+  markdownFontFamily: DEFAULT_MARKDOWN_FONT_FAMILY,
+  markdownFontSize: DEFAULT_MARKDOWN_FONT_SIZE,
   defaultNodeWidth: 640,
   defaultNodeHeight: 440,
+  defaultNodeSizes: {},
   sidebarAutoCollapse: true,
   sidebarCollapsedItems: {},
   sidebarGrouping: 'project',
@@ -2433,12 +2571,14 @@ export const DEFAULT_SETTINGS: Settings = {
   omniKanbanEnabled: false,
   omniKanbanAsDefault: false,
   worktreePathTemplate: DEFAULT_WORKTREE_PATH_TEMPLATE,
+  newProjectStorage: 'folder',
   panHoverDelay: 600,
   terminalFocusFollowsPointer: true,
   doubleClickFocus: true,
   focusZoomToNode: true,
   offerCloseProjectOnLastSession: false,
   rememberCanvasLock: false,
+  allowOpenLinks: false,
   openMarkdownPreview: true,
   openMarkdownPreviewMigrated: true,
   terminalMiddleClickPaste: false,
@@ -3095,9 +3235,14 @@ export interface ProviderUsage {
   updatedAt: number
   /**
    * 'unavailable' = not signed in / no subscription to report → hide this provider entirely.
-   * 'fetching' = request in flight. 'ok' = limits present. 'error' = the fetch failed.
+   * 'fetching' = request in flight. 'ok' = limits present. 'error' = the fetch failed — and when
+   * `limits` is non-empty alongside it, those are the LAST GOOD numbers the service kept
+   * (`holdLastGoodProvider`), still stamped with their own `updatedAt`.
    */
   status: 'unavailable' | 'fetching' | 'ok' | 'error'
+  /** The latest read was refused with HTTP 429 (Codex today, issue #1168). Absent = not rate
+   *  limited, or not known to be. */
+  rateLimited?: boolean
 }
 
 /** Host memory snapshot in MB. `null` from any reader means "could not read" — never "zero".
@@ -3132,6 +3277,28 @@ export interface MemInfo {
   psiSomeAvg60?: number
   /** `/proc/pressure/memory` `full avg60` — % of the last minute EVERY task was stalled. Thrash. */
   psiFullAvg60?: number
+  /**
+   * What the RAM pill SHOWS beyond used/total. **Display only: never an input to the reaper, the
+   * memory-pressure monitor or a reclaim lever**. It is a separate object,
+   * rather than more top-level fields, so that rule is structural: `hostUnderMemoryPressure` reads
+   * `swapTotalMb`/`swapFreeMb`, and filling THOSE on darwin would fire the reaper's swap term all
+   * day on a Mac that can keep most of its swap in use for hours (16% swap free on the measured
+   * one). Absent field = not measured, never zero.
+   */
+  display?: MemDisplay
+}
+
+/** See `MemInfo.display`. Every field is optional and independent: one failed read omits one fact. */
+export interface MemDisplay {
+  /** Swap in use, MB. darwin: `sysctl vm.swapusage`; Linux: `SwapTotal - SwapFree`. */
+  swapUsedMb?: number
+  /** Swap currently provisioned, MB. On darwin this GROWS on demand (dynamic swap files), so it is
+   *  a size, not a ceiling. */
+  swapTotalMb?: number
+  /** The kernel's own verdict (`kern.memorystatus_vm_pressure_level`: 1/2/4), darwin only — the
+   *  colour Activity Monitor's pressure graph shows. Linux has no equivalent level and PSI has no
+   *  measured threshold here, so it is never invented there. */
+  pressureLevel?: 'normal' | 'warn' | 'critical'
 }
 
 /** One nt- session's memory, as the panel renders it. */
@@ -3179,6 +3346,41 @@ export interface SessionMemoryReport {
    * could not be measured: never a fake zero. The tmux leg never sets it.
    */
   host?: SessionHostOverhead
+  /**
+   * nodeterm's OWN processes (main, renderer(s), GPU, helpers) — the "nodeterm itself" group.
+   * Display only, LOCAL scope only. Absent = this shell cannot enumerate its processes (Server
+   * Edition, a relay stub, every SSH scope): not available. `ok:false` = it tried and could not
+   * measure. Never part of the session total — see AppSelfMemory.
+   */
+  app?: AppSelfMemory
+}
+
+/** Which of nodeterm's own processes a group is (Electron `ProcessMetric.type`, folded). */
+export type AppProcessKind = 'main' | 'renderer' | 'gpu' | 'helper'
+
+/** One kind of nodeterm process, summed over every pid of that kind (the HUD is a 2nd renderer). */
+export interface AppSelfGroup {
+  kind: AppProcessKind
+  count: number
+  /** Summed memory in MB, in the SAME accounting as the session rows (darwin: phys_footprint from
+   *  the panel's own `top` read; Linux: VmRSS; Windows: working set). Absent when any pid of the
+   *  group was missing from the table: a partial sum would understate, which is a wrong number. */
+  mb?: number
+  /** Summed CPU time since each process started, seconds (Electron `cumulativeCPUUsage`). Absent =
+   *  not reported. A lifetime total, deliberately not a percentage. */
+  cpuSeconds?: number
+}
+
+/**
+ * The GPU helper's real footprint (1557-1845 MB live, mostly IOSurfaces)
+ * was invisible because `ps` RSS says 96-153 MB and nothing attributed it. `ok:false` (no groups)
+ * when the process list or the table could not be read, or no pid of ours was in it.
+ */
+export interface AppSelfMemory {
+  ok: boolean
+  groups: AppSelfGroup[]
+  /** Sum of every group, only when every group was measured. */
+  totalMb?: number
 }
 
 /** See `SessionMemoryReport.host`. All MB figures are MEASURED working sets, not estimates. */
@@ -3778,6 +3980,19 @@ export interface GrokCliCaps {
 /** Unprobed grok ⇒ omit the flag, offer no models ⇒ today's command line, byte-identical. */
 export const UNKNOWN_GROK_CLI_CAPS: GrokCliCaps = { sessionIdFlag: false, models: [] }
 
+export interface CursorCliCaps {
+  /** `cursor-agent models`: id + label, the account's own catalogue. [] when it cannot be read. */
+  models: { id: string; name?: string }[]
+}
+
+/** Unprobed cursor ⇒ no models ⇒ no model switching (the pre-feature behaviour). */
+export const UNKNOWN_CURSOR_CLI_CAPS: CursorCliCaps = { models: [] }
+
+export interface CursorApi {
+  /** Never rejects; an unprobed or offline CLI resolves to the empty catalogue. */
+  cliCaps(): Promise<CursorCliCaps>
+}
+
 export interface GrokApi {
   /** Capabilities of the local grok CLI (memoized in the shell; safe to call repeatedly).
    *  Never rejects — an unprobed CLI resolves to the fail-open caps. */
@@ -4096,6 +4311,13 @@ export interface RelayHostApi {
   /** Leave host mode: close every bridged peer in the pool. */
   stop(): Promise<void>
   /**
+   * Which of these projects may NOT be shared, with the reason (a folder that is the disk root, the
+   * home directory or an ancestor of either — every file under it would be readable). The invite
+   * UI disables those projects; `start`/`invite` refuse them host-side too. Projects absent from the
+   * answer may be shared.
+   */
+  scopeProblems(projectIds: string[]): Promise<Record<string, string>>
+  /**
    * Team Access: per-peer revoke — cut ONE bridged peer's live session immediately (by its id) and
    * free its seat. Distinct from `stop()` (which drops all).
    */
@@ -4379,6 +4601,22 @@ export interface AgentRateLimitPush {
   verdict: RateLimitReading | null
 }
 
+/** `nodeterm://` links (see main/open-link.ts, @shared/open-link). */
+export interface OpenLinkApi {
+  /** The renderer is listening: main delivers any link that arrived before (a cold start). */
+  ready(): void
+  /** An `open` link for the confirm sheet. */
+  onRequest(listener: (req: import('./open-link').OpenLinkPrompt) => void): () => void
+  /** A `pair` / `join` link: route to the existing pairing / join flow, never auto-accept. */
+  onPair(listener: (link: { kind: 'pair' | 'join'; url: string }) => void): () => void
+  /** A refused or dropped link, as one sentence for a toast. */
+  onNotice(listener: (n: { text: string }) => void): () => void
+  /** The human's choice; main re-checks it and answers with the final open. */
+  accept(id: string, choice: import('./open-link').OpenLinkChoice): Promise<import('./open-link').OpenLinkAcceptResult>
+  /** The sheet was dismissed (or replaced): forget the request. */
+  cancel(id: string): void
+}
+
 export interface NodeTerminalApi {
   pty: PtyApi
   workspace: WorkspaceApi
@@ -4415,6 +4653,8 @@ export interface NodeTerminalApi {
   wallpaper: import('./wallpaper').WallpaperApi
   /** Run node host side (launch.json, devices, launcher, status, stop, signals, reload on save). */
   runConfig: import('./run-config').RunConfigApi
+  /** Simulator node host side (macOS desktop): live iOS simulator screen + input. */
+  simulator: import('./simulator').SimulatorApi
   triggers: TriggersApi
   context: ContextApi
   canvas: CanvasApi
@@ -4423,6 +4663,7 @@ export interface NodeTerminalApi {
   codex: CodexApi
   claude: ClaudeApi
   grok: GrokApi
+  cursor: CursorApi
   /** Custom-agent launch/preview (env-var expansion + command assembly). */
   agent: AgentApi
   chat: ChatApi
@@ -4443,6 +4684,9 @@ export interface NodeTerminalApi {
   pairing: PairingApi
   presence: PresenceApi
   shortcuts: ShortcutsApi
+  /** `nodeterm://` links clicked outside the app. Desktop only (the Server Edition has no URL
+   *  scheme: its stub never fires and refuses accept). */
+  openLink: OpenLinkApi
   /** Fires when the user presses Cmd/Ctrl+M (toggle markdown view). Returns unsubscribe. */
   onMarkdownToggle(listener: () => void): () => void
   /** Fires when the user presses Cmd/Ctrl+W (close selected node). Returns unsubscribe. */

@@ -221,7 +221,8 @@ describe('PtyManager.paneOwner', () => {
     expect(calls).toHaveLength(2)
     expect(calls[0]).toEqual({
       file: '/usr/bin/tmux',
-      args: ['-L', TMUX_SOCKET, 'display-message', '-p', '-t', TARGET, PANE_OWNER_FMT]
+      // Exact (`=name:`): a bare target prefix-matches a longer session on a miss.
+      args: ['-L', TMUX_SOCKET, 'display-message', '-p', '-t', `=${TARGET}:`, PANE_OWNER_FMT]
     })
     expect(calls[1]).toEqual({
       file: 'ps',
@@ -285,7 +286,7 @@ describe('PtyManager.paneOwner', () => {
     }
     const mgr = await manager()
     expect(await mgr.paneOwner('some-other-node')).toBeNull()
-    expect(calls[0].args).toContain(sessionName('some-other-node'))
+    expect(calls[0].args).toContain(`=${sessionName('some-other-node')}:`)
   })
 
   it('answers null — not a partial owner — when tmux is unavailable', async () => {
@@ -658,5 +659,49 @@ describe('PtyManager.backgroundWrite — released session-host node', () => {
     mgr.released.set(NODE, { sessionId: 'sess-1', remote: false })
     await mgr.backgroundWrite(NODE, 'x') // tmuxPath is null ⇒ the tmux leg refuses as before
     expect(hostMessaging.writeDetached).not.toHaveBeenCalled()
+  })
+})
+
+describe('PtyManager.paneProbeTimeoutMs — the budget follows the backend that answers', () => {
+  // Both Windows backends read the pane through a PowerShell console/CIM probe (~2.4 s measured);
+  // tmux and ssh keep the 2 s bound that exists for ssh's sake. Asked in `paneOwner`'s own order.
+  type Mgr = {
+    sessions: Map<string, unknown>
+    byPersistKey: Map<string, string>
+    released: Map<string, unknown>
+    paneProbeTimeoutMs(id: string): number
+  }
+  beforeEach(() => {
+    vi.resetModules()
+    initPlatform(fakePlatform())
+  })
+  afterEach(() => resetPlatformForTests())
+
+  it('keeps 2 s for a local tmux pane and for an SSH pane', async () => {
+    const { PANE_PROBE_TIMEOUT_MS } = await import('./agents/pane-probe')
+    expect(((await manager()) as unknown as Mgr).paneProbeTimeoutMs(NODE)).toBe(PANE_PROBE_TIMEOUT_MS)
+    const ssh = (await manager({ sshRemote: { conn: {}, controlPath: '/tmp/cm' } })) as unknown as Mgr
+    expect(ssh.paneProbeTimeoutMs(NODE)).toBe(PANE_PROBE_TIMEOUT_MS)
+  })
+
+  it('gives an attached and a RELEASED session-host pane the Windows budget', async () => {
+    const { WINDOWS_PANE_PROBE_TIMEOUT_MS } = await import('./agents/pane-probe')
+    const mgr = (await manager()) as unknown as Mgr
+    mgr.sessions.clear()
+    mgr.sessions.set('host-session', { persistKey: NODE, indexKey: NODE, sessionHost: true })
+    mgr.byPersistKey.set(NODE, 'host-session')
+    expect(mgr.paneProbeTimeoutMs(NODE)).toBe(WINDOWS_PANE_PROBE_TIMEOUT_MS)
+    mgr.sessions.clear()
+    mgr.byPersistKey.clear()
+    mgr.released.set(NODE, { sessionId: 'host-session', remote: false, sessionHost: true })
+    expect(mgr.paneProbeTimeoutMs(NODE)).toBe(WINDOWS_PANE_PROBE_TIMEOUT_MS)
+  })
+
+  it('gives a non-persistent native Windows pane the Windows budget too — same probe', async () => {
+    const { WINDOWS_PANE_PROBE_TIMEOUT_MS } = await import('./agents/pane-probe')
+    const mgr = (await manager({ tmux: null })) as unknown as Mgr
+    mgr.sessions.set('plain-session', { indexKey: 'plain-node', nativeWindowsPane: {} })
+    mgr.byPersistKey.set('plain-node', 'plain-session')
+    expect(mgr.paneProbeTimeoutMs('plain-node')).toBe(WINDOWS_PANE_PROBE_TIMEOUT_MS)
   })
 })

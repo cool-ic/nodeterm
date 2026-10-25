@@ -5,6 +5,17 @@ import path from 'node:path'
 import { findInPathString } from './exec-path'
 import { shellSingleQuote } from '../shared/shell-quote'
 import { CODEX_NO_DAEMON_HELP_ERE } from '../shared/agents/codex-daemon'
+import { renameAtomicSync, tempNameFor } from './fs-atomic'
+
+function publishScript(file: string, body: string): void {
+  const tmp = tempNameFor(file)
+  try {
+    fs.writeFileSync(tmp, body, { mode: 0o700 })
+    renameAtomicSync(tmp, file)
+  } finally {
+    try { fs.rmSync(tmp, { force: true }) } catch { /* preserve the publication error */ }
+  }
+}
 
 export const NODE_SCOPE_ENV = [
   'NODETERM_NODE_ID', 'NODETERM_AGENT_ID', 'NODETERM_CANVAS_CONTROL',
@@ -42,9 +53,7 @@ export function ensureTerminalCliBin(userDataDir: string, searchPath: string): s
     let prior: string | undefined
     try { prior = fs.readFileSync(file, 'utf8') } catch { /* first install */ }
     if (prior !== body) {
-      const tmp = `${file}.${process.pid}.tmp`
-      fs.writeFileSync(tmp, body, { mode: 0o700 })
-      fs.renameSync(tmp, file)
+      publishScript(file, body)
     }
     installed = true
   }
@@ -70,9 +79,7 @@ export NODETERM_USER_ZDOTDIR="\${ZDOTDIR:-$HOME}"
 export ZDOTDIR=${shellSingleQuote(dir)}
 ${rc === '.zshrc' || rc === '.zlogin' ? functions : ''}
 `
-    const file = path.join(dir, rc), tmp = `${file}.${process.pid}.tmp`
-    fs.writeFileSync(tmp, body, { mode: 0o700 })
-    fs.renameSync(tmp, file)
+    publishScript(path.join(dir, rc), body)
   }
   return dir
 }

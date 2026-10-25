@@ -165,7 +165,8 @@ describe('initServerCanvasControl', () => {
       // PtyManager's own boolean, plus the tri-state the messaging layer reads (T207b).
       hasLiveSession: () => true,
       sessionLiveness: async () => 'live',
-      sessionExists: async () => true
+      sessionExists: async () => true,
+      paneProbeTimeoutMs: () => 2000
     } as unknown as PtyManager
     const settings = (): Settings => ({ ...DEFAULT_SETTINGS })
 
@@ -286,6 +287,8 @@ describe('initServerCanvasControl', () => {
     const writes: Array<{ text: string; enter: boolean | undefined }> = []
     let pasted = ''
     const legacySendEnvelope = vi.fn(async () => true)
+    // The Server shell must hand messaging the pane's own read budget (ptyPaneProbeDeps).
+    const paneProbeTimeoutMs = vi.fn((_nodeId: string) => 2000)
     const pty = {
       ...headlessShell(),
       createHeadless: vi.fn(async () => ({ sessionId: 'unused', fresh: true })),
@@ -319,7 +322,8 @@ describe('initServerCanvasControl', () => {
       // PtyManager's own boolean, plus the tri-state the messaging layer reads (T207b).
       hasLiveSession: () => true,
       sessionLiveness: async () => 'live',
-      sessionExists: async () => true
+      sessionExists: async () => true,
+      paneProbeTimeoutMs
     } as unknown as PtyManager
 
     runtime = await initServerCanvasControl({
@@ -361,6 +365,7 @@ describe('initServerCanvasControl', () => {
     expect(writes[0]).toMatchObject({ enter: false })
     expect(writes[1]).toEqual({ text: '', enter: true })
     expect(legacySendEnvelope).not.toHaveBeenCalled()
+    expect(paneProbeTimeoutMs).toHaveBeenCalledWith(targetId)
   })
 
   it('publishes its own writes on server-change, never on the outside-edit channel', async () => {
@@ -413,7 +418,8 @@ describe('initServerCanvasControl', () => {
       // PtyManager's own boolean, plus the tri-state the messaging layer reads (T207b).
       hasLiveSession: () => true,
       sessionLiveness: async () => 'live',
-      sessionExists: async () => true
+      sessionExists: async () => true,
+      paneProbeTimeoutMs: () => 2000
     } as unknown as PtyManager
 
     runtime = await initServerCanvasControl({

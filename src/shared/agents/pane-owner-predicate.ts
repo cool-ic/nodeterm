@@ -75,7 +75,8 @@ export const AGENT_BINARIES: Record<string, readonly string[]> = {
   // (2026-10-10, `ps -ww -o pid=,pgid=,stat=,args= -t <pane tty>`: the foreground `S+` line is
   // `/Users/f/.local/bin/qodercli --permission-mode …`), which is what keeps this name stable
   // across the CLI's own self-updates.
-  qoder: ['qodercli']
+  qoder: ['qodercli'],
+  cursor: ['cursor-agent']
 }
 
 /**

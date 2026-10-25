@@ -2,7 +2,7 @@ import { it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { terminalCliScript, ensureTerminalZsh } from './terminal-cli'
+import { terminalCliScript, ensureTerminalZsh, ensureTerminalCliBin } from './terminal-cli'
 import { testTmpDir } from './test-tmp'
 
 function run(agent: 'codex' | 'qoder', args: string[], supports = true) {
@@ -14,6 +14,17 @@ function run(agent: 'codex' | 'qoder', args: string[], supports = true) {
     env: { ...process.env, NODETERM_NODE_ID: 'own-node', NODETERM_AGENT_ID: 'stale-agent' }, encoding: 'utf8'
   }).trim().split('\n')
 }
+it.skipIf(process.platform === 'win32')('keeps an existing destination intact and cleans the temporary script when publication fails', () => {
+  const root = testTmpDir('cli-publication-'), bin = path.join(root, 'bin')
+  fs.mkdirSync(bin)
+  fs.writeFileSync(path.join(bin, 'codex'), '#!/bin/sh\nexit 0\n', { mode: 0o700 })
+  const destination = path.join(root, 'terminal-cli', 'codex')
+  fs.mkdirSync(destination, { recursive: true })
+  fs.writeFileSync(path.join(destination, 'keep'), 'existing data')
+  expect(() => ensureTerminalCliBin(root, bin)).toThrow()
+  expect(fs.readFileSync(path.join(destination, 'keep'), 'utf8')).toBe('existing data')
+  expect(fs.readdirSync(path.dirname(destination))).toEqual(['codex'])
+})
 it.skipIf(process.platform === 'win32')('isolates plain Codex while preserving this pane and literal arguments', () => {
   expect(run('codex', ['resume', 'session-id', 'hello $world; `code`']))
     .toEqual(['own-node', 'codex', '--no-daemon', 'resume', 'session-id', 'hello $world; `code`'])

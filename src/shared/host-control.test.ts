@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { IPC } from './ipc'
 import { HOST_ONLY_REFUSAL, isHostOnlyChannel } from './host-control'
-import { WATCH_CHAT_CAST, WATCH_EVENT, WATCH_INPUT_CAST, WATCH_RELEASE_CAST, WATCH_UNLOCK_CAST } from './watch-link/protocol'
+import { WATCH_CHAT_CAST, WATCH_EVENT, WATCH_HISTORY_CAST, WATCH_INPUT_CAST, WATCH_RELEASE_CAST, WATCH_UNLOCK_CAST } from './watch-link/protocol'
 
 /**
  * The ONE list both shells consult. It exists so the desktop's relay admission and any future
@@ -40,6 +40,14 @@ describe('isHostOnlyChannel', () => {
     // injection. The channel is registered with a raw `ipcMain.handle` (invisible to peers), and
     // listed here as the belt: moving it onto the platform table later must not open it.
     expect(isHostOnlyChannel(IPC.agentBoardCommentDeliver)).toBe(true)
+  })
+
+  it('covers every simulator channel — a relay peer must not drive the host’s devices', () => {
+    for (const ch of (Object.values(IPC) as unknown[]).filter((c): c is string => typeof c === 'string' && c.startsWith('simulator:'))) {
+      expect(isHostOnlyChannel(ch)).toBe(true)
+    }
+    expect(isHostOnlyChannel(IPC.simulatorInput)).toBe(true)
+    expect(isHostOnlyChannel(IPC.simulatorAction)).toBe(true)
   })
 
   it('covers both station-notice request channels', () => {
@@ -85,7 +93,7 @@ describe('isHostOnlyChannel', () => {
     expect(isHostOnlyChannel('watch:meta')).toBe(false)
     // Every viewer message, Control's included (unlock, input, release, the per-viewer control state
     // and the typing set).
-    const viewer = [...Object.values(WATCH_EVENT), WATCH_CHAT_CAST, WATCH_UNLOCK_CAST, WATCH_INPUT_CAST, WATCH_RELEASE_CAST]
+    const viewer = [...Object.values(WATCH_EVENT), WATCH_CHAT_CAST, WATCH_HISTORY_CAST, WATCH_UNLOCK_CAST, WATCH_INPUT_CAST, WATCH_RELEASE_CAST]
     for (const ch of viewer) {
       expect(ch.startsWith('watch:'), ch).toBe(true)
       expect(isHostOnlyChannel(ch), ch).toBe(false)

@@ -10,6 +10,7 @@ import { ensureGrokHomeProbed, grokHomeDir, grokHomeFallbackWasSilent } from '..
 import { installCopilotHooks, removeCopilotHooks } from './copilot'
 import { installAntigravityHooksWithProbe, removeAntigravityHooks } from './antigravity'
 import { installQoderHooks, removeQoderHooks } from './qoder'
+import { installCursorHooks, removeCursorHooks } from './cursor'
 
 type HookInstaller = readonly [string, () => void]
 
@@ -27,7 +28,9 @@ export const MANAGED_HOOK_INSTALLERS: readonly HookInstaller[] = [
   ['antigravity', () => void installAntigravityHooksWithProbe()],
   // Merges into Qoder's SHARED user settings.json (`~/.qoder/settings.json`), the same shape and the
   // same helper claude/gemini use — measured, not assumed: the entry fires (docs/qoder-agent.md).
-  ['qoder', installQoderHooks]
+  ['qoder', installQoderHooks],
+  // Merges into the SHARED ~/.cursor/hooks.json (IDE + other tools), only where cursor-agent exists.
+  ['cursor', () => void installCursorHooks()]
 ]
 
 export const MANAGED_HOOK_REMOVERS: readonly HookInstaller[] = [
@@ -38,7 +41,8 @@ export const MANAGED_HOOK_REMOVERS: readonly HookInstaller[] = [
   ['grok', removeGrokHooks],
   ['copilot', removeCopilotHooks],
   ['antigravity', () => removeAntigravityHooks()],
-  ['qoder', removeQoderHooks]
+  ['qoder', removeQoderHooks],
+  ['cursor', () => removeCursorHooks()]
 ]
 
 /**

@@ -101,7 +101,7 @@ describe('T249: the backdrop is a portal, so it covers the window', () => {
   it('renders into document.body instead of inside the card it was sized to (54×628 measured)', () => {
     const backdrop = DOCK_SRC.slice(DOCK_SRC.indexOf('dock-backdrop'))
     expect(backdrop.slice(0, 400)).toMatch(/document\.body/)
-    expect(DOCK_SRC.match(/createPortal\(/g) ?? []).toHaveLength(2) // the backdrop and the menus
+    expect(DOCK_SRC.match(/createPortal\(/g) ?? []).toHaveLength(3) // backdrop, rail menus, and upstream scroll-safe agent flyouts
     // `inset: 0` is only the window because nothing above it in `document.body` filters/transforms.
     expect(STYLES_SRC).toMatch(/\.dock-backdrop \{[^}]*position: fixed;[^}]*inset: 0;/)
   })

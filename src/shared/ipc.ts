@@ -29,10 +29,13 @@ export const IPC = {
   ptyReadScrollback: 'pty:read-scrollback',
   ptySendText: 'pty:send-text',
   ptySendChatPrompt: 'pty:send-chat-prompt',
+  ptySendToEmptyPrompt: 'pty:send-to-empty-prompt',
   ptyTmuxStatus: 'pty:tmux-status',
   /** The foreground command of a node's tmux pane (`#{pane_current_command}`) — how the in-place
    *  agent restart sees that the CLI has exited and a shell owns the pane again. */
   ptyPaneCommand: 'pty:pane-command',
+  /** Type keys into a node's tmux pane by node id (no mounted terminal). Host-only. */
+  ptySendPaneKeys: 'pty:send-pane-keys',
   /** The live working directory of a node's tmux pane (`#{pane_current_path}`) — where a relative
    *  path an agent printed actually lives when it is not the node's launch cwd (file links). */
   ptyPaneCwd: 'pty:pane-cwd',
@@ -97,6 +100,7 @@ export const IPC = {
   claudeCliCaps: 'claude-cli:caps',
   grokCliCaps: 'grok-cli:caps',
   grokTakenSessionIds: 'grok-cli:taken-session-ids',
+  cursorCliCaps: 'cursor-cli:caps',
   /** Can a node on this machine get a managed Codex identity? See core/codex-identity-caps.ts. */
   codexIdentityCaps: 'codex-identity:caps',
   codexCliCaps: 'codex-cli:caps',
@@ -418,6 +422,8 @@ export const IPC = {
   wallpaperListStills: 'wallpaper:list-stills',
   wallpaperLoad: 'wallpaper:load',
   wallpaperImport: 'wallpaper:import',
+  wallpaperListAerials: 'wallpaper:list-aerials',
+  wallpaperAerialClips: 'wallpaper:aerial-clips',
   // Run node (core/run-service.ts): launch.json entries, devices, launcher, status, stop, signals.
   runEntries: 'run:entries',
   runDevices: 'run:devices',
@@ -428,6 +434,19 @@ export const IPC = {
   runStop: 'run:stop',
   runSignal: 'run:signal',
   runWatch: 'run:watch',
+  // Simulator node (core/simulator/simulator-service.ts): live screen + touch/keys/buttons.
+  simulatorDevices: 'simulator:devices',
+  simulatorBoot: 'simulator:boot',
+  simulatorStart: 'simulator:start',
+  simulatorStop: 'simulator:stop',
+  simulatorInput: 'simulator:input',
+  simulatorShutdown: 'simulator:shutdown',
+  simulatorAction: 'simulator:action',
+  simulatorState: 'simulator:state',
+  simulatorScreenshot: 'simulator:screenshot',
+  simulatorRecordStart: 'simulator:record-start',
+  simulatorRecordStop: 'simulator:record-stop',
+  simulatorRecording: 'simulator:recording',
   // Trigger nodes (issue #493): machine-local arm/disarm + the card's status/run-now.
   triggersArm: 'triggers:arm',
   triggersDisarm: 'triggers:disarm',
@@ -452,6 +471,9 @@ export const IPC = {
   presencePeer: 'presence:peer',
   // Events broadcast from main to the renderer (sessionId is appended to the channel name).
   ptyData: (sessionId: string) => `pty:data:${sessionId}`,
+  /** Per-node simulator frames / status (Simulator node). */
+  simulatorFrame: (nodeId: string) => `simulator:frame:${nodeId}`,
+  simulatorStatus: (nodeId: string) => `simulator:status:${nodeId}`,
   ptyExit: (sessionId: string) => `pty:exit:${sessionId}`,
   /** Authoritative size of a co-attached session: min(cols) × min(rows) over all subscribers.
    *  Broadcast to every subscriber whenever the subscriber set or any reported size changes. */
@@ -478,6 +500,9 @@ export const IPC = {
   ptyResync: (sessionId: string) => `pty:resync:${sessionId}`,
   workspaceLoad: 'workspace:load',
   workspaceSave: 'workspace:save',
+  /** Exactly-once claim of a renderer-delivered held launch across every viewer of a project
+   *  (core/launch-claim-ledger.ts, issue #1173). Host-only. */
+  workspaceClaimLaunch: 'workspace:claim-launch',
   workspaceProbeFolder: 'workspace:probe-folder',
   /** Read-only trust snapshot for ONE project (T201): per surviving agent node, whether the
    *  runtime ownership ledger can vouch for it this run, and why not when it cannot. No action
@@ -486,6 +511,12 @@ export const IPC = {
   /** Is a folder's .nodeterm/project.json present / absent / unreadable — the distinction
    *  `probeFolder`'s null collapses. Recovery of an `unavailable` project needs it (issue #385). */
   workspaceProjectFileState: 'workspace:project-file-state',
+  /** "Store in app data", second half (issue #1145): carry settings over, remove the folder files. */
+  workspaceReleaseFolderFiles: 'workspace:release-folder-files',
+  /** "Store in folder", first half (issue #1145): refuse an occupied folder, carry settings in. */
+  workspacePrepareFolderStorage: 'workspace:prepare-folder-storage',
+  /** Where the store has a project's canvas after a move's save: folder / app data (issue #1145). */
+  workspaceProjectStorage: 'workspace:project-storage',
   projectSettingsRead: 'project-settings:read',
   projectSettingsWriteShared: 'project-settings:write-shared',
   projectSettingsUpdateLocal: 'project-settings:update-local',
@@ -578,6 +609,10 @@ export const IPC = {
   filesSaveUpload: 'files:save-upload',
   /** Write a canvas image into the project's own `.nodeterm/images/` (see core/canvas-images.ts). */
   filesSaveCanvasImage: 'files:save-canvas-image',
+  /** A whiteboard node's side file (core/whiteboards.ts). Addressed by (projectId, nodeId); the
+   *  receiving core derives the path, so a caller can never name one. */
+  filesSaveWhiteboard: 'files:save-whiteboard',
+  filesReadWhiteboard: 'files:read-whiteboard',
   /** Custom agent-alert sounds (issue #289) — stored under the core's data dir, addressed by kind. */
   filesSaveAlertSound: 'files:save-alert-sound',
   filesReadAlertSound: 'files:read-alert-sound',
@@ -696,6 +731,15 @@ export const IPC = {
   remoteHostPeerPendingCleared: 'remote:host:peer-pending-cleared',
   remoteHostApprove: 'remote:host:approve',
   remotePhoneApprove: 'remote:phone:approve',
+  // `nodeterm://` links (desktop only, raw ipcMain, main-window sender only — see main/open-link.ts).
+  // main → renderer: an `open` link to confirm, a pair/join link to route, a refusal to toast.
+  openLinkRequest: 'open-link:request',
+  openLinkPair: 'open-link:pair',
+  openLinkNotice: 'open-link:notice',
+  // renderer → main: listening (deliver held links), the human's choice, a dismissal.
+  openLinkReady: 'open-link:ready',
+  openLinkAccept: 'open-link:accept',
+  openLinkCancel: 'open-link:cancel',
   remoteHostReject: 'remote:host:reject',
   // Host canvas mirror: renderer pushes its serialized active-project canvas to main;
   // main pushes a client's mutation back to the host renderer to apply.
@@ -729,6 +773,9 @@ export const IPC = {
   relayHostInvite: 'relay:host:invite',
   relayHostRevoke: 'relay:host:revoke',
   relayHostStop: 'relay:host:stop',
+  // Which projects may not be the scope of an invite, and why (core/relay/share-root.ts): invoke,
+  // `projectIds: string[]` → `{ [projectId]: reason }`. The invite UI disables those options.
+  relayHostScopeProblems: 'relay:host:scope-problems',
   relayHostPeerPending: 'relay:host:peer-pending',
   relayHostConfirm: 'relay:host:confirm',
   relayHostOpen: 'relay:host:open',

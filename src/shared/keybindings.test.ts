@@ -110,6 +110,8 @@ describe('registry invariants', () => {
         darwin: [], other: [] },
       { id: 'canvas.groupSelection', title: 'Group selection', group: 'Canvas', scope: 'canvas',
         darwin: [], other: [] },
+      { id: 'canvas.toggleLock', title: 'Toggle canvas lock', group: 'Canvas', scope: 'canvas',
+        darwin: [], other: [] },
       { id: 'node.newTerminal', title: 'New terminal node', group: 'Nodes', scope: 'canvas',
         darwin: ['Cmd+T'], other: ['Cmd+T'] },
       { id: 'node.newAgent', title: 'New agent node', group: 'Nodes', scope: 'canvas',
@@ -131,6 +133,8 @@ describe('registry invariants', () => {
         scope: 'canvas', darwin: [], other: [] },
       { id: 'node.newAgent.qoder', title: 'New Qoder node', group: 'Nodes',
         scope: 'canvas', darwin: [], other: [] },
+      { id: 'node.newAgent.cursor', title: 'New Cursor node', group: 'Nodes', scope: 'canvas',
+        darwin: [], other: [] },
       { id: 'node.newSticky', title: 'New sticky note', group: 'Nodes', scope: 'canvas',
         darwin: [], other: [] },
       { id: 'node.newBrowser', title: 'New browser node', group: 'Nodes', scope: 'canvas',
@@ -138,6 +142,8 @@ describe('registry invariants', () => {
       { id: 'node.newWebView', title: 'New web view node', group: 'Nodes', scope: 'canvas',
         darwin: [], other: [] },
       { id: 'node.newDino', title: 'New dino node', group: 'Nodes', scope: 'canvas',
+        darwin: [], other: [] },
+      { id: 'node.newWhiteboard', title: 'New whiteboard', group: 'Nodes', scope: 'canvas',
         darwin: [], other: [] },
       { id: 'node.newFile', title: 'New file…', group: 'Nodes', scope: 'canvas',
         darwin: [], other: [] },
@@ -149,6 +155,9 @@ describe('registry invariants', () => {
         darwin: ['Cmd+ArrowUp'], other: ['Ctrl+Shift+ArrowUp'], allowInTerminal: true },
       { id: 'node.focusDown', title: 'Focus node below', group: 'Nodes', scope: 'canvas',
         darwin: ['Cmd+ArrowDown'], other: ['Ctrl+Shift+ArrowDown'], allowInTerminal: true },
+      // Pool only: no default chord on either platform.
+      { id: 'node.nextNeedingYou', title: 'Go to next agent needing you', group: 'Nodes',
+        scope: 'canvas', darwin: [], other: [], allowInTerminal: true },
       { id: 'node.maximize', title: 'Maximize / restore node', group: 'Nodes', scope: 'canvas',
         darwin: ['Cmd+Shift+Enter'], other: ['Cmd+Shift+Enter'], allowInTerminal: true },
       { id: 'node.zoneLeft', title: 'Snap node to left half', group: 'Nodes', scope: 'canvas',
@@ -159,6 +168,20 @@ describe('registry invariants', () => {
         darwin: ['Ctrl+Alt+ArrowUp'], other: [], allowInTerminal: true },
       { id: 'node.zoneDown', title: 'Snap node to bottom half', group: 'Nodes', scope: 'canvas',
         darwin: ['Ctrl+Alt+ArrowDown'], other: [], allowInTerminal: true },
+      { id: 'node.zoneLeftThird', title: 'Snap node to left third', group: 'Nodes',
+        scope: 'canvas', darwin: [], other: [], allowInTerminal: true },
+      { id: 'node.zoneCenterThird', title: 'Snap node to center third', group: 'Nodes',
+        scope: 'canvas', darwin: [], other: [], allowInTerminal: true },
+      { id: 'node.zoneRightThird', title: 'Snap node to right third', group: 'Nodes',
+        scope: 'canvas', darwin: [], other: [], allowInTerminal: true },
+      { id: 'node.zoneTopLeft', title: 'Snap node to top left quarter', group: 'Nodes',
+        scope: 'canvas', darwin: [], other: [], allowInTerminal: true },
+      { id: 'node.zoneTopRight', title: 'Snap node to top right quarter', group: 'Nodes',
+        scope: 'canvas', darwin: [], other: [], allowInTerminal: true },
+      { id: 'node.zoneBottomLeft', title: 'Snap node to bottom left quarter', group: 'Nodes',
+        scope: 'canvas', darwin: [], other: [], allowInTerminal: true },
+      { id: 'node.zoneBottomRight', title: 'Snap node to bottom right quarter', group: 'Nodes',
+        scope: 'canvas', darwin: [], other: [], allowInTerminal: true },
       { id: 'node.close', title: 'Close node / window', group: 'Nodes', scope: 'app',
         darwin: ['Cmd+W'], other: ['Cmd+W'], allowInTerminal: true, allowWhileTyping: true },
       { id: 'node.toggleMarkdown', title: 'Toggle markdown view', group: 'Nodes', scope: 'app',
@@ -212,6 +235,11 @@ describe('registry invariants', () => {
   // Every command this PR added ships with NO default chord — the pool grows, the out-of-box
   // key map does not. A default sneaking in here would shadow an existing binding or steal a
   // key from the terminal for a user who never asked for the command.
+  it('ships "New whiteboard" unbound on both platforms', () => {
+    const d = COMMANDS_BY_ID.get('node.newWhiteboard')
+    expect(d?.defaultBindings).toEqual({ darwin: [], other: [] })
+  })
+
   it('ships the new create commands unbound on both platforms', () => {
     const added: readonly string[] = [
       ...BUILTIN_AGENT_IDS.map((a) => `node.newAgent.${a}`),
@@ -221,9 +249,9 @@ describe('registry invariants', () => {
       'node.newDino',
       'node.newFile'
     ]
-    // 8 builtins (one per BUILTIN_AGENT_IDS entry) + the five non-agent creates below. Grows with
+    // Builtins (one per BUILTIN_AGENT_IDS entry) + the five non-agent creates below. Grows with
     // the registry on purpose: the point of this test is that a newly added agent arrives UNBOUND.
-    expect(added).toHaveLength(13)
+    expect(added).toHaveLength(BUILTIN_AGENT_IDS.length + 5)
     for (const id of added) {
       const d = COMMANDS_BY_ID.get(id as CommandId)
       expect(d, id).toBeDefined()
