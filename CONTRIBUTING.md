@@ -155,6 +155,8 @@ used, an incompatible one is left running and reported, never killed.
 
 ## Three surfaces
 
+The canvas uses one compact left toolbar: Sessions, Add, Save, Fit, Lock and Settings, plus its collapse toggle. Hidden toolbar actions retain their existing shortcuts and command entries; avoid restoring the former right toolbar or its badge padding.
+
 Terminal font zoom (⌘+/− on macOS, Ctrl+/− elsewhere) has an 8px minimum and no fixed maximum, including saved node overrides and the global font field. Keep reset-to-global and the shared canvas/card-modal size path intact.
 
 Qoder startup messaging has a narrow readiness path: a recorded opener may send to a local,

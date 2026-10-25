@@ -8558,10 +8558,6 @@ button.group-node__setup:disabled {
   align-items: center;
   gap: 6px;
   padding: 7px 6px;
-  /* T247: the slot the badge cluster used to fill as a flex child here — its own flex gap (6px) plus
-     its height, on top of this box's bottom padding — so the card keeps exactly the height, and the
-     cluster exactly the position, it had while it lived inside this scroller. */
-  padding-bottom: calc(7px + 6px + var(--rail-badges-h));
   background: rgba(var(--menu-rgb), 0.92);
   backdrop-filter: blur(10px);
   border: 1px solid var(--border);
@@ -8721,6 +8717,7 @@ button.group-node__setup:disabled {
    keeps no `data-canvas-chrome` (it is dropped in Canvas.tsx when collapsed), so fit still
    measures ZERO obstacles. */
 .canvas-root[data-rail-collapsed] .canvas-rail--left {
+  width: 14px;
   left: 0;
 }
 

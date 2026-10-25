@@ -169,26 +169,11 @@ describe('.usage-popover opens into the window and clear of the rail card (T246/
     expect(body).not.toMatch(/left:\s*0[;\s]/)
   })
 
-  it('keeps the badge cluster OUT of the card scroller, or the panel is clipped away (T247)', () => {
-    // The scroll container clips what it holds, so the cluster must be its SIBLING: the body must
-    // close before the cluster's opening tag, with no other element in between.
-    const at = CANVAS.indexOf('className="canvas-rail__badges"')
-    expect(at, 'the badge cluster in Canvas.tsx').toBeGreaterThan(-1)
-    const bodyAt = CANVAS.lastIndexOf('<div className="canvas-rail__body"', at)
-    expect(bodyAt).toBeGreaterThan(-1)
-    const between = CANVAS.slice(bodyAt, at)
-    expect(between.match(/<\/div>/g)?.length, 'the body closes before the cluster').toBe(1)
-    expect(between.match(/<div/g)?.length, "the body's own tag plus the cluster's").toBe(2)
-    // Out of the flow of the body it used to fill, so pin it to the card's foot instead.
-    const cluster = ruleBody('.canvas-rail__badges')
-    expect(cluster).toMatch(/position:\s*absolute/)
-    expect(cluster).toMatch(/height:\s*var\(--rail-badges-h\)/)
-    // Both sides of the slot: the cluster's height, and the room the card body keeps for it.
-    const gap = pxOf('.canvas-rail__badges', 'gap')
-    const pill = railPill()
-    expect(`${gap + pill.h + pill.h}`).toBe('90') // 6 + 42 + 42
-    expect(ruleBody('.canvas-rail')).toMatch(/--rail-badges-h:\s*90px/)
-    expect(railBodyPaddingBottom()).toBe(`calc(7px + 6px + var(--rail-badges-h))`)
+  it('the compact canvas removes ambient badges and their reserved space', () => {
+    expect(CANVAS).not.toContain('className="canvas-rail__badges"')
+    expect(CANVAS).not.toContain('<SystemResourcePill')
+    expect(CANVAS).not.toContain('<UsageIndicator')
+    expect(ruleBody('.canvas-rail__body')).not.toContain('--rail-badges-h')
   })
 
   it('clears the pill it belongs to: 6px above it, 17px beside it (T247)', () => {

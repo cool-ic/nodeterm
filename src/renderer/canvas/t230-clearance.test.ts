@@ -90,20 +90,18 @@ describe('T235: the rails own all canvas chrome', () => {
   })
 
   it('the moved buttons are 42×42 and share the .dock-btn column', () => {
-    // JSX: seven opt-in buttons live inside the rail bodies as direct `.dock-btn` children —
-    // Sessions / Command palette / Explorer / Source Control on the left, Pair phone / Settings /
-    // Help on the right (plus the toggle, which is not a .dock-btn).
     const railBodies = CANVAS_SRC.split('data-canvas-chrome={railCollapsed ? undefined : \'\'}>')
-    expect(railBodies.length).toBeGreaterThanOrEqual(3)
+    expect(railBodies).toHaveLength(2)
     expect(railBodies[0]).toContain('canvas-rail canvas-rail--left')
-    for (const name of ['Sessions', 'Command palette', 'Explorer', 'Source Control']) {
-      expect(railBodies[1], `left rail: ${name}`).toContain(`aria-label="${name}"`)
+    const rail = railBodies[1].split('{/* Canvas-mounted,')[0]
+    for (const name of ['Sessions', 'Settings']) {
+      expect(rail).toContain(`aria-label="${name}"`)
     }
-    for (const name of ['Pair phone', 'Settings', 'Help']) {
-      expect(railBodies[2], `right rail: ${name}`).toContain(`aria-label="${name}"`)
+    for (const name of ['Command palette', 'Explorer', 'Source Control', 'Pair phone', 'Help']) {
+      expect(rail).not.toContain(`aria-label="${name}"`)
     }
-    expect(railBodies[1].match(/className="dock-btn"/g) ?? []).toHaveLength(4)
-    expect(railBodies[2].match(/className="dock-btn"/g) ?? []).toHaveLength(3)
+    expect(rail).toContain('group="compact"')
+    expect(rail.match(/className="dock-btn"/g) ?? []).toHaveLength(2)
     expect(CANVAS_SRC).not.toContain('cluster-search')
     // CSS: the moved buttons ARE `.dock-btn` (42×42, radius 10, panel-header hover) — one size
     // family with the Dock's own buttons, no second 34px box.
@@ -122,7 +120,6 @@ describe('T235: the rails own all canvas chrome', () => {
     expect(STYLES_SRC).toMatch(/\.dock-sep \{[\s\S]*?width: 28px;[\s\S]*?height: 1px;/)
     const railBodies = CANVAS_SRC.split('data-canvas-chrome={railCollapsed ? undefined : \'\'}>')
     expect(railBodies[1]).toMatch(/^\s*<button\b[\s\S]*?className="canvas-rail__toggle/)
-    expect(railBodies[2]).toMatch(/^\s*<button\b[\s\S]*?className="canvas-rail__toggle/)
     // Both rails cap their height and scroll inside it (the left one gains 5 rows in T235).
     expect(STYLES_SRC).toMatch(/\.canvas-rail \{[\s\S]*?max-height: calc\(100% - 2 \* var\(--float-gap\)\);/)
     expect(STYLES_SRC).toMatch(/\.canvas-rail--right \{[\s\S]*?max-height: calc\(100% - var\(--float-gap\) - 170px\);/)

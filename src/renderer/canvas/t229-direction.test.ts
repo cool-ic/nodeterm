@@ -26,7 +26,7 @@ describe('T229: direction is a product of the rail, one place each', () => {
   it('maps the tooltip direction from the track in ONE place (left rail right, right rail left)', () => {
     // The mapping: create (left track) → right, view (right track) → left. The measured failure
     // shape — a literal placement per button — must not come back.
-    expect(DOCK_SRC).toContain("const tip = group === 'create' ? 'right' : 'left'")
+    expect(DOCK_SRC).toContain("const tip = group === 'view' ? 'left' : 'right'")
     // Every toolbar tooltip goes through the mapping; the only literal placements left are the
     // three row-action tips inside the layouts menu (which opens leftward anyway).
     expect(DOCK_SRC).not.toMatch(/placement="left"/)

@@ -20197,13 +20197,8 @@ export function Canvas() {
         </OwningProjectContext.Provider>
         </SessionProvider>
 
-        {/* T232: ONE single-column track per edge; the container holds ONLY the card (56px) — the
-            collapse control is the card's FIRST ROW (42×42, same family as .dock-btn), so the card
-            top is a real control and the strip under the top clusters is not a leftover shard.
-            MUST stay OUTSIDE <ReactFlow> (stacking context; the pills' popovers must rise above
-            the sessions sidebar). Each body carries `data-canvas-chrome` — conditionally: a
-            collapsed card shrinks to a 14×56 edge tab WITHOUT the attribute, so fit measures ZERO
-            obstacles. The left track steps right when the sessions sidebar is open. */}
+        {/* One compact left rail. Keep fit-view chrome on the expanded body only;
+            the collapsed tab stays flush with the left edge. */}
         <div className="canvas-rail canvas-rail--left">
           <div className="canvas-rail__body" data-canvas-chrome={railCollapsed ? undefined : ''}>
             <button
@@ -20231,28 +20226,9 @@ export function Canvas() {
                 <IconSessions />
               </button>
             </Tooltip>
-            <Tooltip label={commandTooltip('Command palette', 'app.commandPalette')} placement="right">
-              <button
-                className="dock-btn"
-                aria-label="Command palette"
-                onClick={() => setPaletteOpen(true)}
-              >
-                <IconSearch />
-              </button>
-            </Tooltip>
-            <Tooltip label={commandTooltip('Explorer', 'panel.explorer')} placement="right">
-              <button className="dock-btn" aria-label="Explorer" onClick={() => showExplorer('toggle')}>
-                <IconExplorer />
-              </button>
-            </Tooltip>
-            <Tooltip label={commandTooltip('Source Control', 'panel.sourceControl')} placement="right">
-              <button className="dock-btn" aria-label="Source Control" onClick={() => setScOpen(true)}>
-                <IconBranch />
-              </button>
-            </Tooltip>
             <span className="dock-sep" />
             <Dock
-              group="create"
+              group="compact"
               dirty={dirty}
               zoomPct={zoomPct}
               canUndo={pastRef.current.length > 0}
@@ -20303,103 +20279,13 @@ export function Canvas() {
               onZoomIn={() => zoomIn({ duration: ZOOM_STEP_DURATION_MS })}
               onZoomOut={() => zoomOut({ duration: ZOOM_STEP_DURATION_MS })}
               onZoomTo={zoomToPct}
-              // The create dock never renders the lock (it is a view-group row), but the props
-              // are part of DockProps so a rename fails typecheck at both call sites.
               canvasLocked={canvasLocked}
               onToggleCanvasLock={() => setCanvasLocked((v) => !v)}
               onDictate={toggleDictation}
               dictateActive={dictationOpen}
             />
-          </div>
-        </div>
-
-        <div className="canvas-rail canvas-rail--right">
-          <div className="canvas-rail__body" data-canvas-chrome={railCollapsed ? undefined : ''}>
-            <button
-              type="button"
-              className="canvas-rail__toggle nodrag nopan"
-              aria-label={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
-              title={railCollapsed ? 'Expand canvas controls' : 'Collapse canvas controls'}
-              onClick={() => {
-                setRailCollapsed(!railCollapsed)
-                writeRailCollapsed(!railCollapsed)
-              }}
-            >
-              {railCollapsed ? <IconChevronLeft /> : <IconChevronRight />}
-            </button>
-            {/* T235: the "who's connected" facepile, moved off the top row into the rail. It renders
-                nothing without peers (so it costs no row) but must stay mounted to prune the
-                presence face cache (state/presence.ts → selectFaces). */}
             <Facepile onJump={travelToNode} onSwitchProject={travelToProject} />
-            <Dock
-              group="view"
-              dirty={dirty}
-              zoomPct={zoomPct}
-              canUndo={pastRef.current.length > 0}
-              canRedo={futureRef.current.length > 0}
-              canGoBack={
-                !!stepBreadcrumb(navRef.current, 'back', (id) =>
-                  nodesRef.current.some((n) => n.id === id)
-                )
-              }
-              canGoForward={
-                !!stepBreadcrumb(navRef.current, 'forward', (id) =>
-                  nodesRef.current.some((n) => n.id === id)
-                )
-              }
-              onUndo={undo}
-              onRedo={redo}
-              onGoBack={goBack}
-              onGoForward={goForward}
-              onAddTerminal={addTerminal}
-              onAddSticky={addSticky}
-              onSpawnTeam={() => setSpawnTeamDialog({})}
-              onAddDino={addDino}
-              onAddWhiteboard={addWhiteboard}
-              onAddSimulator={() => addSimulator()}
-              onAddTrigger={addTrigger}
-              onAddFiles={() => addFiles()}
-              onAddRun={() => void addRun()}
-              onAddAgent={(aid, accountId) => addAgentNode(aid, undefined, undefined, accountId)}
-              onOpenFile={() => void openFileDialog()}
-              onAddRemote={() => openRemotePicker({ x: window.innerWidth / 2, y: window.innerHeight / 2 })}
-              onConnectRemote={() => void connectRemote()}
-              onAddBrowser={() => addBrowser()}
-              onAddWeb={() => void addWebView()}
-              onNewFile={() => void newProjectFile()}
-              onAddWorktree={() => openWorktreeDialog(null)}
-              onSave={persist}
-              onFitView={fitAll}
-              onSaveLayout={() => void saveCanvasLayout()}
-              onRestoreLayout={restoreCanvasLayout}
-              onUpdateLayout={updateCanvasLayout}
-              onRenameLayout={(layout) => void renameCanvasLayout(layout)}
-              onDeleteLayout={deleteCanvasLayout}
-              onZoomIn={() => zoomIn({ duration: ZOOM_STEP_DURATION_MS })}
-              onZoomOut={() => zoomOut({ duration: ZOOM_STEP_DURATION_MS })}
-              onZoomTo={zoomToPct}
-              canvasLocked={canvasLocked}
-              onToggleCanvasLock={() => setCanvasLocked((v) => !v)}
-              onDictate={toggleDictation}
-              dictateActive={dictationOpen}
-            />
-
-            {/* T235: the app-level controls that used to be the top-right cluster, as rows of the
-                rail's own column (the Dock's trailing hairline already separates the view group
-                above them). */}
-            <Tooltip label="Pair phone" placement="left">
-              <button
-                className="dock-btn"
-                aria-label="Pair phone"
-                onClick={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect()
-                  setPhonePairAnchor((cur) => (cur ? null : { right: r.right, bottom: r.bottom }))
-                }}
-              >
-                <IconPhone />
-              </button>
-            </Tooltip>
-            <Tooltip label={commandTooltip('Settings', 'app.settings')} placement="left">
+            <Tooltip label={commandTooltip('Settings', 'app.settings')} placement="right">
               <button
                 className="dock-btn"
                 aria-label="Settings"
@@ -20411,77 +20297,6 @@ export function Canvas() {
                 <IconGear />
               </button>
             </Tooltip>
-            <Tooltip label="Help" placement="left">
-              <button
-                className="dock-btn"
-                aria-label="Help"
-                onClick={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect()
-                  setMenu({
-                    // Right-align the ~220px menu under the button; never off-screen left.
-                    x: Math.max(8, r.right - 220),
-                    y: r.bottom + 6,
-                    items: [
-                      { label: 'Keyboard shortcuts', hint: chipFor('app.shortcutsPanel') || undefined, onClick: () => setShortcutsOpen(true) },
-                      { label: 'Report a bug…', onClick: () => setBugReportOpen(true) },
-                      {
-                        label: 'Documentation',
-                        onClick: () => window.nodeTerminal.shell.openExternal(`${REPO_URL}#readme`)
-                      },
-                      {
-                        label: 'GitHub repository',
-                        onClick: () => window.nodeTerminal.shell.openExternal(REPO_URL)
-                      },
-                      { type: 'separator' },
-                      {
-                        type: 'label',
-                        label: `nodeterm${appVersion ? ` v${appVersion}` : ''} · ${describeOs(navigator.userAgent)}`
-                      }
-                    ]
-                  })
-                }}
-              >
-                ?
-              </button>
-            </Tooltip>
-            <span className="dock-sep" />
-          </div>
-
-          {/* T226: the ambient badges, squeezed to 42px circles that expand LEFTWARD on hover or
-              focus into the full pill (usage brings its refresh control with it), so the track
-              stays exactly as wide as its buttons.
-              T247: a SIBLING of the card's body, not a child of it — the one structural fact the
-              panel's visibility rests on. The body scrolls (`.canvas-rail__body { overflow-y: auto }`,
-              T235's tall-column cap) and a scroll container clips what it holds: measured on the
-              packaged build, the hovered pill had its left 22px sliced off and the usage panel was
-              invisible end to end (the pixels that should have carried it hit-tested as the canvas).
-              These two clusters are the only rail children that must paint OUTSIDE the card — the
-              pill expands past the card's left edge, and both panels (usage, session memory) open
-              there — so they sit outside the element that clips, pinned to the card's foot by
-              `.canvas-rail__badges`, which keeps their exact pixels. */}
-          <div className="canvas-rail__badges">
-            {/* `travelToNode`, not `focusNodeById`: the panel resolves sessions in CLOSED
-                projects too (their tmux sessions keep running), and reaching one means reopening
-                its tab first — the same path a notification click and a peer jump take. */}
-            <SystemResourcePill
-              overBoard={kanbanOpen}
-              onGoToNode={travelToNode}
-              onKillSession={killSessionById}
-              pauseOfferFor={sessionPauseOfferFor}
-              onPauseSession={pauseSessionById}
-            />
-
-            {/* Same write path as the TabBar caret menu (project.defaultAccountId + persist) —
-                the popover row is a second, better-placed entrance to the same action (issue
-                #142). */}
-            <UsageIndicator
-              rail
-              overBoard={kanbanOpen}
-              onSetDefaultAccount={setProjectDefaultAccount}
-              countAccountSessions={countAccountSessions}
-              onMoveSessions={(from, to, label) => void moveAccountSessions(from, to, label)}
-              accountMove={accountMove}
-            />
           </div>
         </div>
         {/* Canvas-mounted, deliberately NOT in the .top-banners column: this is about THIS canvas,

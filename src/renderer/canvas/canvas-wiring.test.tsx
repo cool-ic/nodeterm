@@ -55,14 +55,14 @@ describe('the canvas rail is fit-view chrome', () => {
     expect(chromeObstacles(VIEWPORT)).toEqual([])
   })
 
-  it('both tracks opt into fit-view obstacles, each as ONE rect', () => {
+  it('the single left track opts into fit-view obstacles as ONE rect', () => {
     // T232: one body per edge, each carrying the attribute CONDITIONALLY (dropped while
     // collapsed), so the solver sees one rect per track instead of one per control.
     expect(
       CANVAS_SRC.match(/<div className="canvas-rail__body" data-canvas-chrome=\{railCollapsed \? undefined : ''\}>/g)
-    ).toHaveLength(2)
+    ).toHaveLength(1)
     expect(CANVAS_SRC).toContain('canvas-rail canvas-rail--left')
-    expect(CANVAS_SRC).toContain('canvas-rail canvas-rail--right')
+    expect(CANVAS_SRC).not.toContain('canvas-rail canvas-rail--right')
   })
 
   it('a track is never wider than its buttons, and a badge never wider than 42px', () => {

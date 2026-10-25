@@ -108,13 +108,12 @@ function RailMenu({
   )
 }
 
-/** T226: which single-column track this dock renders — the left one (create + history) or the
- *  right one (view + status). Each instance owns only its own menus' open state. */
+/** Compact is the canvas toolbar: Add, Save, Fit, Lock. Split groups remain reusable. */
 /** How long a flyout stays open after the pointer leaves its row (see `closeFlyoutSoon`). */
 const FLYOUT_CLOSE_DELAY_MS = 200
 
 interface DockProps {
-  group: 'create' | 'view'
+  group: 'create' | 'view' | 'compact'
   dirty: boolean
   zoomPct: number
   canUndo: boolean
@@ -220,7 +219,7 @@ export function Dock({
   // T229: tooltips open AWAY from the window edge — the left track opens right, the right track
   // opens left. One mapping for the whole instance; the menus' anchors are CSS per rail
   // (`.canvas-rail--left .dock-menu` / `--right`), so the two halves cannot disagree.
-  const tip = group === 'create' ? 'right' : 'left'
+  const tip = group === 'view' ? 'left' : 'right'
   const [menuOpen, setMenuOpen] = useState(false)
   const [zoomMenuOpen, setZoomMenuOpen] = useState(false)
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false)
@@ -504,7 +503,7 @@ export function Dock({
             </div>
         </RailMenu>
 
-        {group === 'create' && (
+        {group !== 'view' && (
           <>
         <Tooltip label="Add node" placement={tip}>
           <button
@@ -523,6 +522,7 @@ export function Dock({
 
         <span className="dock-sep" />
 
+        {group !== 'compact' && (<>
         <Tooltip label={commandTooltip('Undo', 'canvas.undo')} placement={tip}>
           <button className="dock-btn" aria-label="Undo" disabled={!canUndo} onClick={onUndo}>
             <UndoIcon />
@@ -554,6 +554,8 @@ export function Dock({
 
         <span className="dock-sep" />
 
+        </>)}
+
         <Tooltip label={dirty ? 'Save (unsaved changes)' : 'Save'} placement={tip}>
           <button className="dock-btn" aria-label="Save" onClick={onSave}>
             <SaveIcon />
@@ -566,13 +568,14 @@ export function Dock({
         {/* T226: two single-column tracks. The LEFT one (create + history) ends at Save; the
             RIGHT one (view + status) runs Fit → zoom → layouts → dictate, and the status badges
             follow it in Canvas's rail body. */}
-        {group === 'view' && (
+        {group !== 'create' && (
           <>
         <Tooltip label="Fit view" placement={tip}>
           <button className="dock-btn" aria-label="Fit view" onClick={onFitView}>
             <FrameIcon />
           </button>
         </Tooltip>
+        {group !== 'compact' && (<>
         <Tooltip label="Zoom out" placement={tip}>
           <button className="dock-btn" aria-label="Zoom out" onClick={onZoomOut}>
             <MinusIcon />
@@ -620,6 +623,8 @@ export function Dock({
           </button>
         </Tooltip>
 
+        </>)}
+
         {/* T241: the camera lock is the only survivor of the old bottom-left Controls column.
             It is a MODE toggle, not a camera move — it changes what the three above are allowed
             to do — so it keeps a hairline of its own above and below rather than reading as a
@@ -640,6 +645,7 @@ export function Dock({
 
         <span className="dock-sep" />
 
+        {group !== 'compact' && (<>
         {/* An arrangement is view state, not a node you add, so it sits in the view cluster rather
             than behind the "+". */}
         <div className="dock-layouts-wrap" ref={layoutsMenuAnchor.triggerRef}>
@@ -757,6 +763,7 @@ export function Dock({
           </button>
         </Tooltip>
         <span className="dock-sep" />
+        </>)}
           </>
         )}
       </div>
