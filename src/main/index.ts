@@ -1,4 +1,5 @@
 import { registerUpdatePrepIpc } from './update-prep'
+import { startMailWake } from '../../scripts/agent-mail/wake.mjs'
 import { installOpenLinks } from './open-link-wiring'
 import { nodetermUrlFromArgv } from '../shared/open-link'
 import { createRemoteContextEnsure } from '../core/remote-context-ensure'
@@ -2400,6 +2401,15 @@ app.whenReady().then(async () => {
     ).catch(() => {})
   }
   setDeliveryQueue(messagingDeps.queue)
+  // Separate, explicitly opted-in mailbox wake policy; legacy send/reply stays disabled.
+  const stopMailWake = startMailWake(join(corePlatform.userDataDir, 'agent-mail.json'), {
+    authorized: (projectId, member) => !quitting
+      && workspaceStore.persistedCanvases().some(c => c.id === projectId && c.nodes.some(n => n.id === member.node))
+      && mirrorEntry(member.node)?.sessionId === member.session,
+    wake: (member, text, ready, claim) => ptyManager.wakeMailbox(member.node, text, ready, claim),
+    error: message => console.warn('[agent-mail]', message)
+  })
+  app.once('will-quit', stopMailWake)
   ipcMain.handle(IPC.agentMessageDeliver, async (_e, raw: unknown) => {
     if (!isDeliverRequest(raw))
       return { ok: false, error: 'malformed agent-message request. Do not retry.' }

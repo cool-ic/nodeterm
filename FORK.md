@@ -108,3 +108,11 @@ App 重启后节点被接回来时，画布拿这行记录核对一遍：对得�
 上游项目：[eneskirca/nodeterm](https://github.com/eneskirca/nodeterm)，许可 BUSL-1.1。本 fork 的改动同样按 BUSL-1.1 发布——自己在内部用没问题；拿去做对外提供的竞品服务，先读一遍上游的许可条款。
 
 我们的改动全部以 `local:` 前缀提交，落在上游某个基线之上。上游继续往前走，我们会跟着合。
+
+## 本机团队 IM（可选）
+
+`scripts/agent-mail/` 提供 SQLite 信箱、批读与显式确认；`team.mjs` 负责按配置绑定 session。项目 hook 只提供未读元数据，正文由 agent 主动读取，不再逐封强塞上下文。
+
+桌面主进程读取 userData 下 `agent-mail.json`（`enabled`、`projectId`、`teamConfig`），成员需显式 `wake: true`。`wake.mjs` 通过文件事件观察信箱和原生 Codex 回合状态，在已确认身份、正常结束和空输入框时合并唤醒一次；忙碌、中断、草稿、审批或未知状态延后。关闭 enabled 即停用，不删除未读。此首版只覆盖本机 Codex；无额外服务/UI，不是同OS账号间安全隔离，也不承诺不确定投递的自动重试或 exactly-once。
+
+验证：`node --no-warnings --test scripts/agent-mail/*.test.mjs` 与 `vitest run src/core/pty-mail-wake.test.ts`。真实部署还需按成员验证 node/session 绑定、原生 hook、空闲唤醒与停止状态；单测通过不代替这些检查。

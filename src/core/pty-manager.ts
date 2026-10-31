@@ -109,6 +109,7 @@ import {
 } from './agents/pane-ownership'
 import { PANE_OWNER_FMT, foregroundArgvArgs, paneOwnerFrom, parseCombinedPaneOwner, parsePaneOwner } from './agents/pane-owner'
 import { agentPidIn, binariesFor, isAgentPane, type PaneOwner } from '../shared/agents/pane-owner-predicate'
+import { emptyCodexPrompt } from '../../scripts/agent-mail/wake.mjs'
 import { PANE_PROBE_TIMEOUT_MS, WINDOWS_PANE_PROBE_TIMEOUT_MS } from './agents/pane-probe'
 import { readSpawnResources, spawnResourceNote } from './spawn-resources'
 import {
@@ -1192,6 +1193,16 @@ export class PtyManager {
   /** persistKey (node id) → live sessionId. The index that makes `pty:create` idempotent:
    *  a second client asking for the same node subscribes to the running session. */
   private byPersistKey = new Map<string, string>()
+  private mailWakeInput = new Map<string, { cancelled: boolean; committing: boolean; pending: Array<() => void> }>()
+
+  private guardMailboxInput(key: string | undefined, write: () => void): boolean {
+    const gate = key ? this.mailWakeInput.get(key) : undefined
+    if (!gate) return false
+    gate.cancelled = true
+    if (!gate.committing) return false
+    gate.pending.push(write)
+    return true
+  }
   /** persistKey (node id) → the create() currently spawning it. Makes `pty:create` idempotent
    *  ACROSS the awaits inside a spawn (see create()), not just after them. Entries are removed
    *  as soon as the spawn settles, success or failure. */
@@ -1788,6 +1799,7 @@ export class PtyManager {
     // Nothing to type — and `encodeSendKeysHex` would build a `send-keys -H ` with no bytes after
     // it, which is a command line worth not sending.
     if (!data) return false
+    if (this.guardMailboxInput(persistKey, () => { void this.backgroundWrite(persistKey, data) })) return true
     const live = this.sessionByPersistKey(persistKey)
     if (live) {
       try {
@@ -5679,6 +5691,7 @@ export class PtyManager {
     // reach tmux, or the rest are typed into the pane (issue #1172, da-reply-gate.ts).
     data = session.daReplies.filterInput(data, Date.now())
     if (!data) return
+    if (this.guardMailboxInput(session.nodeId, () => session.proc.write(data))) return
     if (clientId !== null && session.nodeId && presenceHub.peerCount() > 1)
       presenceHub.noteTyping(clientId, session.nodeId)
     session.proc.write(data)
@@ -7318,6 +7331,36 @@ export class PtyManager {
    * accidental submit a messaging delivery must never perform — an empty envelope refuses here.
    * (`buildEnvelope` can never return '', so this is a guard against a future caller, not a path.)
    */
+  /** Opt-in mailbox wake. Only local Codex, a proven empty composer, and a still-idle bound turn.
+   * Unknown/dialog/draft/interrupted paths never claim or type. This is not a general send API. */
+  async wakeMailbox(persistKey: string, notice: string, ready: () => boolean, claim: () => boolean): Promise<'sent' | 'held' | 'uncertain'> {
+    return this.serializePaneWrite(persistKey, async () => {
+      const input = { cancelled: false, committing: false, pending: [] as Array<() => void> }
+      this.mailWakeInput.set(persistKey, input)
+      try {
+      if (this.sessionByPersistKey(persistKey)?.sshRemote || !ready()) return 'held'
+      const before = await this.paneOwner(persistKey).catch(() => null)
+      if (!before || isAgentPane(before, 'codex') !== 'agent') return 'held'
+      const first = await this.captureSnapshot(persistKey).catch(() => '')
+      if (!emptyCodexPrompt(first)) return 'held'
+      await new Promise(resolve => setTimeout(resolve, 150))
+      const second = await this.captureSnapshot(persistKey).catch(() => '')
+      const after = await this.paneOwner(persistKey).catch(() => null)
+      if (input.cancelled || first !== second || !emptyCodexPrompt(second) || !after || !ready()
+        || after.paneId !== before.paneId || after.tty !== before.tty
+        || agentPidIn(before, 'codex') === null
+        || agentPidIn(before, 'codex') !== agentPidIn(after, 'codex')) return 'held'
+      input.committing = true
+      if (!claim()) return 'held'
+      // Preserve the claim even on uncertain write failure; resume/unread remain recoverable.
+      return (await this.sendEnvelopeNow(persistKey, notice, after)) === true ? 'sent' : 'uncertain'
+      } finally {
+        this.mailWakeInput.delete(persistKey)
+        for (const write of input.pending) { try { write() } catch { /* same dead-pane semantics as write */ } }
+      }
+    })
+  }
+
   async sendEnvelope(persistKey: string, envelope: string, expected?: PaneOwner): Promise<boolean | 'dialog'> {
     return this.serializePaneWrite(persistKey, () => this.sendEnvelopeNow(persistKey, envelope, expected))
   }
