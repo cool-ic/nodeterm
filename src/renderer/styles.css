@@ -8689,9 +8689,19 @@ button.group-node__setup:disabled {
   color: var(--text);
 }
 
-.canvas-rail__toggle svg {
+.canvas-rail__chevron {
+  display: grid;
+  place-items: center;
   width: 18px;
   height: 18px;
+}
+.canvas-rail__chevron::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-left: 2px solid var(--text-strong);
+  border-bottom: 2px solid var(--text-strong);
+  transform: rotate(45deg);
 }
 
 /* Collapsed: both tracks' contents, the minimap, the top-right cluster and the flow controls all
@@ -8730,7 +8740,7 @@ button.group-node__setup:disabled {
 
 /* The 18px chevron belongs to the expanded control; inside the 14px tab it would clip on the
    body's `overflow: hidden`. A 12px glyph fits the tab without spilling. */
-.canvas-root[data-rail-collapsed] .canvas-rail__toggle svg {
+.canvas-root[data-rail-collapsed] .canvas-rail__chevron {
   width: 12px;
   height: 12px;
 }
@@ -18655,4 +18665,10 @@ body.focus-mode .dock:hover {
   height: 100%;
   color: var(--muted);
   font-size: 13px;
+}
+
+.canvas-root[data-rail-collapsed] .canvas-rail__chevron::before {
+  width: 6px;
+  height: 6px;
+  transform: rotate(225deg);
 }

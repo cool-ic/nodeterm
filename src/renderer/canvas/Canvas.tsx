@@ -20102,7 +20102,7 @@ export function Canvas() {
                 writeRailCollapsed(!railCollapsed)
               }}
             >
-              {railCollapsed ? <IconChevronRight /> : <IconChevronLeft />}
+              <span className="canvas-rail__chevron" aria-hidden="true" />
             </button>
             <Dock
               group="compact"

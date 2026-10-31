@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { Dock } from '../../src/renderer/components/Dock'
-import { IconChevronLeft, IconGear } from '../../src/renderer/components/icons'
+import { IconGear } from '../../src/renderer/components/icons'
 import { Tooltip } from '../../src/renderer/components/Tooltip'
 import { useSettings } from '../../src/renderer/state/settings'
 
@@ -12,7 +12,7 @@ const props = Object.fromEntries(['onAddTerminal','onAddSticky','onSpawnTeam','o
 createRoot(document.getElementById('root')!).render(
  <div className="canvas-root" style={{width:1280,height:800}}><div className="flow-wrap" style={{height:"100%"}}>
   <div className="canvas-rail canvas-rail--left"><div className="canvas-rail__body">
-   <button className="canvas-rail__toggle" aria-label="Collapse canvas controls" onClick={hit}><IconChevronLeft /></button>
+   <button className="canvas-rail__toggle" aria-label="Collapse canvas controls" onClick={hit}><span className="canvas-rail__chevron" aria-hidden="true" /></button>
    <Dock {...props} group="compact" dirty={false} zoomPct={100} canvasLocked={false} />
    <Tooltip label="Settings"><button className="dock-btn" aria-label="Settings" onClick={hit}><IconGear /></button></Tooltip>
   </div></div>
@@ -33,12 +33,12 @@ async function check() {
   if(JSON.stringify(labels)!==JSON.stringify(['Collapse canvas controls','Add node','Save','Fit view','Lock view','Settings']))throw Error('Unexpected controls: '+labels)
   for(const b of buttons){
    b.scrollIntoView({block:'nearest'});await pause()
-   const r=b.getBoundingClientRect(),icon=b.querySelector('svg')!, ink=getComputedStyle(icon), path=icon.querySelector('path,rect,circle')!, line=getComputedStyle(path)
+   const r=b.getBoundingClientRect(),icon=b.querySelector<HTMLElement>('svg,.canvas-rail__chevron')!, chevron=icon.classList.contains('canvas-rail__chevron'), ink=getComputedStyle(icon), line=chevron?getComputedStyle(icon,'::before'):getComputedStyle(icon.querySelector('path,rect,circle')!)
    if(r.width<30||r.height<30||r.right>width+1||r.bottom>height+1)throw Error('clipped '+theme+'/'+glass+'/'+width+' '+b.ariaLabel+' '+JSON.stringify(r))
    if(!b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)))throw Error('covered '+b.ariaLabel)
-   if(icon.getBoundingClientRect().width<12||line.stroke==='none'||Number(ink.opacity)!==1)throw Error('invisible '+b.ariaLabel)
+   if(icon.getBoundingClientRect().width<12||(chevron?line.borderLeftStyle==='none':line.stroke==='none')||Number(ink.opacity)!==1)throw Error('invisible '+b.ariaLabel)
    // Require contrasting foreground in both appearances, including glass overrides.
-   const rgb=ink.color.match(/[\d.]+/g)!.slice(0,3).map(Number), light=rgb.reduce((a,v)=>a+v,0)/3
+   const rgb=(chevron?line.borderLeftColor:ink.color).match(/[\d.]+/g)!.slice(0,3).map(Number), light=rgb.reduce((a,v)=>a+v,0)/3
    if(b.ariaLabel!=='Add node' && (theme==='dark'?light<160:light>130))throw Error('low-contrast '+b.ariaLabel+' '+ink.color)
    if(b.ariaLabel!=='Add node')b.click()
   }
