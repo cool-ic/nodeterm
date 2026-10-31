@@ -28,6 +28,10 @@
 
 ## 改了哪些
 
+### 中文历史滚动时字形破碎（2026-10-31）
+
+当前 xterm WebGL 依赖的字形缓存合并后，新旧页可能具有相同版本号，GPU 因而漏传新页。二开增加缓存页身份校验：只在页身份变化时强制更新纹理，正常帧不额外上传，不定时清缓存。对应上游修复为 xterm.js `dc726a2a`；未来成套升级 xterm/core 与 addon 后应复验并移除兼容层。隔离实机回归：`node scripts/test-webgl-atlas.cjs`，覆盖旧版故障、中文历史滚动、字号变化与渲染器重建。
+
 ### 普通终端与 Codex / Qoder 入口统一
 
 普通 Terminal 也可以连接并读取终端输出；在本机启动 Codex/Qoder 后，经验证的 hook 会保存 agent 类型和对话 ID，供重启恢复使用。普通终端不再继承其他 tmux 会话的 agent 环境。macOS/zsh 下的 Codex 入口避免复用带着旧节点环境的默认 daemon；初始化文件由 nodeterm 单独管理，不改用户 dotfile，显式用户 alias/function 仍优先。

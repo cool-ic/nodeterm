@@ -27,6 +27,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { installWebglAtlasIdentity } from '../terminal/webgl-atlas-identity'
 import { ChatPanelFallback } from './ChatPanelFallback'
 // ChatPanel (the ⌘M transcript view) is code-split with the markdown renderer it uses: neither is
 // on the path to painting a terminal, and both were in the startup chunk purely by being imported
@@ -2678,6 +2679,7 @@ export function TerminalNode({
           webglHandle?.contextLost()
         })
         term.loadAddon(a)
+        if (!installWebglAtlasIdentity(a)) throw new Error('WebGL atlas identity guard unavailable')
         webgl = a
         // Glass: app-painted cell backgrounds become tinted glass (glass-cell-backgrounds.ts). A
         // fresh addon starts from an empty model, so the repaint below already applies the alpha.
