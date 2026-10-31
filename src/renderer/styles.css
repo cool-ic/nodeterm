@@ -443,26 +443,6 @@ body,
   stroke-width: 2.2;
 }
 
-/* Brand: gradient app-tile + wordmark */
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  white-space: nowrap;
-  -webkit-app-region: drag;
-}
-
-.brand__mark {
-  flex-shrink: 0;
-}
-
-.brand__name {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: 0.2px;
-}
-
 /* The + is a sibling of the strip so it cannot scroll away with the tabs (issue #375). The
    wrapper is flex:1 and is NOT in the no-drag list — it is the remaining title-bar drag region. */
 .tabbar__projects {
