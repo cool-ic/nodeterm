@@ -76,9 +76,9 @@ describe('handed-off reopen guard in Canvas', () => {
     )
   })
 
-  it('Welcome "Recently closed" and the sidebar closed history reopen through the guard', () => {
+  it('Welcome "Recently closed" reopens through the guard; the retired sidebar is absent', () => {
     expect(src).toContain('onReopen={reopenProject}')
-    expect(src).toContain('onReopenProject={reopenProject}')
+    expect(src).not.toContain('<SessionsSidebar')
   })
 
   it('re-adding the same SSH folder asks before the store reuses its handed-off project', () => {
