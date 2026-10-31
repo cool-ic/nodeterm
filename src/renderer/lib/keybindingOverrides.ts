@@ -40,7 +40,7 @@ export function commandKeys(id: CommandId, isMac: boolean = isMacPlatform()): st
   return first ? shortcutKeyParts(first, isMac) : []
 }
 
-/** `('Sessions', 'panel.sessions')` -> `'Sessions (⌘⇧L)'` (mac) / `'Sessions (Ctrl+Shift+L)'`
+/** `('Explorer', 'panel.explorer')` -> `'Explorer (⌘⇧E)'` (mac) / `'Explorer (Ctrl+Shift+E)'`
  *  — the same strings hintLabel produced for the defaults, but following remaps; bare text
  *  when unbound. */
 export function commandTooltip(text: string, id: CommandId, isMac: boolean = isMacPlatform()): string {

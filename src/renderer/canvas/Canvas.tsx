@@ -178,7 +178,6 @@ import {
   IconSave,
   IconSearch,
   IconSelectAll,
-  IconSessions,
   IconSwitch,
   IconTerminal,
   IconTrash,
@@ -304,7 +303,6 @@ import { WorktreeDialog } from '../components/WorktreeDialog'
 import { SpawnTeamDialog } from '../components/SpawnTeamDialog'
 import { conductorPrompt } from '../lib/spawnTeamPrompt'
 import { NotifyConsentDialog } from '../components/NotifyConsentDialog'
-import { SessionsSidebar } from '../components/SessionsSidebar'
 import type { SessionNodeInput } from '../lib/sessionList'
 import {
   needsYouQueue,
@@ -1686,22 +1684,6 @@ export function Canvas() {
   // Reveal-in-Explorer target (relative to the active project cwd). The nonce makes each reveal
   // distinct so revealing the same file twice still re-fires the Explorer effect.
   const [reveal, setReveal] = useState<{ path: string; nonce: number } | null>(null)
-  // Sessions sidebar (left): pinned (docked) by default; unpin is a persisted preference.
-  // hover-to-peek when unpinned. `dismissed` is a transient "hide for now" (the × button)
-  // that does NOT change the pin preference — so a pinned sidebar reopens pinned next launch.
-  const [sessionsPinned, setSessionsPinned] = useState(() => {
-    try {
-      const v = localStorage.getItem('nodeterm.sessionsPinned')
-      return v === null ? true : v === '1'
-    } catch {
-      return true
-    }
-  })
-  const [sessionsHover, setSessionsHover] = useState(false)
-  const [sessionsDismissed, setSessionsDismissed] = useState(false)
-  // When pinned the sidebar is docked and stays open (mouse-leave never closes it); `dismissed`
-  // hides it until the next hover/click. When unpinned it is a pure hover-peek.
-  const sessionsOpen = sessionsPinned ? !sessionsDismissed : sessionsHover
   // Live relay tabs, keyed by relay connectionId, so a host/relay drop can dispose the right one
   // (a remote connection is now a project TAB, not a full-surface overlay — Stage 4 Task 6).
   const relayTabsRef = useRef<Map<string, RelayTab>>(new Map())
@@ -3116,37 +3098,6 @@ export function Canvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- edgeSig stands in for nodesRef
   }, [linkEdges, ephemeralEdges, controlEdges, accent, stickySig, edgeSig, trigEdges, drivenLeaseEntries])
 
-  // Header pin button (and ⌘⇧L): toggle the persisted pin preference. Clears the transient
-  // dismiss so (re)pinning shows the docked panel; unpinning collapses it to hover-peek.
-  const toggleSessionsPin = useCallback(() => {
-    setSessionsPinned((v) => {
-      const next = !v
-      try {
-        localStorage.setItem('nodeterm.sessionsPinned', next ? '1' : '0')
-      } catch {
-        // ignore
-      }
-      return next
-    })
-    // Re-show on (re)pin; on unpin, leave hover as-is so it stays a peek until the cursor leaves.
-    setSessionsDismissed(false)
-  }, [])
-
-  // Top-left icon click: when pinned, toggle the transient hide/show (keeps the pin); when
-  // unpinned, promote the hover-peek to a docked pinned panel.
-  const onSessionsIconClick = useCallback(() => {
-    if (sessionsPinned) {
-      setSessionsDismissed((d) => !d)
-    } else {
-      setSessionsPinned(true)
-      try {
-        localStorage.setItem('nodeterm.sessionsPinned', '1')
-      } catch {
-        // ignore
-      }
-      setSessionsDismissed(false)
-    }
-  }, [sessionsPinned])
 
   // ⌘⌥D / Dock mic button: press-to-talk toggle. Closed → opens the dictation pill targeting the
   // first selected terminal node (agent nodes are `type: 'terminal'` with `data.agentId`
@@ -3206,65 +3157,6 @@ export function Canvas() {
       return true
     })
   }, [])
-
-  // Hover-peek: the sidebar overlaps its trigger icon, so leaving the icon (mouseleave)
-  // must not close the peek while the cursor moves onto the sidebar body. A single shared
-  // timer lets entering either surface cancel a pending close from the other.
-  const sessionsCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const openSessionsPeek = useCallback(() => {
-    if (sessionsCloseTimer.current) {
-      clearTimeout(sessionsCloseTimer.current)
-      sessionsCloseTimer.current = null
-    }
-    setSessionsHover(true)
-    // Hovering re-opens a dismissed sidebar; when pinned this re-docks it so it then stays
-    // open after the cursor leaves (open = !dismissed), instead of collapsing like a peek.
-    setSessionsDismissed(false)
-  }, [])
-  const closeSessionsPeekSoon = useCallback(() => {
-    if (sessionsCloseTimer.current) clearTimeout(sessionsCloseTimer.current)
-    sessionsCloseTimer.current = setTimeout(() => {
-      sessionsCloseTimer.current = null
-      setSessionsHover(false)
-    }, 140)
-  }, [])
-  useEffect(
-    () => () => {
-      if (sessionsCloseTimer.current) clearTimeout(sessionsCloseTimer.current)
-    },
-    []
-  )
-
-  // Serialized inputs for the active project's terminal/agent nodes (the sidebar reads the
-  // serialized nodes of *inactive* projects directly from the store, but the active project's
-  // live state lives in React Flow — pass it through here). Skipped entirely while the sidebar
-  // is closed (the common case): this memo recomputes on every `nodes` change, i.e. every drag
-  // frame, and the filter+map over all nodes would be pure waste with nobody consuming it.
-  const liveActiveNodes = useMemo<SessionNodeInput[] | null>(
-    () =>
-      sessionsOpen
-        ? nodes
-            .filter((n) => {
-              const k = n.type ?? 'terminal'
-              return k === 'terminal' || k === 'group'
-            })
-            .map((n) => ({
-              id: n.id,
-              kind: (n.type ?? 'terminal') as SessionNodeInput['kind'],
-              title: n.data.title ?? n.id,
-              color: n.data.color ?? '#888',
-              agentId: n.data.agentId,
-              // The node's creation-time account, for the sidebar row's account chip (the
-              // serialized nodes of inactive projects carry it already).
-              accountId: n.data.accountId,
-              icon: n.data.icon as NodeIcon | undefined,
-              cwd: n.data.cwd,
-              ssh: n.data.ssh,
-              parentId: n.parentId
-            }))
-        : null,
-    [nodes, sessionsOpen]
-  )
 
   // 1) Load the whole workspace once and hydrate the projects store.
   useEffect(() => {
@@ -10695,7 +10587,7 @@ export function Canvas() {
     }
     // The pin/open flags mount and unmount the panels, so they decide WHAT to observe; the gate
     // inside the callback decides whether an observation is worth acting on.
-  }, [sessionsPinned, sessionsDismissed, explorerOpen, explorer.pinned, fitMaximizedToUsableArea])
+  }, [explorerOpen, explorer.pinned, fitMaximizedToUsableArea])
 
   /**
    * "Go to next agent needing you" (`node.nextNeedingYou`, ⌘K): one chord to a waiting agent in
@@ -10800,7 +10692,6 @@ export function Canvas() {
       'view.focusMode': () => { toggleFocusMode(); return true },
       'panel.explorer': () => { showExplorer('toggle'); return true },
       'panel.sourceControl': () => { setScOpen((v) => !v); return true },
-      'panel.sessions': () => { toggleSessionsPin(); return true },
       'app.reopenLastClosed': reopenLastClosedCommand,
       'canvas.undo': () => { undo(); return true },
       'canvas.redo': () => { redo(); return true },
@@ -20213,20 +20104,6 @@ export function Canvas() {
             >
               {railCollapsed ? <IconChevronRight /> : <IconChevronLeft />}
             </button>
-            {/* T235: the session/app controls that used to be the top-left cluster, as rows of the
-                same 42×42 column. Hover handlers keep the sidebar's hover-peek. */}
-            <Tooltip label={commandTooltip('Sessions', 'panel.sessions')} placement="right">
-              <button
-                className="dock-btn"
-                aria-label="Sessions"
-                onMouseEnter={openSessionsPeek}
-                onMouseLeave={closeSessionsPeekSoon}
-                onClick={onSessionsIconClick}
-              >
-                <IconSessions />
-              </button>
-            </Tooltip>
-            <span className="dock-sep" />
             <Dock
               group="compact"
               dirty={dirty}
@@ -20552,41 +20429,6 @@ export function Canvas() {
           onGoToNode={goToLiveChatNode}
         />
       )}
-
-      <SessionsSidebar
-        open={sessionsOpen}
-        pinned={sessionsPinned}
-        liveActiveNodes={liveActiveNodes}
-        onTogglePin={toggleSessionsPin}
-        onClose={() => {
-          // Transient "hide for now" — does NOT touch the pin preference.
-          setSessionsHover(false)
-          setSessionsDismissed(true)
-        }}
-        onFocusNode={focusNodeById}
-        onCloseSession={closeSession}
-        onRenameSession={renameSession}
-        onReorderProject={reorderProject}
-        onAiNameSession={aiNameSession}
-        onAiNameGroup={aiNameGroup}
-        onMoveToGroup={moveSessionToGroup}
-        onReorder={reorderSession}
-        onReorderGroup={reorderSidebarGroup}
-        onRowContextMenu={onRowContextMenu}
-        onProjectContextMenu={onProjectContextMenu}
-        onSwitchProject={switchProject}
-        onAddToProject={addToProject}
-        onReopenProject={reopenProject}
-        onDeleteProject={requestDeleteClosed}
-        onReopenClosedSession={reopenClosedSessionCommand}
-        onDiscardClosedSession={(projectId, entryId) => {
-          useProjects.getState().discardClosedSession(projectId, entryId)
-          void writeDisk()
-        }}
-        onOpenClosedTranscript={openClosedTranscript}
-        onMouseEnter={openSessionsPeek}
-        onMouseLeave={closeSessionsPeekSoon}
-      />
 
       {/* The one-time clone notice for a project whose git-shared capability switch arrived
           already on (PR 3 Task 3.4). Self-contained against the projects store: it re-evaluates on

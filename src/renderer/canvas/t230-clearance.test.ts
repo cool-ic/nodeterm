@@ -94,14 +94,14 @@ describe('T235: the rails own all canvas chrome', () => {
     expect(railBodies).toHaveLength(2)
     expect(railBodies[0]).toContain('canvas-rail canvas-rail--left')
     const rail = railBodies[1].split('{/* Canvas-mounted,')[0]
-    for (const name of ['Sessions', 'Settings']) {
+    for (const name of ['Settings']) {
       expect(rail).toContain(`aria-label="${name}"`)
     }
     for (const name of ['Command palette', 'Explorer', 'Source Control', 'Pair phone', 'Help']) {
       expect(rail).not.toContain(`aria-label="${name}"`)
     }
     expect(rail).toContain('group="compact"')
-    expect(rail.match(/className="dock-btn"/g) ?? []).toHaveLength(2)
+    expect(rail.match(/className="dock-btn"/g) ?? []).toHaveLength(1)
     expect(CANVAS_SRC).not.toContain('cluster-search')
     // CSS: the moved buttons ARE `.dock-btn` (42×42, radius 10, panel-header hover) — one size
     // family with the Dock's own buttons, no second 34px box.

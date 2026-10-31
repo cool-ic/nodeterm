@@ -37,13 +37,13 @@ describe('effectiveBindings / commandKeys / commandTooltip', () => {
     expect(effectiveBindings('app.commandPalette')).toEqual(['Cmd+K'])
   })
   it('an override replaces the default everywhere', () => {
-    setKb({ 'panel.sessions': ['Cmd+Alt+L'] })
-    expect(commandKeys('panel.sessions', true)).toEqual(['⌘', '⌥', 'L'])
-    expect(commandTooltip('Sessions', 'panel.sessions', true)).toBe('Sessions (⌘⌥L)')
+    setKb({ 'panel.explorer': ['Cmd+Alt+L'] })
+    expect(commandKeys('panel.explorer', true)).toEqual(['⌘', '⌥', 'L'])
+    expect(commandTooltip('Explorer', 'panel.explorer', true)).toBe('Explorer (⌘⌥L)')
   })
   it('matches the legacy hintLabel formatting on both platforms for the defaults', () => {
-    expect(commandTooltip('Sessions', 'panel.sessions', true)).toBe('Sessions (⌘⇧L)')
-    expect(commandTooltip('Sessions', 'panel.sessions', false)).toBe('Sessions (Ctrl+Shift+L)')
+    expect(commandTooltip('Explorer', 'panel.explorer', true)).toBe('Explorer (⌘⇧E)')
+    expect(commandTooltip('Explorer', 'panel.explorer', false)).toBe('Explorer (Ctrl+Shift+E)')
   })
   it('resolves the defaults with the SAME platform it formats with', () => {
     // terminal.copySelection is the one command whose defaults differ per platform, so it is

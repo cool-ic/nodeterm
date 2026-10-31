@@ -8558,6 +8558,11 @@ button.group-node__setup:disabled {
   font-size: 15px;
 }
 
+/* Scroll a short rail instead of squeezing its first/last icon rows away. */
+.canvas-rail__body > * {
+  flex-shrink: 0;
+}
+
 .canvas-rail__body > .tooltip-trigger > .dock-btn svg {
   width: 18px;
   height: 18px;
@@ -17593,6 +17598,14 @@ body.focus-mode .dock:hover {
   opacity: 0.85;
 }
 :root[data-nt-glass='on'] .dock-btn:not(.dock-add, .active):hover:not(:disabled) svg {
+  opacity: 1;
+}
+/* Canvas controls must keep solid, contrasting strokes on dark/glass chrome.
+   Leave the Add and active-state accent colours intact. */
+:root .canvas-rail__toggle svg,
+:root .canvas-rail__body .dock-btn:not(.dock-add, .active) svg {
+  color: var(--text-strong);
+  stroke: currentColor;
   opacity: 1;
 }
 /* Palette rows take the strong ink so the placeholder, at `--text`'s alpha in light, reads as the

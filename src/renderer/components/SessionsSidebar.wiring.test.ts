@@ -29,18 +29,11 @@ describe('SessionsSidebar renders and wires the Recently closed history section'
   })
 })
 
-describe('Canvas wires the history callbacks into SessionsSidebar', () => {
-  it('reuses the existing reopenProject/requestDeleteClosed callbacks and the new reopen/discard commands', () => {
-    expect(CANVAS_SRC).toContain('onReopenProject={reopenProject}')
-    expect(CANVAS_SRC).toContain('onDeleteProject={requestDeleteClosed}')
-    expect(CANVAS_SRC).toContain('onReopenClosedSession={reopenClosedSessionCommand}')
-  })
-
-  it('flushes a discard to disk immediately, since the discarded project may not be the active one', () => {
-    const fnStart = CANVAS_SRC.indexOf('onDiscardClosedSession={')
-    expect(fnStart).toBeGreaterThan(-1)
-    const fnBody = CANVAS_SRC.slice(fnStart, fnStart + 250)
-    expect(fnBody).toContain('.discardClosedSession(projectId, entryId)')
-    expect(fnBody).toContain('void writeDisk()')
+describe('retired Sessions sidebar', () => {
+  it('has no canvas mount, hover/pin state or shortcut handler', () => {
+    expect(CANVAS_SRC).not.toContain('<SessionsSidebar')
+    expect(CANVAS_SRC).not.toContain('sessionsPinned')
+    expect(CANVAS_SRC).not.toContain("'panel.sessions'")
+    expect(CANVAS_SRC).not.toContain('aria-label="Sessions"')
   })
 })

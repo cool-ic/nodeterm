@@ -88,8 +88,6 @@ describe('registry invariants', () => {
         darwin: ['Cmd+Shift+E'], other: ['Cmd+Shift+E'], allowInTerminal: true },
       { id: 'panel.sourceControl', title: 'Toggle source control panel', group: 'General',
         scope: 'app', darwin: ['Cmd+Shift+G'], other: ['Cmd+Shift+G'], allowInTerminal: true },
-      { id: 'panel.sessions', title: 'Pin sessions sidebar', group: 'General', scope: 'app',
-        darwin: ['Cmd+Shift+L'], other: ['Cmd+Shift+L'], allowInTerminal: true },
       { id: 'app.reopenLastClosed', title: 'Reopen last closed', group: 'General', scope: 'app',
         darwin: ['Cmd+Shift+T'], other: ['Cmd+Shift+T'], allowInTerminal: true },
       { id: 'canvas.undo', title: 'Undo', group: 'Canvas', scope: 'canvas',

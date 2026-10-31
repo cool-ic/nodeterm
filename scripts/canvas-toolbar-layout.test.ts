@@ -9,17 +9,19 @@ import { expect, it } from 'vitest'
 
 // Real layout + hit testing, not jsdom's zero rectangles. CI/device runs can supply CHROME_BIN.
 const chrome = process.env.CHROME_BIN ?? '/usr/bin/google-chrome'
-it.skipIf(!existsSync(chrome))('keeps refresh clickable beside/above the real dock at laptop and phone widths', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'usage-layout-'))
+it.skipIf(!existsSync(chrome))('keeps compact toolbar icons visible and controls reachable across themes and widths', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'canvas-toolbar-layout-'))
   try {
     const bundle = await build({
-      entryPoints: ['test/fixtures/usage-layout.tsx'], bundle: true, write: false,
+      entryPoints: ['test/fixtures/canvas-toolbar-layout.tsx'], bundle: true, write: false,
       loader: { '.svg': 'dataurl' }, tsconfig: 'tsconfig.web.json', define: { 'process.env.NODE_ENV': '"production"' }
     })
     const css = readFileSync('src/renderer/styles.css', 'utf8')
     writeFileSync(join(dir, 'index.html'), `<style>${css}</style><div id="root"></div><pre id="result">WAIT</pre><script>${bundle.outputFiles[0].text}</script>`)
     const browser = spawn(chrome, [
-      '--headless', '--no-sandbox', '--disable-gpu', `--user-data-dir=${join(dir, 'profile')}`,
+      '--headless', '--no-sandbox', '--disable-gpu',
+      // A temporary profile alone does not isolate macOS Keychain access.
+      ...(process.platform === 'darwin' ? ['--use-mock-keychain', '--password-store=basic'] : []), `--user-data-dir=${join(dir, 'profile')}`,
       '--window-size=1800,1100', '--remote-debugging-port=0', 'about:blank'
     ])
     const exited = new Promise(resolve => browser.once('exit', resolve))
@@ -76,7 +78,7 @@ it.skipIf(!existsSync(chrome))('keeps refresh clickable beside/above the real do
         }, sessionId)
         const result = value.result.value
         expect(result).toMatch(/^PASS /)
-        console.log('Usage layout checks passed.')
+        console.log('Canvas toolbar layout checks passed.')
       } finally {
         await call('Browser.close')
         // The CDP acknowledgement precedes profile flush/child shutdown. Wait for the process

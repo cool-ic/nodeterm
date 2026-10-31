@@ -56,7 +56,6 @@ export type CommandId =
   | 'view.focusMode'
   | 'panel.explorer'
   | 'panel.sourceControl'
-  | 'panel.sessions'
   | 'app.reopenLastClosed'
   | 'canvas.undo'
   | 'canvas.redo'
@@ -146,8 +145,6 @@ export const COMMAND_DEFINITIONS: readonly CommandDefinition[] = [
     defaultBindings: both('Cmd+Shift+E'), allowInTerminal: true },
   { id: 'panel.sourceControl', title: 'Toggle source control panel', group: 'General', scope: 'app',
     defaultBindings: both('Cmd+Shift+G'), allowInTerminal: true },
-  { id: 'panel.sessions', title: 'Pin sessions sidebar', group: 'General', scope: 'app',
-    defaultBindings: both('Cmd+Shift+L'), allowInTerminal: true },
   { id: 'app.reopenLastClosed', title: 'Reopen last closed', group: 'General', scope: 'app',
     defaultBindings: both('Cmd+Shift+T'), allowInTerminal: true },
 
