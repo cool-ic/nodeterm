@@ -1,3 +1,4 @@
+import { paperLayoutStyle } from '../terminal/paper-layout'
 import { elementOnScreen } from '../terminal/on-screen'
 import { useContextEnsure } from '../terminal/useContextEnsure'
 import { canPlainApprove, sendHeaderAnswer } from '../lib/approveGate'
@@ -27,6 +28,8 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { PaperInkAddon } from '../terminal/paper-ink'
+import { paperThemeClass, isPaperTheme, resolveTerminalTheme } from '../terminal/themes'
 import { installWebglAtlasIdentity } from '../terminal/webgl-atlas-identity'
 import { ChatPanelFallback } from './ChatPanelFallback'
 // ChatPanel (the ⌘M transcript view) is code-split with the markdown renderer it uses: neither is
@@ -242,7 +245,7 @@ import {
   useMdModeFocus
 } from '../terminal/useMdModeFocus'
 import { canvasOwnsMarkdownChord } from '../lib/markdownChord'
-import { IconBroadcast, IconChat, IconChevronDown, IconChevronRight, IconClose, IconEye, IconEyeOff, IconGrid, IconMic, IconMoveTo, IconPlay, IconReload, IconSearch, IconSparkle } from '../components/icons'
+import { IconChevronDown, IconChevronRight, IconClose, IconGrid, IconMoveTo, IconPlay, IconReload, IconSearch, IconSparkle } from '../components/icons'
 import { NodeLabels } from '../components/kanban/NodeLabels'
 import { MdViewHintButton } from '../components/MdViewHintButton'
 import { mdViewHint } from '../lib/mdViewHint'
@@ -301,8 +304,6 @@ import { RunBar } from './RunBar'
 import { isRemoteProjectId, useSession, useActiveSessionPresence } from '../session/session'
 import { isHostedReadOnly, useHostedReadOnly } from '../state/hostedTeams'
 import { isBrowserRuntime } from '../bridge/runtime'
-import { liveLinkUnavailable } from '../lib/liveLinkEntry'
-import { useWatchLinks } from '../state/watchLinks'
 import { agentLaunchOverride, toggleCollapsed, type CanvasNode } from '../state/workspace'
 import { NodeColorSwatches } from '../components/NodeColorSwatches'
 import { AccountChip, useAccountChip } from '../components/AccountChip'
@@ -350,7 +351,6 @@ import {
 import { matchesShortcut } from '@shared/shortcut'
 import { hintLabel, isWindowsPlatform, isMacPlatform } from '@shared/platform-utils'
 import { ColumnPill } from '../components/kanban/ColumnPill'
-import { NodeCommentsPanel } from '../components/kanban/NodeCommentsPanel'
 import { AgentMascot } from './AgentMascot'
 import { MaximizeButton } from './MaximizeButton'
 import { NodeIconView } from '../components/NodeIcon'
@@ -1452,15 +1452,6 @@ export function TerminalNode({
   // mounted node right away instead of waiting for a remount. Search, Close and the worktree-move
   // button are absent from `isHidden`'s inventory and stay put whatever the list says.
   const hiddenHeaderButtons = useSettings((s) => s.settings.hiddenHeaderButtons)
-  // The header's "Share live link" button: the same availability rule every opener checks before the
-  // Pro gate (lib/liveLinkEntry). A primitive selector — the header must not re-render on every
-  // watch-link state push.
-  const activeLiveLinks = useWatchLinks((s) => s.links.length)
-  const shareLinkWhy = liveLinkUnavailable({
-    serverEdition: isBrowserRuntime(),
-    source: session.source,
-    activeLinks: activeLiveLinks
-  })
   const bodyRef = useRef<HTMLDivElement>(null)
   const middleClickPaste = useSettings((st) => st.settings.terminalMiddleClickPaste)
   // Chromium pastes the X PRIMARY selection into xterm's hidden textarea on middle click — a path
@@ -1602,7 +1593,6 @@ export function TerminalNode({
   useEffect(() => () => {
     if (uploadNoteTimer.current) clearTimeout(uploadNoteTimer.current)
   }, [])
-  const [naming, setNaming] = useState(false)
   // Is a glyph grid attached RIGHT NOW? Drives the `term-node--glyphgrid` class on the node ROOT,
   // which is what turns the node into a transparent window onto the shared canvas (see styles.css).
   // React state, not an imperative `classList.add`: the root's className is recomputed from
@@ -1839,7 +1829,6 @@ export function TerminalNode({
   // which now spans three agents. See lib/transcriptGates.ts for what sharing that gate broke.
   const claudeTranscript = readsClaudeTranscript(agentId)
   // The header 💬 now opens the board-log comments flyout (right side); ⌘M keeps the markdown/chat view.
-  const [commentsOpen, setCommentsOpen] = useState(false)
   const canRenameNode = !!agentId && canRename(agentId) // WRITE leg: push `/rename <name>` back
   // READ leg: adopt the agent's own session name into the title. A superset of canRenameNode —
   // gemini names its own sessions but has no rename command, so it polls and never pushes.
@@ -3263,6 +3252,7 @@ export function TerminalNode({
       term.loadAddon(fit)
       term.loadAddon(searchAddon)
       term.open(container)
+      term.loadAddon(new PaperInkAddon())
       patchImeModeSwitch(term)
       // Renderer-parity: quantize the char measurement to the device-pixel grid, so a budget
       // grant/release swaps renderers without the text visibly reflowing (see the helper).
@@ -5605,7 +5595,7 @@ export function TerminalNode({
   // while the slider is dragged (scheduleGlassCellAlpha); the shared glyph grid stands glass down,
   // and so does this. Declared ABOVE the applyLiveOptions effect: the glyphgrid effect below that
   // one must stay immediately after it (see its comment).
-  const glassCellAlpha = tint && !glyphMounted ? tint.alpha : null
+  const glassCellAlpha = isPaperTheme(visual.terminalTheme) && !resolveTerminalTheme(visual.terminalTheme).dark && !glyphMounted ? -1 : tint && !glyphMounted ? tint.alpha : null
   useEffect(() => {
     glassCellAlphaRef.current = glassCellAlpha
     const term = termRef.current
@@ -6021,22 +6011,6 @@ export function TerminalNode({
     }
   }
 
-  // AI-generated names compare against the node's current title (issue #714): the model can
-  // return the same name back, and clicking "Name with AI" repeatedly must not spam /rename.
-  const nameWithAi = async () => {
-    setNaming(true)
-    const r = await api.pty.generateName(
-      id,
-      (data.cwd as string) ?? '',
-      data.accountId as string | undefined
-    )
-    setNaming(false)
-    if (r.ok) {
-      const current = titleRef.current ?? (data.title as string) ?? ''
-      applyManualTitle(r.message, current)
-    }
-  }
-
   // Read state is separate from workflow state: selection clears the unread notification, while
   // an agent whose turn is done remains "Waiting for your response" until its next prompt starts.
   useEffect(() => {
@@ -6168,6 +6142,7 @@ export function TerminalNode({
       }${glyphMounted ? ' term-node--glyphgrid' : ''}${focused ? ' term-node--focused' : ''}${
         glassOn ? ' term-node--glass' : ''
       }`}
+      data-paper-theme={isPaperTheme(visual.terminalTheme) ? visual.terminalTheme : undefined}
       ref={rootRef}
       style={glassOn ? { ...glassVars, borderTopColor: data.color } : { borderTopColor: data.color }}
       onMouseEnter={() => (hoveredRef.current = true)}
@@ -6603,79 +6578,6 @@ export function TerminalNode({
             <IconSearch />
           </button>
         </Tooltip>
-        {!isHidden('mic', hiddenHeaderButtons) && (
-          <Tooltip label="Dictate into this terminal">
-            <button
-              className="term-node__mic nodrag"
-              onClick={(e) => {
-                e.stopPropagation()
-                window.dispatchEvent(new CustomEvent('nodeterm:dictate', { detail: { nodeId: id } }))
-              }}
-            >
-              <IconMic />
-            </button>
-          </Tooltip>
-        )}
-        {!isHidden('ai-name', hiddenHeaderButtons) && (
-          <Tooltip label="Name with AI (from terminal output)">
-            <button
-              className="term-node__ai nodrag"
-              aria-label="Name with AI"
-              disabled={naming}
-              onClick={nameWithAi}
-            >
-              {naming ? <span className="ui-spinner" /> : <IconSparkle />}
-            </button>
-          </Tooltip>
-        )}
-        {!isHidden('comments', hiddenHeaderButtons) && (
-          <Tooltip label="Comments & activity">
-            <button
-              className="term-node__chat nodrag"
-              aria-pressed={commentsOpen}
-              onClick={() => setCommentsOpen((v) => !v)}
-            >
-              <IconChat />
-            </button>
-          </Tooltip>
-        )}
-        {!isHidden('share-link', hiddenHeaderButtons) && (
-          <Tooltip label={shareLinkWhy ?? 'Share live link'}>
-            {/* The node menu's "Share live link…" row as a header button. Canvas opens the dialog
-                (`nodeterm:live-link`) after re-checking availability and the Pro gate; a node only
-                ever lives in the active project's canvas, so that is the project it names. */}
-            <button
-              className="term-node__share nodrag"
-              aria-label="Share live link"
-              disabled={!!shareLinkWhy}
-              onClick={(e) => {
-                e.stopPropagation()
-                window.dispatchEvent(
-                  new CustomEvent('nodeterm:live-link', {
-                    detail: { nodeId: id, title: data.title, projectId: owningProjectId() }
-                  })
-                )
-              }}
-            >
-              <IconBroadcast />
-            </button>
-          </Tooltip>
-        )}
-        {!isHidden('hide-fanout', hiddenHeaderButtons) && (
-          <Tooltip label={hideFanout ? 'Show cards & connections' : 'Hide cards & connections'}>
-            <button
-              className="term-node__hide-fanout nodrag"
-              aria-label={hideFanout ? 'Show cards & connections' : 'Hide cards & connections'}
-              aria-pressed={hideFanout}
-              onClick={(e) => {
-                e.stopPropagation()
-                updateNodeData(id, { hideFanout: !hideFanout })
-              }}
-            >
-              {hideFanout ? <IconEyeOff /> : <IconEye />}
-            </button>
-          </Tooltip>
-        )}
         {fanoutCapable &&
           !hideFanout &&
           fanoutCount >= 2 &&
@@ -6761,7 +6663,8 @@ export function TerminalNode({
         onPasteCapture={onBodyPaste}
       >
         <div
-          className={`term-node__xterm nodrag nowheel${co.letterbox ? ' letterboxed' : ''}`}
+          className={`term-node__xterm nodrag nowheel${paperThemeClass(visual.terminalTheme)}${co.letterbox ? ' letterboxed' : ''}`}
+          style={paperLayoutStyle(visual.terminalTheme, visual.fontSize)}
           ref={bodyRef}
           {...{ [FONT_ZOOM_NODE_ATTR]: id }}
         />
@@ -7036,13 +6939,6 @@ export function TerminalNode({
           ))}
       </div>
     </div>
-    {/* Board-log comments flyout — a SIBLING of the root (overflow:hidden would clip it),
-        expanding to the node's right. Same feed/composer as the card modal's panel. */}
-    {commentsOpen && !collapsed && (
-      <div className="term-node__comments nodrag nowheel" onMouseDown={(e) => e.stopPropagation()}>
-        <NodeCommentsPanel id={id} />
-      </div>
-    )}
     {/* Link handles (all terminal nodes): drag right→left to link. Between two context-capable
         (Claude) nodes this shares context; from a sticky note it attaches the note as context.
         Vertically centered on the side edges; raised above the body so they're never buried.

@@ -955,6 +955,22 @@ describe('applyLiveOptions', () => {
     expect(term.writes).toEqual([])
   })
 
+  it('paper renders glyphs over its own material and restores opaque ordinary themes', () => {
+    const ordinary = visual()
+    const term = fakeTerm(ordinary)
+    const paper = visual({ terminalTheme: 'paper-cotton' })
+    expect(xtermOptionsFromSettings(paper).allowTransparency).toBe(true)
+    applyLiveOptions(term, paper)
+    expect(term.options.theme?.background).toBe('#cfc7bc00')
+    expect(term.options.allowTransparency).toBe(true)
+    term.writes.length = 0
+    applyLiveOptions(term, paper)
+    expect(term.writes).toEqual([])
+    applyLiveOptions(term, ordinary)
+    expect(term.options.allowTransparency).toBe(false)
+    expect(term.options.theme?.background).toBe('#1e1e1e')
+  })
+
   it('glass toggles live: transparent background + allowTransparency on, and back off', () => {
     const s = visual()
     const term = fakeTerm(s)

@@ -1,3 +1,4 @@
+import { paperXtermLineHeight } from './paper-layout'
 import type { FontWeight, ITheme } from '@xterm/xterm'
 import type { ClientId } from '@shared/presence'
 import type {
@@ -9,7 +10,7 @@ import type {
 import { isWindowsPlatform } from '@shared/platform-utils'
 import { xtermScrollback } from '@shared/scrollback'
 import { toXtermText } from '@shared/capture-paint'
-import { isKnownTerminalThemeId, resolveTerminalTheme } from './themes'
+import { isPaperTheme, isKnownTerminalThemeId, resolveTerminalTheme } from './themes'
 
 /**
  * Pure decisions behind the xterm instance in `TerminalNode` — extracted so they can be tested
@@ -360,6 +361,7 @@ export function xtermOptionsFromSettings(
   glass = false
 ): XtermVisualOptions & { allowProposedApi: true; macOptionClickForcesSelection: true } {
   const theme = resolveTerminalTheme(s.terminalTheme).theme
+  const transparent = glass || isPaperTheme(s.terminalTheme)
   return {
     fontFamily: s.fontFamily,
     fontSize: s.fontSize,
@@ -367,19 +369,19 @@ export function xtermOptionsFromSettings(
     fontWeight: terminalFontWeight(s.fontWeight, 400),
     fontWeightBold: terminalFontWeight(s.fontWeightBold, 700),
     drawBoldTextInBrightColors: s.drawBoldTextInBrightColors,
-    minimumContrastRatio: terminalMinContrast(s.terminalMinContrast),
+    minimumContrastRatio: isPaperTheme(s.terminalTheme) && !resolveTerminalTheme(s.terminalTheme).dark ? Math.max(6, terminalMinContrast(s.terminalMinContrast)) : terminalMinContrast(s.terminalMinContrast),
     cursorBlink: s.cursorBlink,
     cursorStyle: s.cursorStyle,
     cursorInactiveStyle: s.cursorInactiveStyle,
-    lineHeight: terminalLineHeight(s.terminalLineHeight),
-    letterSpacing: terminalLetterSpacing(s.terminalLetterSpacing),
+    lineHeight: isPaperTheme(s.terminalTheme) ? paperXtermLineHeight(s.fontSize, s.fontFamily, terminalLineHeight(s.terminalLineHeight)) : terminalLineHeight(s.terminalLineHeight),
+    letterSpacing: terminalLetterSpacing(s.terminalLetterSpacing) * (isPaperTheme(s.terminalTheme) ? s.fontSize / 15 : 1),
     // NOT what the user scrolls in a tmux session — tmux's mouse is ON and the wheel scrolls
     // tmux's own history (see pty-manager's tmuxConf). This buffer backs the plain-shell
     // fallback (tmux unavailable) and the cold-snapshot replay. Capped: per node, many nodes.
     scrollback: xtermScrollback(s.tmuxScrollback),
-    theme: glass ? glassTheme(theme) : theme,
+    theme: transparent ? glassTheme(theme) : theme,
     // Only present when on, so a non-glass terminal's options are exactly what they were.
-    ...(glass ? { allowTransparency: true } : {}),
+    ...(transparent ? { allowTransparency: true } : {}),
     allowProposedApi: true,
     // Inside an app that requested mouse tracking (vim, htop) a plain drag goes to the app;
     // Option/Alt forces a selection instead (Shift does the same via xterm's own bypass).
@@ -459,7 +461,7 @@ export function applyLiveOptions(
   // Before the theme, in the same synchronous pass: the WebGL renderer rebuilds its atlas on every
   // option change, and the two must land together or one frame paints a transparent background
   // over glyphs rasterized onto an opaque one.
-  if ((o.allowTransparency ?? false) !== glass) o.allowTransparency = glass
+  if ((o.allowTransparency ?? false) !== !!next.allowTransparency) o.allowTransparency = !!next.allowTransparency
   if (themeChanged) o.theme = next.theme
 
   return { metricsChanged, themeChanged }

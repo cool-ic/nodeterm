@@ -10,15 +10,6 @@ import { readFileSync } from 'fs'
 const read = (p: string): string => readFileSync(p, 'utf8').replace(/\r\n/g, '\n')
 
 describe('board-comment mentions: canvas flyout ⇄ card modal parity', () => {
-  it('the canvas node flyout renders the panel WITH mention candidates', () => {
-    const node = read('src/renderer/nodes/TerminalNode.tsx')
-    expect(node).toContain('<NodeCommentsPanel id={id} />')
-    expect(node).not.toMatch(/<BoardLogPanel card=\{\{ id \}\} \/>/)
-    const flyout = read('src/renderer/components/kanban/NodeCommentsPanel.tsx')
-    expect(flyout).toContain('mentionCandidatesFromNodes')
-    expect(flyout).toMatch(/<BoardLogPanel card=\{\{ id \}\} mentionables=\{mentionables\} \/>/)
-  })
-
   it('the card modal passes the board\'s own candidates, built the same way', () => {
     expect(read('src/renderer/components/kanban/CardModal.tsx')).toMatch(
       /<BoardLogPanel card=\{session\} mentionables=\{mentionables\} \/>/

@@ -149,33 +149,6 @@ describe('git status colours have one source', () => {
   })
 })
 
-describe('minimap status strokes', () => {
-  const canvas = read('canvas/Canvas.tsx')
-  const pairs = [
-    ['working', "st?.state === 'working') return 'var(--mm-working)'", '#ffd60a'],
-    ['attention', "st?.state === 'blocked') return 'var(--mm-attention)'", '#ff453a'],
-    ['unread', "st?.unread) return 'var(--mm-unread)'", '#d97757']
-  ] as const
-
-  for (const [state, stroke, legacy] of pairs) {
-    it(`${state}: stroke and halo read --mm-${state}`, () => {
-      expect(canvas).toContain(stroke)
-      const mm = CSS.slice(CSS.indexOf(`\n.minimap .mm-${state} {\n  filter`))
-      expect(mm.slice(0, mm.indexOf('}'))).toContain(`var(--mm-${state})`)
-    })
-
-    it(`${state}: the default look keeps its pre-glass map colour, glass maps it to the node glow's role`, () => {
-      expect(literal(`--mm-${state}`, DARK)).toBe(legacy)
-      expect(literal(`--mm-${state}`, LIGHT)).toBe(legacy)
-      for (const tokens of [GLASS_THEMES.dark, GLASS_THEMES.light]) {
-        expect(literal(`--mm-${state}`, tokens)).toBe(literal(`--state-${state}`, tokens))
-      }
-      const glow = CSS.slice(CSS.indexOf(`.react-flow__node:has(.term-node.${state})::after {`))
-      expect(glow.slice(0, glow.indexOf('}'))).toContain(`var(--state-${state})`)
-    })
-  }
-})
-
 describe('Liquid Glass accessibility fallbacks', () => {
   /** Body of the first `@media <query> {` block (balanced braces). */
   const media = (query: string): string => {
@@ -211,7 +184,6 @@ describe('Liquid Glass accessibility fallbacks', () => {
       const rule = all.slice(all.indexOf(`.react-flow__node:has(.term-node.${state})::after {`))
       expect(rule.slice(0, rule.indexOf('}')), state).toContain('animation: none')
     }
-    expect(all).toMatch(/\.minimap \.mm-unread \{\s*animation: none/)
     // Specificity: the pulsing dots are (0,2,0), so the stop must be at least that.
     expect(all).toContain('.term-node__status .term-node__status-dot')
     for (const m of CSS.matchAll(/^(\.term-node__status--[a-z-]+ \.term-node__status-dot) \{[^}]*animation:[^}]*infinite/gm)) {

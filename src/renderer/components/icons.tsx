@@ -78,15 +78,6 @@ export const IconMinus = () => (
   </svg>
 )
 
-/** Minimap — a map frame with the viewport rectangle inside it: the minimized minimap's restore
- *  button. */
-export const IconMinimap = () => (
-  <svg {...S}>
-    <rect x="3" y="5" width="18" height="14" rx="2" />
-    <rect x="11" y="9" width="6" height="6" rx="1" />
-  </svg>
-)
-
 export const IconSelectAll = () => (
   <svg {...S}>
     <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" />

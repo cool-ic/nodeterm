@@ -1,3 +1,4 @@
+import { paperInk, PAPER_EXTENDED_ANSI } from './paper-colours'
 import type { ITheme } from '@xterm/xterm'
 
 /**
@@ -21,12 +22,68 @@ export interface TerminalTheme {
   /** Whether the scheme is dark — groups the picker, and is what a light theme needs to declare
    *  so the surrounding node chrome can stay legible against it. */
   dark: boolean
+  /** Paper material and echo feedback, independent of light/dark chrome. */
+  paper?: boolean
+  paperMaterial?: 'linen' | 'cotton' | 'moonlit' | 'midnight'
   theme: ITheme
 }
 
 export const DEFAULT_TERMINAL_THEME_ID = 'nodeterm-dark'
 
 export const TERMINAL_THEMES: readonly TerminalTheme[] = [
+  {
+    id: 'paper-ink',
+    label: 'Paper & Ink · Linen',
+    dark: false,
+    paper: true,
+    theme: {
+      background: '#ebe5d8', foreground: '#2a231c',
+      cursor: '#4e3b2d', cursorAccent: '#ebe5d8', selectionBackground: '#80674438',
+      // Nocturne's paper-safe palette (MIT, resources/licenses/Typewriter-Nocturne.txt).
+      black: '#2b231c', red: '#9c3a2a', green: '#4c6b2f', yellow: '#7e5e1a',
+      blue: '#2f5277', magenta: '#7b3f6e', cyan: '#2e6b6a', white: '#716453',
+      brightBlack: '#6e6153', brightRed: '#ac4028', brightGreen: '#4b6c2d',
+      brightYellow: '#7c5c17', brightBlue: '#3a6491', brightMagenta: '#8c4a7e',
+      brightCyan: '#2d6b69', brightWhite: '#5b4f43'
+    }
+  },
+  {
+    id: 'paper-cotton',
+    label: 'Paper & Ink · Cotton',
+    dark: false,
+    paper: true,
+    paperMaterial: 'cotton',
+    theme: {
+      background: '#eee6d5', foreground: '#2a231c',
+      cursor: '#4e3b2d', cursorAccent: '#eee6d5', selectionBackground: '#80674438',
+      // Nocturne's paper-safe palette (MIT, resources/licenses/Typewriter-Nocturne.txt).
+      black: '#2b231c', red: '#9c3a2a', green: '#4c6b2f', yellow: '#7e5e1a',
+      blue: '#2f5277', magenta: '#7b3f6e', cyan: '#2e6b6a', white: '#716453',
+      brightBlack: '#6e6153', brightRed: '#ac4028', brightGreen: '#4b6c2d',
+      brightYellow: '#7c5c17', brightBlue: '#3a6491', brightMagenta: '#8c4a7e',
+      brightCyan: '#2d6b69', brightWhite: '#5b4f43'
+    }
+  },
+  {
+    id: 'paper-midnight', label: 'Midnight Study', dark: true, paper: true, paperMaterial: 'midnight',
+    theme: {
+      background: '#262431', foreground: '#e8e2d5', cursor: '#d9bb83', cursorAccent: '#262431',
+      selectionBackground: '#bda6743d', black: '#17161f', red: '#e39b96', green: '#b0c49d',
+      yellow: '#dfc18a', blue: '#9bb6d6', magenta: '#c1a3cd', cyan: '#96c6c3', white: '#ded8ce',
+      brightBlack: '#a29aa8', brightRed: '#efb4ad', brightGreen: '#c3d7b1', brightYellow: '#efdaa9',
+      brightBlue: '#b5cbe5', brightMagenta: '#d9bddd', brightCyan: '#b1ded7', brightWhite: '#faf4e7'
+    }
+  },
+  {
+    id: 'paper-moonlit', label: 'Moonlit Poetry', dark: false, paper: true, paperMaterial: 'moonlit',
+    theme: {
+      background: '#e5e4e0', foreground: '#302d38', cursor: '#535069', cursorAccent: '#e5e4e0',
+      selectionBackground: '#6e6d9940', black: '#302d38', red: '#953f50', green: '#4d654b',
+      yellow: '#7a622b', blue: '#425579', magenta: '#76527e', cyan: '#386663', white: '#655f6e',
+      brightBlack: '#68636f', brightRed: '#a13e51', brightGreen: '#456745', brightYellow: '#806024',
+      brightBlue: '#435f87', brightMagenta: '#80518b', brightCyan: '#366c69', brightWhite: '#56515d'
+    }
+  },
   {
     id: 'nodeterm-dark',
     label: 'nodeterm Dark',
@@ -344,6 +401,24 @@ export const TERMINAL_THEMES: readonly TerminalTheme[] = [
   }
 ]
 
+// Light paper uses pigment-like ink, including the 256-colour cube used by shell prompts.
+// Apply once so live option comparisons retain stable theme identity.
+for (const entry of TERMINAL_THEMES) {
+  if (!entry.paper || entry.dark) continue
+  const inks = {
+    black: '#29241f', red: '#773a31', green: '#354d30', yellow: '#634820',
+    blue: '#29435d', magenta: '#633d60', cyan: '#294c49', white: '#544a40',
+    brightBlack: '#60564c', brightRed: '#85352f', brightGreen: '#31512e',
+    brightYellow: '#6a4819', brightBlue: '#26466a', brightMagenta: '#6b3964',
+    brightCyan: '#22514c', brightWhite: '#40372f'
+  }
+  Object.assign(entry.theme, Object.fromEntries(Object.entries(inks).map(([k,v])=>[k,paperInk(v)])), {
+    extendedAnsi: PAPER_EXTENDED_ANSI,
+    // Transparent xterm keeps RGB for contrast calculations. Use the lit paper, not raw stock.
+    background: entry.id === 'paper-cotton' ? '#cfc7bc' : '#ccc7c0'
+  })
+}
+
 const BY_ID = new Map(TERMINAL_THEMES.map((t) => [t.id, t]))
 
 /**
@@ -369,3 +444,22 @@ export function resolveTerminalTheme(id: string | undefined): TerminalTheme {
 export function isKnownTerminalThemeId(id: string | undefined): boolean {
   return id !== undefined && BY_ID.has(id)
 }
+
+export function isPaperTheme(id: string | undefined): boolean {
+  return resolveTerminalTheme(id).paper === true
+}
+
+export function paperThemeClass(id: string | undefined): string {
+  const t = resolveTerminalTheme(id)
+  return t.paper ? ` terminal-paper${t.dark ? ' terminal-paper--night' : ''}${t.paperMaterial ? ` terminal-paper--${t.paperMaterial}` : ''}` : ''
+}
+
+export const PAPER_TYPOGRAPHY = {
+  fontFamily: '"Courier Prime", "JetBrainsMono Nerd Font Mono", "Courier New", Courier, monospace',
+  fontSize: 15,
+  terminalLineHeight: 1.45,
+  terminalLetterSpacing: 0,
+  fontWeight: 400,
+  fontWeightBold: 700,
+  terminalMinContrast: 4.5
+} as const

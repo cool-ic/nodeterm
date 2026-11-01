@@ -2004,6 +2004,9 @@ export interface Settings {
   terminalLineHeight: number
   /** Extra horizontal space between cells, in CSS pixels (0 = xterm's default). */
   terminalLetterSpacing: number
+  /** Local, passive keyboard feedback. Never driven by PTY output. */
+  terminalTypewriterSound: boolean
+  terminalTypewriterVolume: number
   /** Empty string = use the system default shell. */
   defaultShell: string
   gridSize: number
@@ -2552,6 +2555,8 @@ export const DEFAULT_SETTINGS: Settings = {
   cursorInactiveStyle: 'outline',
   terminalLineHeight: 1,
   terminalLetterSpacing: 0,
+  terminalTypewriterSound: false,
+  terminalTypewriterVolume: 25,
   defaultShell: '',
   gridSize: 24,
   snapToGrid: false,

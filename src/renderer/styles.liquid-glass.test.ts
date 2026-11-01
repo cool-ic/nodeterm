@@ -95,7 +95,7 @@ describe('Liquid Glass stylesheet', () => {
     for (const text of ['.nt-settings', '.palette', '.ctx-menu', '.tab-menu', '.sessions-sidebar', '.drawer', '.tooltip', '.confirm', '.usage-popover', '.kanban-col', '.kanban-add-col', '.kanban-modal']) {
       expect(outer(text)?.body, text).toMatch(/var\(--glass-chrome-bg\)[\s\S]*var\(--glass-text-blur\)/)
     }
-    for (const control of ['.tabbar', '.react-flow__minimap', '.usage-pill', '.sysres-pill', '.usage-refresh']) {
+    for (const control of ['.tabbar', '.usage-pill', '.sysres-pill', '.usage-refresh']) {
       expect(outer(control)?.body, control).toMatch(/var\(--glass-control-bg\)[\s\S]*var\(--glass-control-blur\)/)
     }
   })
@@ -167,10 +167,5 @@ describe('Liquid Glass stylesheet', () => {
     expect(gated('.kanban-card').some((r) => /backdrop-filter/.test(r.body))).toBe(false)
   })
 
-  it('draws minimap nodes in neutral ink, not node colour, and keeps status strokes', () => {
-    const fill = gated('.react-flow__minimap-node').find((r) => r.selector.endsWith('.react-flow__minimap-node'))
-    expect(fill?.body).toMatch(/fill:\s*rgba\(var\(--tint-rgb\),[^)]*\)\s*!important/)
-    const stroke = gated('.react-flow__minimap-node:not(.mm-working)')[0]
-    expect(stroke?.selector).toContain(':not(.mm-attention):not(.mm-unread)')
-  })
+
 })

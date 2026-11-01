@@ -10,6 +10,7 @@ import { applyWindowChrome } from './lib/windowChrome'
 import { installMarkdownLinkGuard, LOCAL_LINK_MESSAGE, openExternalQuietly } from './lib/markdownLinks'
 import './styles.css'
 import './tailwind.css'
+import { loadPaperFonts } from './terminal/paper-fonts'
 
 // Does this window draw the macOS traffic lights inside our own tab bar? Stamped on <html> before
 // the first paint so the tab bar reserves room for them only where they exist (issue #564: on
@@ -66,4 +67,4 @@ void refreshAgentEnv()
 
 // Note: StrictMode is intentionally not used — its double mount in dev would open
 // two PTY sessions per terminal node.
-ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(<App />)
+void loadPaperFonts().then(() => ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(<App />))

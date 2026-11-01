@@ -6,8 +6,6 @@ import { useDevPortScanner } from './useDevPortScanner'
 import { withCodexNoDaemon } from '@shared/agents/codex-daemon'
 import { codexApprovalCaps } from '../state/codexCli'
 import { TEXT_NOT_SUBMITTED } from '@shared/text-delivery'
-import { VisibleMiniMap } from './VisibleMiniMap'
-import { MinimapDock } from './MinimapDock'
 import { keepGlassBlurWhileMoving } from '../lib/glassContrast'
 import { LINK_ENDPOINT_NOT_FOUND } from '@shared/canvas-link'
 import { arrangeArgsRefusal, isTopLevelGroupArg, parseArrangeGap, TOP_ARRANGE_LAYOUTS } from '@shared/arrange-verb'
@@ -753,7 +751,6 @@ import {
 import { projectSwitchHint } from '../lib/projectSwitchHint'
 import { uuid } from '../lib/uuid'
 import { CANVAS_LAYOUTS_CAP, findLayoutByName, type CanvasLayout } from '@shared/canvas-layout'
-import { CANVAS_MINIMAP_HEIGHT, CANVAS_MINIMAP_WIDTH } from '@shared/notch-hud'
 import { applyLayout, captureLayout } from '../lib/canvasLayout'
 import {
   deleteLayoutMessage,
@@ -1310,91 +1307,8 @@ const edgeTypes = { floating: FloatingEdge }
  *  (`displayEdges` / `ropeVisual`), so it never travels. */
 const toBridgeLink = (e: Edge): BridgeLink => ({ id: e.id, source: e.source, target: e.target })
 
-const minimapNodeColor = (n: Node): string =>
-  (n.data as { color?: string })?.color ?? '#0a84ff'
-
 /** Stable empty card list, so the closed board's memo never churns array identity. */
 const NO_KANBAN_SESSIONS: KanbanSession[] = []
-
-// The minimap subscribes to agent status HERE, in its own tiny component — not in Canvas.
-// Canvas must not subscribe to the whole status map (every working/waiting flip would re-render
-// the entire canvas), but the minimap's working/attention/unread strokes DO need to track those
-// flips live; a fresh `nodeStrokeColor` identity per status change is what busts React Flow's
-// internal MiniMap memo so it repaints. Re-render cost is confined to this component.
-function StatusAwareMiniMap({ onNodeDoubleClick }: { onNodeDoubleClick: (node: Node) => void }) {
-  const statusById = useAgentStatus((s) => s.byId)
-  const { setCenter, getZoom } = useReactFlow()
-  // React Flow's MiniMap only pans on drag (`pannable`) — a plain click is a no-op unless
-  // wired up. `position` arrives already converted to flow coordinates.
-  const onMinimapClick = useCallback(
-    (_e: React.MouseEvent, position: { x: number; y: number }) => {
-      setCenter(position.x, position.y, { zoom: getZoom(), duration: 300 })
-    },
-    [setCenter, getZoom]
-  )
-  // The MiniMap has no double-click prop; `detail === 2` is the second click of a
-  // double-click. stopPropagation keeps the svg-level click handler above from
-  // re-centering at the raw pointer right after the zoom-to-node.
-  const onMinimapNodeClick = useCallback(
-    (e: React.MouseEvent, node: Node) => {
-      if (e.detail >= 2) {
-        e.stopPropagation()
-        onNodeDoubleClick(node)
-      }
-    },
-    [onNodeDoubleClick]
-  )
-  // Status language matches the canvas glows/badges: amber = working, red = needs you,
-  // clay = unread. The classes below add the minimap-scale glow/pulse (styles.css).
-  //
-  // Unread is CLAY (#d97757) — the agent-hook colour the RUNNING badge and the node's working glow
-  // already use — and not the accent blue it used to be: blue is also the fallback stroke for a
-  // node that carries no colour of its own, so "finished while you were away" was painted the
-  // exact shade as "nothing to report" and vanished into the map.
-  //
-  // The colours are the --mm-* tokens (styles.css): exactly the above in the default look, the
-  // state roles under Liquid Glass, whose neutral node fills leave nothing for them to clash with.
-  const nodeStrokeColor = useCallback(
-    (n: Node): string => {
-      const st = statusById[n.id]
-      if (st?.state === 'working') return 'var(--mm-working)'
-      if (st?.state === 'waiting' || st?.state === 'blocked') return 'var(--mm-attention)'
-      if (st?.unread) return 'var(--mm-unread)'
-      return (n.data as { color?: string })?.color ?? '#0a84ff'
-    },
-    [statusById]
-  )
-  const nodeClassName = useCallback(
-    (n: Node): string => {
-      const st = statusById[n.id]
-      if (st?.state === 'working') return 'mm-working'
-      if (st?.state === 'waiting' || st?.state === 'blocked') return 'mm-attention'
-      if (st?.unread) return 'mm-unread'
-      return ''
-    },
-    [statusById]
-  )
-  return (
-    <VisibleMiniMap
-      className="minimap"
-      position="bottom-right"
-      pannable
-      zoomable
-      onClick={onMinimapClick}
-      onNodeClick={onMinimapNodeClick}
-      /* T243: explicit, so the rendered box is our declared size and not a library default the
-         HUD's avoidance silently depended on. Same constants main's `hudPlacement` reasons with
-         (src/shared/notch-hud.ts) — one footprint, two readers. */
-      style={{ width: CANVAS_MINIMAP_WIDTH, height: CANVAS_MINIMAP_HEIGHT }}
-      /* The mask dims what's OUTSIDE the viewport rectangle, so it has to be the app's own
-         darkness — a near-black wash over a white minimap would invert the reading. */
-      maskColor="var(--minimap-mask)"
-      nodeColor={minimapNodeColor}
-      nodeStrokeColor={nodeStrokeColor}
-      nodeClassName={nodeClassName}
-    />
-  )
-}
 
 /**
  * `window.nodeTerminal` rather than the session `api`: the run store's `subscribeProject` listens on
@@ -10593,7 +10507,7 @@ export function Canvas() {
    * "Go to next agent needing you" (`node.nextNeedingYou`, ⌘K): one chord to a waiting agent in
    * another project. The queue is built ON DEMAND from `getState()` reads — Canvas never
    * subscribes to the status store's `byId` (every working/waiting flip would re-render the whole
-   * canvas; see StatusAwareMiniMap). The cycle
+   * canvas). The cycle
    * cursor is memory only: a restart starts again at the oldest wait, which is the right answer.
    * Travel is `travelToNodeRef` (declared above this point; the callback itself is defined much
    * further down) so a closed-project hop keeps travelToNode's hosted-team reopen guard.
@@ -20081,9 +19995,6 @@ export function Canvas() {
           {/* Peer cursors live INSIDE <ReactFlow>: PresenceLayer uses ViewportPortal +
               useReactFlow, which throw outside the provider — and cursors are flow coordinates. */}
           <PresenceLayer />
-          <MinimapDock>
-            <StatusAwareMiniMap onNodeDoubleClick={goToNode} />
-          </MinimapDock>
         </ReactFlow>
         </OwningProjectContext.Provider>
         </SessionProvider>

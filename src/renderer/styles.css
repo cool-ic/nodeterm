@@ -8312,174 +8312,6 @@ button.group-node__setup:disabled {
   color: var(--muted);
 }
 
-/* ---- Minimap ---- */
-.react-flow__minimap.minimap {
-  /* Monaco also mounts a .minimap even when disabled. Styling that zero-width element
-     adds a vertical border through the editor and, without isolation, its preview (#834). */
-  /* React Flow places its panels with a 15px margin; the app's overlays all sit one --float-gap
-     from their edge, and the minimap and the controls are the two the library positions. */
-  margin: var(--float-gap) !important;
-  background: rgba(var(--menu-rgb), 0.85) !important;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, calc(0.4 * var(--shadow-k)));
-}
-
-/* Minimize control (canvas/MinimapDock.tsx). The dock takes over the placement React Flow's Panel
-   gave the map — one --float-gap in from the bottom-right — and turns the map's own Panel into an
-   in-flow child, so the dock's box, and with it the hover area, is exactly the map: no dead band
-   of margin over the canvas. */
-.minimap-dock {
-  position: absolute;
-  /* T243: this 22px is mirrored by `CANVAS_MINIMAP_MARGIN` in src/shared/notch-hud.ts — the HUD's
-     docked capsule sits on a ledge computed from THIS margin plus the minimap's declared size, so
-     the two copies must move together (each comment block names the other). */
-  right: var(--float-gap);
-  bottom: var(--float-gap);
-  z-index: 5;
-}
-.minimap-dock > .react-flow__minimap.minimap {
-  position: relative;
-  margin: 0 !important;
-}
-/* The "−" sits inside the map's top-left corner and shows only while the map is hovered or the
-   button has keyboard focus. A solid panel fill in every appearance: it lies over the map's node
-   rectangles, and a translucent one there would be a button over noise. */
-.minimap-dock > .tooltip-trigger {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  z-index: 6;
-}
-.minimap-dock__minimize {
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-.minimap-dock__minimize svg {
-  width: 12px;
-  height: 12px;
-}
-.minimap-dock:hover .minimap-dock__minimize,
-.minimap-dock__minimize:focus-visible {
-  opacity: 1;
-}
-.minimap-dock__minimize:hover {
-  background: var(--panel-header);
-}
-/* No hover on a touch screen (the Server Edition on a tablet): keep the control visible there, or
-   the map could never be minimized. */
-@media (hover: none) {
-  .minimap-dock__minimize {
-    opacity: 1;
-  }
-}
-
-/* The minimized map: one button in the corner the map occupied, on the same plate as the other
-   floating controls. */
-.minimap-restore {
-  position: absolute;
-  right: var(--float-gap);
-  bottom: var(--float-gap);
-  z-index: 5;
-}
-.minimap-restore button {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(var(--menu-rgb), 0.92);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  color: var(--text);
-  cursor: pointer;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, calc(0.3 * var(--shadow-k)));
-}
-.minimap-restore button:hover {
-  background: var(--panel-header);
-}
-.minimap-restore button svg {
-  width: 18px;
-  height: 18px;
-}
-
-/* Minimap-scale status glow (amber working / red needs-you / clay unread in the default look; the
-   state roles under Liquid Glass — see the --mm-* tokens). A static drop-shadow provides the halo; only
-   stroke-opacity animates (cheap on tiny svg rects), cadence matching each canvas glow. */
-.minimap .mm-working,
-.minimap .mm-attention,
-.minimap .mm-unread {
-  stroke-width: 4px;
-}
-.minimap .mm-working {
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--mm-working) 80%, transparent));
-  animation: mm-pulse-soft 2.6s ease-in-out 4;
-  animation-play-state: var(--nt-anim-state);
-}
-.minimap .mm-attention {
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--mm-attention) 90%, transparent));
-  animation: mm-pulse 1.8s ease-in-out infinite;
-  animation-play-state: var(--nt-anim-state);
-}
-/* Unread = clay, the agent-hook colour (RUNNING badge, working glow). Its own keyframes: at
-   minimap scale a node is a few pixels tall, so opacity alone reads as a faint flicker — the
-   stroke THICKENS on the beat as well, which is what makes it findable on a busy map. */
-.minimap .mm-unread {
-  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--mm-unread) 95%, transparent));
-  animation: mm-pulse-unread 1.6s ease-in-out 4;
-  animation-play-state: var(--nt-anim-state);
-}
-/* Working and unread beat 4 times and then REST at full stroke (the drop-shadow halo is static),
-   mirroring their bounded canvas glows: an infinite beat repainted the minimap's filtered SVG every
-   frame for as long as a node stayed unread. Needs-you keeps beating, like its canvas glow. */
-@keyframes mm-pulse-unread {
-  0%,
-  100% {
-    stroke-opacity: 1;
-    stroke-width: 4px;
-  }
-  40% {
-    stroke-opacity: 0.3;
-    stroke-width: 3px;
-  }
-  75% {
-    stroke-opacity: 1;
-    stroke-width: 6px;
-  }
-}
-@keyframes mm-pulse {
-  0%,
-  100% {
-    stroke-opacity: 0.25;
-  }
-  50% {
-    stroke-opacity: 1;
-  }
-}
-/* Working never blinks off — it breathes, mirroring the canvas glow. */
-@keyframes mm-pulse-soft {
-  0%,
-  100% {
-    stroke-opacity: 1;
-  }
-  50% {
-    stroke-opacity: 0.45;
-  }
-}
-
 /* ---- Bottom-left pill cluster (usage + system resources) ----
    ONE flex row, because neither pill can hard-code an offset for the other: the usage pill's width
    changes with every number it prints, and it is absent altogether for a user with no agent
@@ -8746,11 +8578,8 @@ button.group-node__setup:disabled {
 }
 
 .canvas-root[data-rail-collapsed] .canvas-rail__body > :not(.canvas-rail__toggle),
-/* T247: the badge cluster is a SIBLING of the body now (see `.canvas-rail__badges`), so the rule
-   above no longer reaches it — a collapsed rail would leave the two pills floating over the tab. */
-.canvas-root[data-rail-collapsed] .canvas-rail__badges,
-.canvas-root[data-rail-collapsed] .minimap-dock,
-.canvas-root[data-rail-collapsed] .minimap-restore {
+
+.canvas-root[data-rail-collapsed] .canvas-rail__badges {
   display: none;
 }
 
@@ -16332,6 +16161,86 @@ button.pull-checks__name {
 }
 
 /* ---- Settings → Terminal: the live appearance preview ---- */
+@font-face {
+  font-family: 'Courier Prime'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('./assets/fonts/courier-prime-regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Courier Prime'; font-style: normal; font-weight: 700; font-display: swap;
+  src: url('./assets/fonts/courier-prime-bold.woff2') format('woff2');
+}
+/* The material is baked once by a shared, temporary shader and then reused as a still image.
+   Nothing transforms real glyphs or changes fit geometry. */
+.kanban-modal__term.terminal-paper,
+.settings-term-preview .terminal-paper {
+  position: relative;
+}
+/* Opaque, fully lit paper beneath transparent xterm glyphs: no texture filter over ink. */
+.terminal-paper {
+  --paper-base: #ebe5d8;
+  --paper-font-size: 15px;
+  --paper-tile-size: 680px;
+  background: var(--paper-base) url('./assets/paper-linen.png') repeat;
+  background-size: var(--paper-tile-size, 680px) var(--paper-tile-size, 680px);
+}
+.terminal-paper--cotton {
+  --paper-base: #eee6d5;
+  background-image: url('./assets/paper-cotton.png');
+  background-size: var(--paper-tile-size, 680px) var(--paper-tile-size, 680px);
+}
+.terminal-paper--moonlit {
+  --paper-base: #e5e4e0;
+  background-image: url('./assets/paper-moonlit.png');
+  background-size: var(--paper-tile-size, 680px) var(--paper-tile-size, 680px);
+}
+.terminal-paper--midnight {
+  --paper-base: #262431;
+  background-image: url('./assets/paper-midnight.png');
+  background-size: var(--paper-tile-size, 680px) var(--paper-tile-size, 680px);
+}
+.terminal-paper::after {
+  content: ''; position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 24px rgba(68,49,26,.06);
+}
+/* FitAddon subtracts the xterm child's padding. Do not inset the measured host/body. */
+.terminal-paper .xterm {
+  box-sizing: border-box;
+  padding: calc(var(--paper-font-size, 15px) * 1.466667) max(calc(var(--paper-font-size, 15px) * 1.733333), 6%);
+}
+.paper-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.paper-preset {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 10px;
+  border: 1px solid #9d8e7455;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+.paper-preset[aria-pressed='true'] { outline: 2px solid #ab8c58; outline-offset: 2px; }
+.paper-preset:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.paper-preset strong { font-size: 11px; font-weight: 600; }
+.paper-preset__sample { font: 14px 'Courier Prime', monospace; }
+.paper-preset__colours { display: flex; gap: 5px; }
+.paper-preset__colours i { width: 8px; height: 8px; border-radius: 50%; }
+.terminal-paper-ink {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .terminal-paper-ink { display: none; }
+}
+
 /* A real (non-interactive) xterm at a fixed 46x9 grid. It sizes itself from the font metrics, so
    the frame just wraps it — no fit addon is involved and nothing here may set a width the terminal
    would then be measured against. */
@@ -17259,8 +17168,6 @@ body.focus-mode .dock:hover {
 :root[data-nt-glass='on']
   :is(
     .tabbar,
-    .react-flow__minimap.minimap,
-    .minimap-restore button,
     .sysres-pill,
     .usage-pill,
     .usage-refresh,
@@ -18034,20 +17941,6 @@ body.focus-mode .dock:hover {
    selected node brighter. Status strokes (working/attention/unread, the `mm-*` classes) keep their
    colours: they are state, not decoration. The mask dims outside the viewport with the same
    chrome fill the map sits on. */
-:root[data-nt-glass='on'] .react-flow__minimap.minimap {
-  --minimap-mask: var(--glass-control-bg);
-}
-:root[data-nt-glass='on'] .minimap .react-flow__minimap-node {
-  fill: rgba(var(--tint-rgb), 0.3) !important;
-}
-:root[data-nt-glass='on'] .minimap .react-flow__minimap-node.selected {
-  fill: rgba(var(--tint-rgb), 0.6) !important;
-}
-:root[data-nt-glass='on']
-  .minimap
-  .react-flow__minimap-node:not(.mm-working):not(.mm-attention):not(.mm-unread) {
-  stroke: rgba(var(--tint-rgb), 0.45) !important;
-}
 
 /* ---- Liquid Glass palette (HIG color.md › Liquid Glass color) ---------------------------------
    Glass has no colour of its own: labels stay monochrome, and colour is reserved for status and
@@ -18186,10 +18079,7 @@ body.focus-mode .dock:hover {
   }
   /* The pulsing dots are styled at (0,2,0) (`.term-node__status--busy .term-node__status-dot`,
      `--attention …`); a bare `.term-node__status-dot` here lost to them and they kept pulsing. */
-  .term-node__status .term-node__status-dot,
-  .minimap .mm-working,
-  .minimap .mm-attention,
-  .minimap .mm-unread {
+  .term-node__status .term-node__status-dot {
     animation: none;
   }
 }
@@ -18671,4 +18561,55 @@ body.focus-mode .dock:hover {
   width: 6px;
   height: 6px;
   transform: rotate(225deg);
+}
+
+/* Paper-themed nodes: an inked folio heading, not a separate dark app toolbar.
+   Scope chrome tokens to these two rows so popovers and status badges keep their semantics. */
+.term-node[data-paper-theme] {
+  --folio-paper: #ebe5d8;
+  --folio-ink: #42372a;
+  --folio-muted: #796b58;
+  border-color: color-mix(in srgb, var(--folio-ink) 26%, var(--folio-paper));
+}
+.term-node[data-paper-theme='paper-cotton'] { --folio-paper: #cfc7bc; }
+.term-node[data-paper-theme='paper-moonlit'] {
+  --folio-paper: #e5e4e0; --folio-ink: #302d38; --folio-muted: #716a79;
+}
+.term-node[data-paper-theme='paper-midnight'] {
+  --folio-paper: #262431; --folio-ink: #e8e2d5; --folio-muted: #b3a99b;
+}
+.term-node[data-paper-theme] > .term-node__header,
+.term-node[data-paper-theme] > .term-node__labelrow {
+  --text: var(--folio-ink);
+  --muted: var(--folio-muted);
+  --panel: var(--folio-paper);
+  --panel-header: color-mix(in srgb, var(--folio-paper) 94%, var(--folio-ink));
+  --border: color-mix(in srgb, var(--folio-ink) 22%, transparent);
+  background: var(--folio-paper);
+  color: var(--folio-ink);
+}
+.term-node[data-paper-theme] > .term-node__header {
+  background: linear-gradient(color-mix(in srgb, var(--folio-paper) 94%, var(--folio-ink)), var(--folio-paper));
+  box-shadow: inset 0 -1px color-mix(in srgb, var(--folio-ink) 13%, transparent);
+}
+.term-node[data-paper-theme] .term-node__title-text,
+.term-node[data-paper-theme] .term-node__title {
+  font-family: 'Courier Prime', monospace;
+  letter-spacing: 0.035em;
+}
+.term-node[data-paper-theme] > .term-node__labelrow {
+  box-shadow: inset 0 -1px color-mix(in srgb, var(--folio-ink) 16%, transparent);
+}
+.term-node[data-paper-theme] .term-node__labeladd,
+.term-node[data-paper-theme] .term-node__mdhint {
+  color: var(--folio-muted);
+  background: transparent;
+}
+.term-node[data-paper-theme] .term-node__labeladd {
+  border-color: color-mix(in srgb, var(--folio-ink) 22%, transparent);
+}
+.term-node[data-paper-theme] .term-node__labeladd:hover,
+.term-node[data-paper-theme] .term-node__mdhint:hover {
+  color: var(--folio-ink);
+  background: color-mix(in srgb, var(--folio-ink) 8%, transparent);
 }

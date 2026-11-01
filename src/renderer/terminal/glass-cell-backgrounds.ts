@@ -121,6 +121,7 @@ type PanelFill = { rgb: Rgb; alpha: number }
 
 /** The panel's lift/sink before any text is considered; null only under Reduce Transparency. */
 function panelFill(c: Rgb, theme: { bg: Rgb; fg: Rgb }, t: number): PanelFill | null {
+  if (t < 0) return { rgb: c, alpha: 0.45 } // Paper: a pigment wash over the existing paper texture.
   if (t >= 1) return null // Reduce Transparency: the app's panels, opaque
   const [lc, ac, bc] = oklab(c)
   const [lb, ab, bb] = oklab(theme.bg)
@@ -150,6 +151,13 @@ function panelFill(c: Rgb, theme: { bg: Rgb; fg: Rgb }, t: number): PanelFill | 
  * (worst contrast 1.00).
  */
 function panelTextOk(f: Rgb, c: Rgb, fill: PanelFill, theme: { bg: Rgb; fg: Rgb }, t: number): boolean {
+  if (t < 0) {
+    const own = contrastRatio(f, c)
+    if (own < TEXT_MIN_CONTRAST) return true // xterm's foreground contrast path resolves these
+    const lo = composite(fill.rgb, theme.bg.map(v => Math.round(v * .84)) as unknown as Rgb, fill.alpha)
+    const hi = composite(fill.rgb, theme.bg.map(v => Math.min(255, Math.round(v * 1.1))) as unknown as Rgb, fill.alpha)
+    return Math.min(contrastRatio(f, lo), contrastRatio(f, hi)) >= Math.min(4.5, own)
+  }
   if (fill.alpha === 0) return true // drawn as nothing: the plain glass
   const own = contrastRatio(f, c)
   if (own < TEXT_MIN_CONTRAST) return true

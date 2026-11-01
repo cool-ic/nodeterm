@@ -11214,3 +11214,16 @@ partial/unknown delivery, with no resend. The SessionStart idle rescue latch sto
 agent and receive time; foreign/missing idle identity never creates proof or changes the
 renderer-visible session. These boundaries have behavioral regressions in
 `core/windows-delivery-safety.test.ts` and the mirror/client suites.
+
+
+## Paper & Ink terminal appearance
+
+Opt-in paper-ink palette paints a static local texture on canvas terminals, card modals and the settings preview. Do not transform glyphs, change fit-host geometry or remount xterm to implement paper effects. Paper remains opaque when the app uses Liquid Glass. Typography uses existing xterm options. Typewriter sound is off by default and observed once at App with passive trusted focused-textarea keyboard/composition listeners; never attach it to PTY output or paste, never delay input, and keep hidden windows silent. Audio must fail harmlessly and release resources on disable/unmount. Nocturne material is pre-baked into bundled 2× PNGs using the original demo shader, Moonlit ambient tint, then base-paper multiply; terminals render transparent glyph backgrounds over that opaque paper. No runtime GPU bake, Blob URL, timeout or texture overlay over text. Keep ink canvases outside the xterm-owned subtree so renderer recovery cannot remove them. Courier Prime loads before xterm grid measurement with a bounded wait. The ink addon paints only buffer-confirmed echoes, expires in 420ms, clears on scroll/resize/blur/buffer changes, respects Reduce Motion and shrinks idle canvases. Never paint concealed input or use guessed CJK widths. No per-terminal audio context or perpetual animation loop. Vendored Nocturne MIT and Courier Prime OFL licences ship on every desktop target.
+
+Paper themes also tint terminal headers/label rows and use Courier Prime titles. The canvas minimap and restore control are removed; do not reintroduce their status subscriptions or fit obstacles. HUD placement is independent.
+
+Paper proportions are centralized in terminal/paper-layout.ts: scale the 680px reference tile and minimum margins with effective fontSize/15; convert the demo font-size-based line spacing to xterm font-box-based lineHeight. Canvas/modal/settings preview share this path. Do not tune texture pixels independently of glyph scale.
+
+Light paper ink palettes include extendedAnsi (indices16–255), since shell prompts commonly bypass ANSI16. paper-colours.ts checks against a darker textured-paper sample. Use lit-paper RGB beneath transparent xterm for contrast; keep ordinary/dark themes unchanged.
+
+Light-paper dim rendering uses paper-dim.ts adapters (DOM/WebGL): check contrast after dim alpha, not before. Paper cell mode -1 reuses glass-cell-backgrounds for default transparency and45% explicit-panel pigment washes, with per-run contrast fallback; preserve inverse and renderer highlights. These private renderer hooks require revalidation with xterm upgrades.

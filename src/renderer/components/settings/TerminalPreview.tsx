@@ -1,3 +1,5 @@
+import { installPaperDimReadability } from '../../terminal/paper-dim'
+import { paperLayoutStyle } from '../../terminal/paper-layout'
 import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { useSettings } from '../../state/settings'
@@ -5,6 +7,7 @@ import { applyLiveOptions, xtermOptionsFromSettings } from '../../terminal/termi
 import { useXtermVisualSettings } from '../../terminal/useXtermVisualSettings'
 import { activateUnicode11 } from '../../terminal/unicode-width'
 import { quantizeCharSize } from '../../terminal/char-size-quantize'
+import { paperThemeClass } from '../../terminal/themes'
 
 /** Fixed grid — the preview is a sample, not a fitted terminal, so there is no FitAddon and no
  *  ResizeObserver to keep in sync. Wide enough for the sample lines below without wrapping. */
@@ -24,6 +27,7 @@ const SAMPLE = [
   '\x1b[90m│\x1b[0m \x1b[31m✗\x1b[0m workspace-files  \x1b[90m  1 failed\x1b[0m \x1b[90m│\x1b[0m',
   '\x1b[90m└────────────────────────────────┘\x1b[0m',
   '\x1b[1mbold\x1b[0m \x1b[2mdim\x1b[0m \x1b[3mitalic\x1b[0m \x1b[4munderline\x1b[0m \x1b[7mreverse\x1b[0m',
+  '中文双宽 · English · 0123456789',
   // Eight normal backgrounds (40-47) then eight bright ones (100-107).
   [40, 41, 42, 43, 44, 45, 46, 47, 100, 101, 102, 103, 104, 105, 106, 107]
     .map((c) => `\x1b[${c}m  `)
@@ -68,10 +72,12 @@ export function TerminalPreview(): React.JSX.Element {
     activateUnicode11(term)
     termRef.current = term
     term.open(hostRef.current!)
+    const releasePaperDim = installPaperDimReadability(term)
     // Same cell width as the real terminals, so the preview shows the layout users get.
     quantizeCharSize(term)
     term.write(SAMPLE)
     return () => {
+      releasePaperDim()
       termRef.current = null
       term.dispose()
     }
@@ -87,7 +93,7 @@ export function TerminalPreview(): React.JSX.Element {
 
   return (
     <div className="settings-term-preview">
-      <div ref={hostRef} />
+      <div ref={hostRef} style={paperLayoutStyle(visual.terminalTheme, visual.fontSize)} className={paperThemeClass(visual.terminalTheme).trim() || undefined} />
     </div>
   )
 }

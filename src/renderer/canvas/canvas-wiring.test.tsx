@@ -90,8 +90,6 @@ describe('the canvas rail is fit-view chrome', () => {
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\] \.canvas-rail--left \{[\s\S]*?left: 0;/)
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\] \.canvas-rail--right \{[\s\S]*?right: 0;/)
     expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\] \.canvas-rail__toggle \{[^}]*width: 14px;/)
-    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.minimap-dock/)
-    expect(STYLES_SRC).toMatch(/canvas-root\[data-rail-collapsed\][\s\S]*?\.minimap-restore/)
   })
 })
 
@@ -689,4 +687,8 @@ describe('the last-session offer joins the one-confirmation-at-a-time guard (iss
     )
     expect(body).toContain('if (id === store.activeProjectId) commitActiveToStore()')
   })
+})
+
+it("does not mount a minimap or its restore dock", () => {
+  expect(CANVAS_SRC).not.toMatch(/VisibleMiniMap|StatusAwareMiniMap|MinimapDock/)
 })

@@ -171,23 +171,14 @@ describe('idle-window animation gate', () => {
     expect(kf).toMatch(/0%,\s*100%\s*\{\s*opacity:\s*0\.7/)
   })
 
-  it('the unread glow and the minimap working/unread beats are bounded and rest lit', () => {
+  it('the unread glow is bounded and rests lit', () => {
     // Infinite, these kept the compositor at display rate for as long as any node stayed unread
     // (measured: ~120% -> ~26% idle renderer+GPU with every status animation paused).
     const rule = ruleBody(css, '.react-flow__node:has(.term-node.unread)::after')
     expect(rule).toMatch(/animation:\s*nt-unread-glow\s+2s\s+ease-in-out\s+4\b/)
     expect(rule).toMatch(/opacity:\s*0\.85/)
     expect(keyframesBody(css, 'nt-unread-glow')).toMatch(/0%,\s*100%\s*\{\s*opacity:\s*0\.85/)
-    for (const [sel, kf] of [
-      ['.minimap .mm-unread', 'mm-pulse-unread'],
-      ['.minimap .mm-working', 'mm-pulse-soft']
-    ]) {
-      // The selector also heads a shared stroke-width group rule; take the rule that animates.
-      const r = css.split(sel + ' {').slice(1).map((b) => b.slice(0, b.indexOf('}'))).find((b) => b.includes('animation:')) ?? ''
-      expect(r).toMatch(new RegExp(`animation:\\s*${kf}\\s+[\\d.]+s\\s+ease-in-out\\s+4\\b`))
-      expect(r).not.toMatch(/infinite/)
-      expect(keyframesBody(css, kf)).toMatch(/0%,\s*100%\s*\{\s*stroke-opacity:\s*1\b/)
-    }
+
   })
 
   it('never pauses the notch HUD, whose window is never focused', () => {

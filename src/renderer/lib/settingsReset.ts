@@ -26,6 +26,8 @@ export const TERMINAL_RESET_KEYS = [
   'cursorBlink',
   'terminalLineHeight',
   'terminalLetterSpacing',
+  'terminalTypewriterSound',
+  'terminalTypewriterVolume',
   'terminalGpuRendering'
 ] as const satisfies readonly (keyof Settings)[]
 // NOTE: `tmuxScrollback` is deliberately absent even though the terminal renders with it — it

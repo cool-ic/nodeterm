@@ -16,10 +16,7 @@ import {
   type Rect
 } from './notch-hud-geometry'
 import {
-  CANVAS_MINIMAP_HEIGHT,
-  CANVAS_MINIMAP_MARGIN,
   HUD_BOTTOM_RIGHT_INSET,
-  HUD_DOCK_CLEARANCE,
   type NotchAlign
 } from '../shared/notch-hud'
 
@@ -359,18 +356,6 @@ describe('hudPlacement — the bottom-right dock (T227)', () => {
     const g = hudGeometry(docked())
     expect(g.x + p.capsuleX).toBe(g.x + g.width - HUD_EDGE_MARGIN)
     expect(g.y + g.height - p.capsuleBottom!).toBe(g.y + g.height - HUD_BOTTOM_RIGHT_INSET)
-  })
-
-  it('THE RELATION — the capsule lands on a ledge above the minimap, with the stated clearance', () => {
-    // Not a magic number: the inset must clear the minimap's own footprint (its dock margin, its
-    // declared height, the dock's 1px borders) by HUD_DOCK_CLEARANCE. If any of those grows, this
-    // fails until somebody decides what to do about it — the capsule may not slide back under the
-    // map unnoticed.
-    expect(HUD_BOTTOM_RIGHT_INSET).toBeGreaterThanOrEqual(
-      CANVAS_MINIMAP_MARGIN + CANVAS_MINIMAP_HEIGHT + HUD_DOCK_CLEARANCE
-    )
-    // …and the placement uses it, so the ledge is real, not a constant only tests know.
-    expect(hudPlacement(dockPlace()).capsuleBottom).toBe(HUD_BOTTOM_RIGHT_INSET)
   })
 
   it('grows the panel UP and LEFT: its right edge is the capsule’s, inside the window', () => {

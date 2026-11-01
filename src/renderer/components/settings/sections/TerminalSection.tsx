@@ -5,6 +5,7 @@ import { FieldRow } from '../FieldRow'
 import { TerminalPreview } from '../TerminalPreview'
 import { FontPicker } from '../FontPicker'
 import { ThemeSelect } from '../ThemeSelect'
+import { PAPER_TYPOGRAPHY, TERMINAL_THEMES } from '../../../terminal/themes'
 import { SectionReset } from '../SectionReset'
 import { Switch } from '@renderer/ui/Switch'
 import { Select } from '@renderer/ui/Select'
@@ -34,6 +35,10 @@ import type { Settings, TerminalCursorInactiveStyle, TerminalCursorStyle } from 
  * searching either word still surfaces the row that holds it.
  */
 const ROWS = {
+  typewriter: {
+    title: 'Paper & Ink',
+    keywords: ['paper', 'typewriter', 'ink', 'sound', 'volume', 'typing', 'nocturne', '纸张', '打字机']
+  },
   theme: {
     title: 'Colour theme',
     keywords: [
@@ -191,6 +196,33 @@ export function TerminalSection({ isActive }: { isActive: boolean }): React.JSX.
               />
             }
           />
+        </div>
+      </SearchableRow>
+
+      <SearchableRow {...ROWS.typewriter}>
+        <div className="space-y-3">
+          <GroupHeading>Paper & Ink</GroupHeading>
+          <p className="text-[12px] text-muted">Linen paper, no lamp. Choose a palette with Courier Prime at 15px and 1.45 line spacing.</p>
+          <div className="paper-presets" role="group" aria-label="Paper palette presets">
+            {TERMINAL_THEMES.filter((t) => t.paper).map((t) => (
+              <button type="button" key={t.id} className="paper-preset"
+                aria-pressed={settings.terminalTheme === t.id}
+                style={{ background: t.theme.background, color: t.theme.foreground }}
+                onClick={() => update({ ...PAPER_TYPOGRAPHY, terminalTheme: t.id })}>
+                <strong>{t.label.replace(' · Linen', '')}</strong>
+                <span className="paper-preset__sample">Aa 中文 0123</span>
+                <span className="paper-preset__colours" aria-hidden="true">
+                  {[t.theme.red, t.theme.green, t.theme.yellow, t.theme.blue, t.theme.magenta, t.theme.cyan].map((c) => <i key={c} style={{ background: c }} />)}
+                </span>
+              </button>
+            ))}
+          </div>
+          <FieldRow label="Typewriter sound"
+            description="Soft mechanical feedback in the terminal you type in. Output, paste and shortcuts stay silent; input is never delayed."
+            control={<Switch ariaLabel="Typewriter sound" checked={settings.terminalTypewriterSound} onChange={(v) => update({ terminalTypewriterSound: v })} />} />
+          <FieldRow label="Typing volume"
+            control={<NumberField ariaLabel="Typing volume" value={settings.terminalTypewriterVolume} min={0} max={100} step={5}
+              onChange={(v) => update({ terminalTypewriterVolume: Math.max(0, Math.min(100, v)) })} />} />
         </div>
       </SearchableRow>
 

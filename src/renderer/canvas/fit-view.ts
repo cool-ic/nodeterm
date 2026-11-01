@@ -17,7 +17,6 @@
 export const CANVAS_CHROME_SELECTOR = [
   '[data-canvas-chrome]',
   '.dock',
-  '.minimap',
   // T235: the two top clusters (`.sessions-icon-cluster`, `.controls-cluster`) are gone — their
   // buttons live inside the rail cards, which are `data-canvas-chrome` elements. Naming the dead
   // selectors here would reserve a rect that no longer exists.

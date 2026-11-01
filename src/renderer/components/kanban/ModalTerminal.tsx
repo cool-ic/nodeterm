@@ -1,4 +1,7 @@
+import { paperLayoutStyle } from '../../terminal/paper-layout'
 import { useContextEnsure } from '../../terminal/useContextEnsure'
+import { PaperInkAddon } from '../../terminal/paper-ink'
+import { paperThemeClass } from '../../terminal/themes'
 import { transcriptSessionFor } from '../../lib/transcriptSession'
 import { FIND_DECORATIONS } from '../../lib/palette'
 import { isLocalOnSshCanvas } from '../../lib/localOnSshCanvas'
@@ -311,6 +314,7 @@ export function ModalTerminal({
     fitRef.current = fit
     transportRef.current = transport
     term.open(hostRef.current!)
+    term.loadAddon(new PaperInkAddon())
     patchImeModeSwitch(term)
     // Renderer-parity with the canvas terminals (see char-size-quantize): the modal co-views
     // the same session, so its column math must match what the canvas draws.
@@ -822,7 +826,7 @@ export function ModalTerminal({
           onClose={onCloseSearch}
         />
       )}
-      <div ref={hostRef} className="kanban-modal__term" {...{ [FONT_ZOOM_NODE_ATTR]: nodeId }} />
+      <div ref={hostRef} style={paperLayoutStyle(visual.terminalTheme, visual.fontSize)} className={`kanban-modal__term${paperThemeClass(visual.terminalTheme)}`} {...{ [FONT_ZOOM_NODE_ATTR]: nodeId }} />
       {linkMenu && (
         <ContextMenu
           x={linkMenu.x}

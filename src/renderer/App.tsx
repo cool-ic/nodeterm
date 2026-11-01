@@ -40,8 +40,10 @@ import {
 import { useGlassA11y } from './lib/useGlassA11y'
 import { GlassRefraction } from './components/GlassRefraction'
 import { isLiquidGlass } from './lib/appTheme'
+import { useTypewriterSound } from './terminal/useTypewriterSound'
 
 export default function App() {
+  useTypewriterSound()
   // Apply the terminal-rendering setting to the two GPU coordinators, live. 'auto' is
   // per-terminal WebGL on every platform (see `resolveTerminalRenderer` for the history of the
   // macOS branch and the evidence that collapsed it). 'off' reclaims every context; 'shared'

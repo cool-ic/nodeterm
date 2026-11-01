@@ -123,14 +123,20 @@ function ThemeMenu({
             fade (the menu itself is the glass, and a mask there would fade the blur too). */}
         <div className="theme-select__list">
           <Group
+            label="Paper & Ink"
+            themes={TERMINAL_THEMES.filter((t) => t.paper)}
+            value={value}
+            onPick={onPick}
+          />
+          <Group
             label="Dark"
-            themes={TERMINAL_THEMES.filter((t) => t.dark)}
+            themes={TERMINAL_THEMES.filter((t) => t.dark && !t.paper)}
             value={value}
             onPick={onPick}
           />
           <Group
             label="Light"
-            themes={TERMINAL_THEMES.filter((t) => !t.dark)}
+            themes={TERMINAL_THEMES.filter((t) => !t.dark && !t.paper)}
             value={value}
             onPick={onPick}
           />

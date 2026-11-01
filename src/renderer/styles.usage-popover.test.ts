@@ -196,7 +196,7 @@ describe('.usage-popover opens into the window and clear of the rail card (T246/
     // The collapse rule reaches the body's CHILDREN; the cluster is a sibling of the body now, so it
     // needs its own selector — otherwise the two pills would float over the collapsed tab.
     expect(CSS).toMatch(
-      /\.canvas-root\[data-rail-collapsed\] \.canvas-rail__badges,[\s\S]{0,200}?display: none;/
+      /\.canvas-root\[data-rail-collapsed\] \.canvas-rail__badges,?[\s\S]{0,200}?display: none;/
     )
   })
 

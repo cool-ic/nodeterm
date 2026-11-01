@@ -1,10 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  CANVAS_MINIMAP_HEIGHT,
-  CANVAS_MINIMAP_MARGIN,
-  CANVAS_MINIMAP_WIDTH,
   HUD_BOTTOM_RIGHT_INSET,
-  HUD_DOCK_CLEARANCE,
   NOTCH_ALIGNS,
   NOTCH_ALIGN_DEFAULT,
   NOTCH_OFFSET_MAX,
@@ -89,21 +85,6 @@ describe('sanitizeNotchWidth (moved here from notch-hud.ts, behaviour pinned)', 
   })
 })
 
-// T243: the minimap footprint the docked capsule avoids. These were @xyflow/react's defaults and
-// the canvas never declared them — the pin says the avoidance value is BUILT from them, so a
-// change to any piece has to be looked at, and the +2 (the dock's own 1px borders) is spelled out
-// rather than folded into a magic number.
-describe('the minimap footprint the bottom-right dock avoids (T243)', () => {
-  it('is the library defaults we adopted, plus the canvas edge margin', () => {
-    expect(CANVAS_MINIMAP_WIDTH).toBe(200)
-    expect(CANVAS_MINIMAP_HEIGHT).toBe(150)
-    expect(CANVAS_MINIMAP_MARGIN).toBe(22) // canvas's --float-gap
-    expect(HUD_DOCK_CLEARANCE).toBe(12)
-  })
-  it('the inset clears the minimap with the stated clearance', () => {
-    expect(HUD_BOTTOM_RIGHT_INSET).toBe(
-      CANVAS_MINIMAP_MARGIN + (CANVAS_MINIMAP_HEIGHT + 2) + HUD_DOCK_CLEARANCE
-    )
-    expect(HUD_BOTTOM_RIGHT_INSET).toBe(186)
-  })
+it('preserves the independently configured HUD inset', () => {
+  expect(HUD_BOTTOM_RIGHT_INSET).toBe(186)
 })

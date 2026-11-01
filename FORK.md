@@ -116,3 +116,12 @@ App 重启后节点被接回来时，画布拿这行记录核对一遍：对得�
 桌面主进程读取 userData 下 `agent-mail.json`（`enabled`、`projectId`、`teamConfig`），成员需显式 `wake: true`。`wake.mjs` 通过文件事件观察信箱和原生 Codex 回合状态，在已确认身份、正常结束和空输入框时合并唤醒一次；hook提醒按回合去重，主动唤醒按独立消息序号去重，旧信未读不会压住后来新信；忙碌、中断、草稿、审批或未知状态延后。关闭 enabled 即停用，不删除未读。此首版只覆盖本机 Codex；无额外服务/UI，不是同OS账号间安全隔离，也不承诺不确定投递的自动重试或 exactly-once。
 
 验证：`node --no-warnings --test scripts/agent-mail/*.test.mjs` 与 `vitest run src/core/pty-mail-wake.test.ts`。真实部署还需按成员验证 node/session 绑定、原生 hook、空闲唤醒与停止状态；单测通过不代替这些检查。
+
+
+### Paper & Ink（2026-11-02）
+
+可选Cotton/Linen/Midnight/Moonlit纸面、Courier Prime排版和人工按键敲击音（默认关闭）。基于Typewriter Nocturne的MIT实现，许可及字体OFL随包分发；不含物理打字机框架，不延迟PTY输入或输出。
+
+纸面由原demo shader预生成PNG，无启动GPU编译或常驻材质动画。纸纹、字距和留白随字号联动；实测15px为9×22字格，30px为18×44。浅色纸面重设16/256色墨色，独立修正dim文字对比和单元格背景，让应用输入区保留底色并透出纸纹；反色、高亮及对比不足的特殊面板保留原样。
+
+标题与标签栏随纸面配色。移除canvas minimap，以及终端标题栏的语音、AI命名、评论、分享、隐藏连接五个按钮。普通主题与终端会话行为保持；DOM/WebGL适配使用受检查的内部接口，升级xterm必须复验。实验性shared glyph渲染器尚未覆盖纸面单元格适配。

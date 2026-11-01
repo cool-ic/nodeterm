@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type React from 'react'
 import { useSettings } from '../state/settings'
-import { resolveTerminalTheme } from '../terminal/themes'
+import { isPaperTheme, resolveTerminalTheme } from '../terminal/themes'
 import { isLiquidGlass } from './appTheme'
 import { GLASS_READABLE_TICK, glassTint, resolveGlassSlider, type GlassTint } from './glassContrast'
 import { useGlassA11y } from './useGlassA11y'
@@ -20,7 +20,7 @@ export function useTerminalGlass(terminalTheme: string, readableFloor = false): 
   tint: GlassTint | null
   vars: React.CSSProperties | null
 } {
-  const glass = isLiquidGlass(useSettings((s) => s.settings.appTheme))
+  const glass = isLiquidGlass(useSettings((s) => s.settings.appTheme)) && !isPaperTheme(terminalTheme)
   const slider = resolveGlassSlider(useSettings((s) => s.settings.glassTint))
   const glassSlider = readableFloor ? Math.max(slider, GLASS_READABLE_TICK) : slider
   const glassA11y = useGlassA11y()

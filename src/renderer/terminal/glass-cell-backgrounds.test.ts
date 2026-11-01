@@ -252,6 +252,15 @@ function fakeAddon(cells: Record<number, FakeCell>, rows: Record<number, Record<
 describe('installGlassCellBackgrounds', () => {
   const panel = CM_RGB | 0x3a3a3a
 
+  it('paper mode textures explicit panels, clears false rectangles and retains inverse', () => {
+    const { addon, rr, draw } = fakeAddon({ 0: { bg: panel } })
+    installGlassCellBackgrounds(addon)
+    setGlassCellAlpha(rr._terminal, -1)
+    expect(draw(0, DIM)[7]).toBe(0)
+    expect(draw(0, panel)[7]).toBeCloseTo(Math.sqrt(.45),6)
+    expect(draw(INVERSE, panel)[7]).toBe(1)
+  })
+
   it('glass: an app panel becomes its premultiplied lift, a dim run vanishes, overrides stay', () => {
     const { addon, rr, draw } = fakeAddon({ 0: { bg: panel } })
     expect(installGlassCellBackgrounds(addon)).toBe(true)
