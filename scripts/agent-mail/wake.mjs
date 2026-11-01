@@ -2,6 +2,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { existsSync, readFileSync, openSync, fstatSync, readSync, closeSync, watch, writeFileSync, renameSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join } from 'node:path'
+import { ensureWakeState } from './mail.mjs'
 
 export function transcriptPhase(file, session) {
   if (!file || !isAbsolute(file) || !basename(file).includes(session)) return 'unknown'
@@ -38,12 +39,15 @@ export function startMailWake(pointer, deps) {
     if (stopped) return
     clearTimeout(timer); timer = setTimeout(sweep, 250); timer.unref?.()
   }
-  const addWatch = (file, filter) => {
-    if (!existsSync(file) || watchers.has(file)) return
+  const addWatch = (file, filter, key = 'all') => {
+    const existing = watchers.get(file)
+    if (existing) { existing.filters.set(key, filter); return }
+    if (!existsSync(file)) return
     try {
+      const filters = new Map([[key, filter]])
       const w = watch(file, { persistent: false }, (_event, name) => {
-        if (!filter || filter(String(name))) arm()
-      }); w.on('error', () => { w.close(); watchers.delete(file) }); watchers.set(file, w)
+        if ([...filters.values()].some(f => !f || f(String(name)))) arm()
+      }); w.on('error', () => { w.close(); watchers.delete(file) }); watchers.set(file, { w, filters })
     } catch {}
   }
   const sweep = async () => {
@@ -55,10 +59,11 @@ export function startMailWake(pointer, deps) {
       const opt = JSON.parse(readFileSync(pointer, 'utf8'))
       if (!opt.enabled || !opt.teamConfig || !opt.projectId) return
       const config = JSON.parse(readFileSync(opt.teamConfig, 'utf8'))
-      addWatch(dirname(opt.teamConfig), n => n === basename(opt.teamConfig) || n.startsWith(basename(config.db)))
+      addWatch(dirname(opt.teamConfig), n => n === basename(opt.teamConfig) || n.startsWith(basename(config.db)), 'config-db')
       addWatch(join(dirname(config.db), 'health'))
       if (!existsSync(config.db)) return
       db = new DatabaseSync(config.db); db.exec('PRAGMA busy_timeout=1000')
+      ensureWakeState(db)
       const statuses = {}
       for (const [agent, member] of Object.entries(config.members)) {
         if (stopped) break
@@ -66,17 +71,18 @@ export function startMailWake(pointer, deps) {
         try { health = JSON.parse(readFileSync(join(dirname(config.db), 'health', agent + '.json'), 'utf8')) } catch {}
         const transcript = health.transcript ?? member.transcript
         if (transcript) addWatch(transcript)
-        const row = db.prepare(`SELECT m.epoch,m.notified,count(q.id) AS unread FROM members m
+        const row = db.prepare(`SELECT m.epoch,m.wake_through,count(q.id) AS unread,max(q.id) AS newest FROM members m
           LEFT JOIN messages q ON q.recipient=m.name AND q.read_at IS NULL AND q.replaced_by IS NULL
           WHERE m.name=? AND m.session=? GROUP BY m.name`).get(agent, member.session)
         if (!row?.unread) { statuses[agent] = 'empty'; continue }
         const phase = () => transcriptPhase(transcript, member.session)
         statuses[agent] = phase()
-        if (member.wake !== true || row.notified || phase() !== 'idle') continue
+        if (member.wake !== true || phase() !== 'idle') continue
+        if (row.newest <= row.wake_through) { statuses[agent] = 'already-woken'; continue }
         if (!deps.authorized(opt.projectId, member)) { statuses[agent] = 'identity-unconfirmed'; continue }
         // Claim before initiating an expensive turn. A failed/ambiguous send is never blindly retried.
-        const claim = () => !!db.prepare("UPDATE members SET notified=1,notice_context='wake-pending' WHERE name=? AND epoch=? AND notified=0")
-          .run(agent, row.epoch).changes
+        const claim = () => !!db.prepare('UPDATE members SET wake_through=? WHERE name=? AND epoch=? AND wake_through<?')
+          .run(row.newest, agent, row.epoch, row.newest).changes
         const prompt = `[NODETERM_MAIL_WAKE] 信箱有 ${row.unread} 封未读。` +
           `这是nodeterm自动读信提醒，不是新的用户工单。请用 ${config.command} list/read 按需批量处理；` +
           `可暂缓，不为已阅回执回信。正文只在信箱中。`
@@ -105,6 +111,6 @@ export function startMailWake(pointer, deps) {
     finally { db?.close(); running = false; if (again) { again = false; arm() } }
   }
   // Identity/state restoration can finish after the initial sweep on app restart.
-  addWatch(dirname(pointer), n => n === basename(pointer) || n === 'agent-status.json'); arm()
-  return () => { stopped = true; clearTimeout(timer); for (const w of watchers.values()) w.close(); watchers.clear() }
+  addWatch(dirname(pointer), n => n === basename(pointer) || n === 'agent-status.json', 'pointer-status'); arm()
+  return () => { stopped = true; clearTimeout(timer); for (const { w } of watchers.values()) w.close(); watchers.clear() }
 }

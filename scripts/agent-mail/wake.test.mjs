@@ -70,3 +70,32 @@ test('opt-out during terminal observation prevents the final write',async t=>{
   await wait(700);assert.equal(checked,true)
   assert.equal(b.db.prepare('SELECT notified FROM members WHERE name=?').get('b').notified,0)
 })
+
+test('passive hook notice cannot suppress later idle mail; wake dedupe survives restart',async t=>{
+  const dir=mkdtempSync(join(tmpdir(),'im-hook-idle-'));let stop
+  t.after(()=>{stop?.();rmSync(dir,{recursive:true,force:true})})
+  const db=join(dir,'mail.sqlite'),config=join(dir,'team.json'),pointer=join(dir,'pointer.json'),trace=join(dir,'rollout-s2.jsonl')
+  const b=new Mailbox(db);t.after(()=>b.close());b.bind('a','s1');b.bind('b','s2')
+  writeFileSync(config,JSON.stringify({db,command:'mail',members:{b:{node:'b',session:'s2',wake:true,transcript:trace}}}))
+  writeFileSync(pointer,JSON.stringify({enabled:true,projectId:'p',teamConfig:config}))
+  writeFileSync(trace,event('task_started'))
+  const first=b.send('a','s1',{to:'b',thread:'t',key:'first',body:'first'})
+  assert.ok(b.notice('b','s2','PostToolUse','work-turn'))
+  let calls=0
+  const deps={authorized:()=>true,wake:async (_m,_text,ready,claim)=>{
+    assert.ok(ready());assert.ok(claim());calls++;return 'sent'
+  }}
+  stop=startMailWake(pointer,deps)
+  await wait(500);assert.equal(calls,0)
+  appendFileSync(trace,event('task_complete'))
+  await wait(600);assert.equal(calls,1)
+  assert.equal(b.db.prepare('SELECT wake_through FROM members WHERE name=?').get('b').wake_through,first.id)
+  // The first message remains unread, as in the incident. New idle mail still wakes.
+  const next=b.send('a','s1',{to:'b',thread:'t',key:'later',body:'later while idle'})
+  await wait(600);assert.equal(calls,2)
+  assert.equal(b.db.prepare('SELECT wake_through FROM members WHERE name=?').get('b').wake_through,next.id)
+  b.notice('b','s2','PostToolUse','new-work-turn')
+  stop();stop=startMailWake(pointer,deps)
+  await wait(600);assert.equal(calls,2)
+  assert.equal(b.status('b','s2').unread,2)
+})

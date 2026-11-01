@@ -16,6 +16,16 @@ const required = (x, max) => {
   return x
 }
 
+// Passive hook delivery and active idle wake are separate facts. A hook notification
+// must never consume the wake eligibility of later messages in the same unread inbox.
+export function ensureWakeState(db) {
+  if (db.prepare('PRAGMA table_info(members)').all().some(x => x.name === 'wake_through')) return
+  try { db.exec('ALTER TABLE members ADD COLUMN wake_through INTEGER NOT NULL DEFAULT 0') }
+  catch (e) {
+    if (!db.prepare('PRAGMA table_info(members)').all().some(x => x.name === 'wake_through')) throw e
+  }
+}
+
 export class Mailbox {
   constructor(path) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
@@ -36,6 +46,7 @@ export class Mailbox {
       CREATE INDEX IF NOT EXISTS inbox ON messages(recipient, read_at, replaced_by, id);`)
     if (!this.db.prepare('PRAGMA table_info(members)').all().some(x => x.name === 'notice_context'))
       this.db.exec("ALTER TABLE members ADD COLUMN notice_context TEXT NOT NULL DEFAULT ''")
+    ensureWakeState(this.db)
   }
   close() { this.db.close() }
   tx(fn) {
@@ -55,7 +66,7 @@ export class Mailbox {
       const old = this.db.prepare('SELECT * FROM members WHERE name=?').get(agent)
       const epoch = old ? old.epoch + 1 : 1
       this.db.prepare(`INSERT INTO members(name,session,epoch) VALUES(?,?,?)
-        ON CONFLICT(name) DO UPDATE SET session=excluded.session,epoch=excluded.epoch,notified=0`)
+        ON CONFLICT(name) DO UPDATE SET session=excluded.session,epoch=excluded.epoch,notified=0,wake_through=0`)
         .run(agent, session, epoch)
       this.db.prepare('DELETE FROM reads WHERE member=?').run(agent)
       return { agent, epoch }
