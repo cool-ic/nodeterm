@@ -176,7 +176,7 @@ describe('the managed script for antigravity', () => {
     }
   })
 
-  it('leaves the other six scripts byte-identical to the pre-antigravity build', () => {
+  it('pins reviewed CLI script bodies independently of the shared revision stamp', () => {
     // sha256 of each agent's script as built by origin/main at 06afa9d7 (the merge this branch
     // was brought up to), computed from THAT commit's managed-script.ts — i.e. without any
     // antigravity code — and compared equal to this branch's output before being pinned here.
@@ -191,7 +191,15 @@ describe('the managed script for antigravity', () => {
     // RECOMPUTED again for #1150/#1175 on top of that: the shared codex prelude changed, so every
     // IDENTITY-ROOT variant (the second hash of each pair) moved — codex's most, since it reads its
     // payload first. The no-root (remote) variants did not.
+    // Product IM intentionally changes Codex/Qoder to synchronously return metadata-only
+    // notices (executed in managed-script.im.test.ts). Other CLI bodies must stay identical.
+    // The shared client revision is checked in managed-script-revision.test.ts; normalize
+    // only that stamp to this fixture's rev 5 so a protocol bump cannot mask body differences.
     const expected: Record<string, [string, string]> = {
+      qoder: [
+        'a81998ab6ade26ec8af8530064ad7c15a661de569d0d8acafac67c8fb65ddb2d',
+        '711f0dface6823761f416878fdde8ff9de6a5073c6d40f90f9e288ef5f5f6778'
+      ],
       // claude changed DELIBERATELY (issues #1112/#1153): it now reports which process ran the
       // hook (`$CLAUDE_PID`, foreground, tty — claude-pane-origin.ts). Recomputed from this
       // branch's builder; the other five are untouched, which is what this test still proves.
@@ -200,8 +208,8 @@ describe('the managed script for antigravity', () => {
         '84a8fc82dede3cf252138376b209e6469a22bfdc9b72f953eb35cb94ccd4fbe3'
       ],
       codex: [
-        '592fe88ee069db002c9f5c385a2e0465f9659bade3f0bd18c86b5b51f7644e59',
-        '0399f289c489544c377f90b747437621e6f7b8fe813bb2c46a364975bc8c6bbe'
+        '1d22ac328e88603ebf836b9190d1c7ea4ec123a3a8085a5708cd8332cb2162e5',
+        '68f660bde1460c5ffe5955d8546e7009595ce8f024402b570f74dc0bd1a8be8e'
       ],
       gemini: [
         'c3fb01424ff2a78012ffd6e87200430badfe60b05f603731bf205ee3b791f988',
@@ -220,7 +228,7 @@ describe('the managed script for antigravity', () => {
         '101b2d44c3fb11126cb8d487a425951b63f8f0c1262ed1aa2d6241bce060ec55'
       ]
     }
-    const sha = (s: string): string => createHash('sha256').update(s).digest('hex')
+    const sha = (s: string): string => createHash('sha256').update(s.replace(/^nt_client_rev=\d+$/m, 'nt_client_rev=5')).digest('hex')
     for (const [agent, [noRoot, withRoot]] of Object.entries(expected)) {
       expect(sha(buildManagedScript(agent, null)), `${agent} (no identity root)`).toBe(noRoot)
       expect(sha(buildManagedScript(agent, '/fixed/identity-root')), `${agent} (identity root)`).toBe(withRoot)
