@@ -261,6 +261,22 @@ describe('installGlassCellBackgrounds', () => {
     expect(draw(INVERSE, panel)[7]).toBe(1)
   })
 
+  it('paper re-evaluates a panel after restrictive text leaves the viewport', () => {
+    const bg = CM_RGB | 0xc3bfb8
+    const cells = { 0: { bg, fg: CM_RGB | 0x646464, ch: 'x' } }
+    const { addon, rr } = fakeAddon(cells)
+    rr._themeService.colors.background.rgba = 0xccc7c000
+    rr._themeService.colors.foreground.rgba = 0x302d38ff
+    installGlassCellBackgrounds(addon)
+    setGlassCellAlpha(rr._terminal, -1)
+    const model = [{ fg: 0, bg, x: 0, endX: 1, y: 0 }]
+    rr.updateBackgrounds(model)
+    expect(rr._vertices.attributes[7]).toBe(1)
+    cells[0].fg = CM_RGB | 0x302d38
+    rr.updateBackgrounds(model)
+    expect(rr._vertices.attributes[7]).toBeCloseTo(Math.sqrt(.45), 6)
+  })
+
   it('glass: an app panel becomes its premultiplied lift, a dim run vanishes, overrides stay', () => {
     const { addon, rr, draw } = fakeAddon({ 0: { bg: panel } })
     expect(installGlassCellBackgrounds(addon)).toBe(true)

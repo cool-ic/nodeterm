@@ -205,7 +205,7 @@ export function setGlassCellAlpha(term: Terminal, alpha: number | null): boolean
  * is computed once; each text colour is checked once; a failure makes the colour opaque for good —
  * and the pass that saw it is re-run (see the `updateBackgrounds` wrap) so the rows drawn before it
  * do not stay translucent on an idle screen. Dropped whenever the slider alpha or the theme's bg/fg
- * changes, and wholesale past `PANEL_VERDICTS_MAX` colours (truecolor images/video paint thousands).
+ * changes (paper additionally resets at each full viewport rebuild), and wholesale past `PANEL_VERDICTS_MAX` colours (truecolor images/video paint thousands).
  * ponytail: an OSC 4 palette-only change keeps the old verdicts until the next alpha/theme change;
  * key on the ANSI table too if an app is ever seen recolouring its panels that way.
  */
@@ -401,7 +401,11 @@ export function installGlassCellBackgrounds(addon: WebglAddon): boolean {
       | undefined
     if (typeof origUpdate === 'function') {
       proto[ORIGINAL_UPDATE_BACKGROUNDS] = origUpdate
-      proto.updateBackgrounds = function (this: unknown, model: unknown): void {
+      proto.updateBackgrounds = function (this: RectangleRendererLike, model: unknown): void {
+        // Paper verdicts belong to the current viewport, not every colour ever displayed.
+        // Start a fresh collection once per full rebuild; retain it for the settling pass so
+        // all rows of a panel agree. Glass keeps its existing conservative cache policy.
+        if ((cellAlpha.get(this._terminal) ?? 0) < 0) panelVerdicts.delete(this._terminal)
         flippedThisPass = false
         origUpdate.call(this, model)
         if (flippedThisPass) origUpdate.call(this, model)
