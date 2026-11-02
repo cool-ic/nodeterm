@@ -397,3 +397,16 @@ describe('addon-webgl internals the glass cell wrap relies on', () => {
     expect(bundle).toContain(needle)
   })
 })
+
+describe('adaptive paper backgrounds', () => {
+  const PAPER = { bg: [207,199,188] as const, fg: [42,35,28] as const }
+  it('keeps texture in dark teal / light text instead of dropping straight to opaque', () => {
+    const fill = glassPanelFill([40,73,83], PAPER, -1, [[210,220,225]])
+    expect(fill).not.toBeNull()
+    expect(fill!.alpha).toBeGreaterThan(.45)
+    expect(fill!.alpha).toBeLessThan(.99)
+  })
+  it('keeps the light input wash at its original opacity when contrast already passes', () => {
+    expect(glassPanelFill([207,199,188], PAPER, -1, [[42,35,28]])?.alpha).toBe(.45)
+  })
+})

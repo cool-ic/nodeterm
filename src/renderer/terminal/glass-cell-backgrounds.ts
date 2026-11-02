@@ -113,6 +113,14 @@ export function glassPanelFill(
   t: number,
   texts: readonly Rgb[]
 ): { rgb: Rgb; alpha: number } | null {
+  if (t < 0) {
+    // Keep as much texture as contrast permits, rather than jumping straight to a flat panel.
+    for (let step = 0; step <= 54; step++) {
+      const fill = { rgb: c, alpha: 0.45 + step * 0.01 }
+      if (texts.every(f => panelTextOk(f, c, fill, theme, t))) return fill
+    }
+    return null // Only genuinely impossible combinations retain an opaque background.
+  }
   const fill = panelFill(c, theme, t)
   return fill && texts.every((f) => panelTextOk(f, c, fill, theme, t)) ? fill : null
 }
@@ -203,7 +211,7 @@ export function setGlassCellAlpha(term: Terminal, alpha: number | null): boolean
  */
 interface PanelVerdicts {
   key: string
-  panels: Map<number, { fill: PanelFill | null; ok: Set<number> }>
+  panels: Map<number, { fill: PanelFill | null; ok: Set<number>; texts: Rgb[] }>
 }
 const panelVerdicts = new WeakMap<Terminal, PanelVerdicts>()
 /** ponytail: a full clear past this many panel colours, not an LRU — verdicts are cheap to redo. */
@@ -332,7 +340,7 @@ export function installGlassCellBackgrounds(addon: WebglAddon): boolean {
       let panel = verdicts.panels.get(bg & COLOR_BITS)
       if (!panel) {
         if (verdicts.panels.size >= PANEL_VERDICTS_MAX) verdicts.panels.clear()
-        verdicts.panels.set(bg & COLOR_BITS, (panel = { fill: panelFill(run, theme, t), ok: new Set() }))
+        verdicts.panels.set(bg & COLOR_BITS, (panel = { fill: panelFill(run, theme, t), ok: new Set(), texts: [] }))
       }
       // The run's text colours: a run spans cells of one bg but any fg, and the fg the renderer
       // passes is only the first cell's. Each colour is checked once per panel colour.
@@ -348,7 +356,13 @@ export function installGlassCellBackgrounds(addon: WebglAddon): boolean {
             : (mode === CM_P16 || mode === CM_P256) && colors?.ansi?.[f & 0xff]
               ? rgbOf(colors.ansi[f & 0xff].rgba)
               : rgbOf(fore)
-        if (panelTextOk(text, run, panel.fill, theme, t)) panel.ok.add(f & COLOR_BITS)
+        if (t < 0) {
+          panel.texts.push(text)
+          const previousAlpha = panel.fill.alpha
+          panel.fill = glassPanelFill(run, theme, t, panel.texts)
+          panel.ok.add(f & COLOR_BITS)
+          if (panel.fill?.alpha !== previousAlpha) flippedThisPass = true
+        } else if (panelTextOk(text, run, panel.fill, theme, t)) panel.ok.add(f & COLOR_BITS)
         else {
           panel.fill = null // opaque sticks for this colour
           flippedThisPass = true
