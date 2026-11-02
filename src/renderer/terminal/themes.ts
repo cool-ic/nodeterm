@@ -1,3 +1,4 @@
+import { BUNDLED_TERMINAL_FONT } from './paper-fonts'
 import { paperInk, PAPER_EXTENDED_ANSI } from './paper-colours'
 import type { ITheme } from '@xterm/xterm'
 
@@ -455,7 +456,7 @@ export function paperThemeClass(id: string | undefined): string {
 }
 
 export const PAPER_TYPOGRAPHY = {
-  fontFamily: '"Courier Prime", "JetBrainsMono Nerd Font Mono", "Courier New", Courier, monospace',
+  fontFamily: BUNDLED_TERMINAL_FONT,
   fontSize: 15,
   terminalLineHeight: 1.45,
   terminalLetterSpacing: 0,

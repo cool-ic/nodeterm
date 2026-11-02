@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Terminal } from '@xterm/headless'
-import { inkCellMatches, inkStrength, INK_SETTLE_MS } from './paper-ink'
+import { inkCellMatches, inkStrength, inkGeometry, INK_SETTLE_MS } from './paper-ink'
 
 describe('read-only ink feedback', () => {
   it('settles monotonically and expires without delaying terminal text', () => {
@@ -32,4 +32,13 @@ describe('read-only ink feedback', () => {
       expect(t.buffer.active.getLine(0)?.translateToString(true)).toBe('改文')
     } finally { t.dispose() }
   })
+})
+
+it('scales the settling halo and offset with type size, without lengthening its delay', () => {
+ const base=inkGeometry(15)
+ for(const size of [30,60,120]){
+  const actual=inkGeometry(size)
+  for(const key of ['blur','offsetX','offsetY'] as const)expect(actual[key]/base[key]).toBe(size/15)
+ }
+ expect(INK_SETTLE_MS).toBe(420)
 })

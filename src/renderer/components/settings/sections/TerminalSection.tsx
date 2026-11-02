@@ -1,3 +1,5 @@
+import { BUNDLED_TERMINAL_FONT } from '../../../terminal/paper-fonts'
+import { Button } from '@renderer/ui/Button'
 import { useSettings } from '../../../state/settings'
 import { SettingsSection } from '../SettingsSection'
 import { SearchableRow } from '../SearchableRow'
@@ -202,7 +204,7 @@ export function TerminalSection({ isActive }: { isActive: boolean }): React.JSX.
       <SearchableRow {...ROWS.typewriter}>
         <div className="space-y-3">
           <GroupHeading>Paper & Ink</GroupHeading>
-          <p className="text-[12px] text-muted">Linen paper, no lamp. Choose a palette with Courier Prime at 15px and 1.45 line spacing.</p>
+          <p className="text-[12px] text-muted">Paper palettes use bundled Maple Mono NF CN at 15px and 1.45 line spacing. Chinese, Latin and terminal icons use the same font on every machine.</p>
           <div className="paper-presets" role="group" aria-label="Paper palette presets">
             {TERMINAL_THEMES.filter((t) => t.paper).map((t) => (
               <button type="button" key={t.id} className="paper-preset"
@@ -229,9 +231,12 @@ export function TerminalSection({ isActive }: { isActive: boolean }): React.JSX.
       <SearchableRow {...ROWS.fontFamily}>
         <div className="space-y-3">
           <GroupHeading>Font</GroupHeading>
+          <Button onClick={() => update({ fontFamily: BUNDLED_TERMINAL_FONT })}>
+            Use bundled Chinese font (Maple Mono NF CN)
+          </Button>
           <FieldRow
             label="Font"
-            description="Only fonts installed on this machine are listed. The field below is the full CSS stack — keep a generic monospace last, so the setting still works on a machine without your font."
+            description="Bundled Maple Mono NF CN includes Chinese and terminal icons; no system installation is required. Other detected system fonts remain available."
             control={
               <FontPicker
                 value={settings.fontFamily}

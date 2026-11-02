@@ -3,6 +3,11 @@ import type { IBufferCell, ITerminalAddon, ITheme, Terminal } from '@xterm/xterm
 // Ink-settling treatment adapted from Typewriter Nocturne (MIT); see resources/licenses.
 
 export const INK_SETTLE_MS = 420
+/** Match the paper/type scale: a constant pixel halo vanishes relative to a large glyph. */
+export function inkGeometry(fontSize: number): { blur: number; offsetX: number; offsetY: number } {
+  const scale = Math.max(1, Number.isFinite(fontSize) ? fontSize : 15) / 15
+  return { blur: 1.6 * scale, offsetX: 0.25 * scale, offsetY: 0.15 * scale }
+}
 export function inkStrength(age: number): number {
   const t = Math.max(0, Math.min(1, age / INK_SETTLE_MS))
   return (1 - t * t * (3 - 2 * t)) * 0.48
@@ -90,10 +95,11 @@ export class PaperInkAddon implements ITerminalAddon {
         const x = s.col * cw + Math.floor((term.options.letterSpacing ?? 0) / 2)
         const y = row * ch + Math.round((ch - height) / 2) + height
         const k = inkStrength(now - s.at)
+        const ink = inkGeometry(term.options.fontSize ?? 15)
         c.fillStyle = inkColor(cell, term.options.theme)
-        c.shadowColor = c.fillStyle; c.shadowBlur = 1.6 * k * dpr
+        c.shadowColor = c.fillStyle; c.shadowBlur = ink.blur * k * dpr
         c.globalAlpha = k; c.fillText(s.chars, x, y)
-        c.shadowBlur = 0; c.globalAlpha = k * 0.45; c.fillText(s.chars, x + 0.25, y + 0.15)
+        c.shadowBlur = 0; c.globalAlpha = k * 0.45; c.fillText(s.chars, x + ink.offsetX, y + ink.offsetY)
       }
       c.globalAlpha = 1
       if (strikes.length) frame = requestAnimationFrame(draw)

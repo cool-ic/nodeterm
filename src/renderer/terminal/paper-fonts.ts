@@ -1,10 +1,13 @@
-/** Measure xterm only after the bundled face is available; a missing font cannot stall boot. */
+/** Fixed bundled family: no local() source, so system installations cannot change its metrics. */
+export const BUNDLED_TERMINAL_FONT = '"Nodeterm Maple Mono", monospace'
+
+/** Boot waits for the actual bundled faces before xterm's first grid measurement. */
 export async function loadPaperFonts(): Promise<void> {
   if (!document.fonts) return
-  let timer: ReturnType<typeof setTimeout> | undefined
-  await Promise.race([
-    Promise.all([400, 700].map((w) => document.fonts.load(`${w} 16px "Courier Prime"`).catch(() => []))),
-    new Promise<void>((resolve) => { timer = setTimeout(resolve, 800) })
-  ])
-  clearTimeout(timer)
+  await Promise.all(['Courier Prime', 'Nodeterm Maple Mono'].flatMap((family) =>
+    [400, 700].map(async (weight) => {
+      try { await document.fonts.load(`${weight} 16px "${family}"`, 'MW中文繁體\ue0b0') }
+      catch (error) { console.warn(`Bundled terminal font failed to load: ${family} ${weight}`, error) }
+    })
+  ))
 }

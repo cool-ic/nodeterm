@@ -16161,6 +16161,15 @@ button.pull-checks__name {
 }
 
 /* ---- Settings → Terminal: the live appearance preview ---- */
+/* Maple Mono NF CN 7.900, full CJK + Nerd Font coverage, OFL in resources/licenses. */
+@font-face {
+  font-family: 'Nodeterm Maple Mono'; font-style: normal; font-weight: 400; font-display: block;
+  src: url('./assets/fonts/maple-mono-nf-cn-regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Nodeterm Maple Mono'; font-style: normal; font-weight: 700; font-display: block;
+  src: url('./assets/fonts/maple-mono-nf-cn-bold.woff2') format('woff2');
+}
 @font-face {
   font-family: 'Courier Prime'; font-style: normal; font-weight: 400; font-display: swap;
   src: url('./assets/fonts/courier-prime-regular.woff2') format('woff2');
@@ -16227,7 +16236,7 @@ button.pull-checks__name {
 .paper-preset[aria-pressed='true'] { outline: 2px solid #ab8c58; outline-offset: 2px; }
 .paper-preset:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .paper-preset strong { font-size: 11px; font-weight: 600; }
-.paper-preset__sample { font: 14px 'Courier Prime', monospace; }
+.paper-preset__sample { font: 14px 'Nodeterm Maple Mono', monospace; }
 .paper-preset__colours { display: flex; gap: 5px; }
 .paper-preset__colours i { width: 8px; height: 8px; border-radius: 50%; }
 .terminal-paper-ink {
