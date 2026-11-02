@@ -109,16 +109,13 @@ App 重启后节点被接回来时，画布拿这行记录核对一遍：对得�
 
 我们的改动全部以 `local:` 前缀提交，落在上游某个基线之上。上游继续往前走，我们会跟着合。
 
-## 本机团队 IM（可选）
+## 通用 Agent IM
 
-派遣、IM、memory、恢复与验收的统一方法见 [团队协作协议](docs/canvas-protocol.md)。修改后运行 `sh scripts/install-canvas-protocol.sh install` 同步本机协议；项目自有指针需另行核对。
+桌面应用内置持久信箱和统一命令；Codex/Qoder复用同一身份、接口、通知调度与输入保护。原生会话经核验后自动登记，工作中通过hook给短提醒，空闲时合并唤醒，正文按需批读并显式ack。启动器使用应用自带运行时，不依赖个人项目脚本。使用、兼容边界与验收见[团队协作协议](docs/canvas-protocol.md)，目标语义见[特性规格](docs/agent-im-requirements.md)。
 
-`scripts/agent-mail/` 提供 SQLite 信箱、批读与显式确认；`team.mjs` 负责按配置绑定 session。项目 hook 只提供未读元数据，正文由 agent 主动读取，不再逐封强塞上下文。
+当前真实验收为macOS桌面Codex/Qoder（含纯Qoder往返）；其他CLI、远程与Server Edition未验自动通知。旧`agent-mail.json`和`team.mjs`作为兼容路径保留，旧消息不自动迁移。绑定不构成同OS账户安全沙箱；不承诺模型执行恰好一次。
 
-桌面主进程读取 userData 下 `agent-mail.json`（`enabled`、`projectId`、`teamConfig`），成员需显式 `wake: true`。`wake.mjs` 通过文件事件观察信箱和原生 Codex 回合状态，在已确认身份、正常结束和空输入框时合并唤醒一次；hook提醒按回合去重，主动唤醒按独立消息序号去重，旧信未读不会压住后来新信；忙碌、中断、草稿、审批或未知状态延后。关闭 enabled 即停用，不删除未读。此首版只覆盖本机 Codex；无额外服务/UI，不是同OS账号间安全隔离，也不承诺不确定投递的自动重试或 exactly-once。
-
-验证：`node --no-warnings --test scripts/agent-mail/*.test.mjs` 与 `vitest run src/core/pty-mail-wake.test.ts`。真实部署还需按成员验证 node/session 绑定、原生 hook、空闲唤醒与停止状态；单测通过不代替这些检查。
-
+协议更新后运行`sh scripts/install-canvas-protocol.sh install`同步本机副本。回归：`node --no-warnings --test scripts/agent-mail/*.test.mjs`及相关`hook-server.im`/`managed-script.im`/`pty-mail-wake`测试。
 
 ### Paper & Ink（2026-11-02）
 

@@ -6,7 +6,11 @@ export const QODER_EMPTY = 'Previous response\n───────────
 describe('Qoder startup composer evidence', () => {
   it('recognizes the measured empty composer, including CRLF', () => {
     expect(qoderEmptyComposer(QODER_EMPTY)).toBe(true)
+    expect(qoderEmptyComposer('\x1b[37m'+QODER_EMPTY.replace(/\n/g, '\x1b[0m\n\x1b[37m')+'\x1b[0m')).toBe(true)
     expect(qoderEmptyComposer(QODER_EMPTY.replace(/\n/g, '\r\n'))).toBe(true)
+  })
+  it('accepts the measured narrow Qoder 1.1.71 footer without cwd', () => {
+    expect(qoderEmptyComposer(QODER_EMPTY.replace('Performance Model', 'Auto Model').replace(' · ~/project',''))).toBe(true)
   })
   it.each([null, '', '$ ', 'Permission Required\nAllow this command to run?\n1. Allow once',
     QODER_EMPTY.replace('Type your message or @path/to/file', 'unfinished user draft'),

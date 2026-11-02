@@ -1,3 +1,4 @@
+import { qoderEmptyComposer } from './agents/qoder-startup-ready'
 import { NODE_SCOPE_ENV, ensureTerminalCliBin, ensureTerminalZsh } from './terminal-cli'
 import type { ChatPromptBlocked, ChatPromptResult, EmptyPromptResult, TextDeliveryResult } from '../shared/text-delivery'
 import { claudeScreenBlocksInput, readClaudeComposer, readClaudeScreen } from '../shared/agents/claude-screen'
@@ -1195,7 +1196,11 @@ export class PtyManager {
   private byPersistKey = new Map<string, string>()
   private mailWakeInput = new Map<string, { cancelled: boolean; committing: boolean; pending: Array<() => void> }>()
 
+  private mailboxInputListener?: (node:string)=>void
+  onMailboxInput(listener:(node:string)=>void):void {this.mailboxInputListener=listener}
+
   private guardMailboxInput(key: string | undefined, write: () => void): boolean {
+    if(key)this.mailboxInputListener?.(key)
     const gate = key ? this.mailWakeInput.get(key) : undefined
     if (!gate) return false
     gate.cancelled = true
@@ -7333,23 +7338,23 @@ export class PtyManager {
    */
   /** Opt-in mailbox wake. Only local Codex, a proven empty composer, and a still-idle bound turn.
    * Unknown/dialog/draft/interrupted paths never claim or type. This is not a general send API. */
-  async wakeMailbox(persistKey: string, notice: string, ready: () => boolean, claim: () => boolean): Promise<'sent' | 'held' | 'uncertain'> {
+  async wakeMailbox(persistKey: string, notice: string, ready: () => boolean, claim: () => boolean, cli: 'codex' | 'qoder' = 'codex'): Promise<'sent' | 'held' | 'uncertain'> {
     return this.serializePaneWrite(persistKey, async () => {
       const input = { cancelled: false, committing: false, pending: [] as Array<() => void> }
       this.mailWakeInput.set(persistKey, input)
       try {
       if (this.sessionByPersistKey(persistKey)?.sshRemote || !ready()) return 'held'
       const before = await this.paneOwner(persistKey).catch(() => null)
-      if (!before || isAgentPane(before, 'codex') !== 'agent') return 'held'
+      if (!before || isAgentPane(before, cli) !== 'agent') return 'held'
       const first = await this.captureSnapshot(persistKey).catch(() => '')
-      if (!emptyCodexPrompt(first)) return 'held'
+      if (!(cli === 'qoder' ? qoderEmptyComposer(first) : emptyCodexPrompt(first))) return 'held'
       await new Promise(resolve => setTimeout(resolve, 150))
       const second = await this.captureSnapshot(persistKey).catch(() => '')
       const after = await this.paneOwner(persistKey).catch(() => null)
-      if (input.cancelled || first !== second || !emptyCodexPrompt(second) || !after || !ready()
+      if (input.cancelled || first !== second || !(cli === 'qoder' ? qoderEmptyComposer(second) : emptyCodexPrompt(second)) || !after || !ready()
         || after.paneId !== before.paneId || after.tty !== before.tty
-        || agentPidIn(before, 'codex') === null
-        || agentPidIn(before, 'codex') !== agentPidIn(after, 'codex')) return 'held'
+        || agentPidIn(before, cli) === null
+        || agentPidIn(before, cli) !== agentPidIn(after, cli)) return 'held'
       input.committing = true
       if (!claim()) return 'held'
       // Preserve the claim even on uncertain write failure; resume/unread remain recoverable.

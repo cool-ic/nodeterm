@@ -1,6 +1,8 @@
 # Agent 团队协作与通信协议（nodeterm）
 
-版本：2.0 · 2026-11-03。权威正文是本文件；`scripts/install-canvas-protocol.sh` 将它同步至 `~/.nodeterm/canvas-protocol.md`。项目决定组织关系与授权；本文规定派遣、通信、恢复与验收方法。CLI 动词参数以当前 canvas skill/help 为准，不从历史示例猜测兼容性。
+版本：2.1 · 2026-11-03。权威正文是本文件；`scripts/install-canvas-protocol.sh` 将它同步至 `~/.nodeterm/canvas-protocol.md`。项目决定组织关系与授权；本文规定派遣、通信、恢复与验收方法。CLI 动词参数以当前 canvas skill/help 为准，不从历史示例猜测兼容性。
+
+产品目标及当前兼容缺口见 [通用 Agent IM 需求](agent-im-requirements.md)。该需求尚未全部实现；下文的本机接入说明不是通用兼容承诺。
 
 ## 1. 我们解决什么问题
 
@@ -38,12 +40,18 @@ LLM 只处理当前回合可见的上下文。把每封消息直接提交到输�
 - 先 `--dry-run` 校验；创建时用唯一 `--request-id`。回复丢失时用相同 ID 重试，明确拒绝后修正参数则用新 ID。不要因超时重复造工位。
 - `queued` 只代表等待启动投递，`delivered` 也只代表命令已送入终端。核对实际 native session、node、cwd、首回合与 hook；tmux 存活或标题一致不够。
 - 已有会话先核对归属再 resume。不同 CLI 的 resume/prompt 组合必须按当前实现验证；不可沿用“只有某 CLI 支持”的旧结论。
-- 主管明确绑定信箱身份后，专员才能收发。不得按显示名自动继承，也不得自己改绑定绕过检查。隔离测试使用独立数据库和显式登记。
+- 产品IM由nodeterm核实原生node/session/project后自动登记，专员不自行bind。新session替换旧成员仍拒绝自动接管；显示名不作为身份。旧项目适配器的显式登记规则只适用于旧信箱。
 - 接单回复应说明有价值的边界/方案或阻塞；无需为每次通知另发“收到”。
 
 ## 3. IM：正文与唤醒分离
 
-参考实现：[`scripts/agent-mail/`](../scripts/agent-mail/)，当前项目可提供自己的 `mail` 包装器。以下命令须经已登记的身份入口调用：
+当前产品实现：桌面主进程内置IM服务，数据在userData的`agent-im.sqlite`，复用 [`scripts/agent-mail/`](../scripts/agent-mail/) 信箱核心。已验证的原生会话自动登记成员；不要求项目包装器或CLI专用session环境变量。
+
+启动/恢复后的原生hook给出当前安装位置的统一命令：`sh "<userData>/canvas-control/im.sh"`，下文以`im`代称。启动器使用应用自带运行时，无需另外安装Node。`im --help`查看用法，`im roster`查询本项目节点，`im status`核对身份、phase、paused和lastWake。`send.to`填写目标node ID；收信结果中的内部`node:`前缀需去除后作为目标。
+
+工作中由Codex/Qoder原生hook同步返回仅含元数据的提醒；空闲时公共调度器检查原生回合状态、真实CLI进程及稳定空输入框，协调用户输入后提交短提醒。用户中断与推断idle严格区分；用户输入变化触发事件评估，不轮询模型。恢复原绑定需匹配记录的进程PID、pane、TTY及系统启动时间，不能只凭标题或磁盘记录。旧唤醒水位保留，不盲重投不确定通知。
+
+以下操作共用同一身份与接口：
 
 | 操作 | 语义 |
 |---|---|
@@ -67,7 +75,7 @@ LLM 只处理当前回合可见的上下文。把每封消息直接提交到输�
 ### 工作中与空闲时
 
 - 工作中：native hook 在工具回调等已支持边界给未读数/入口，同回合合并。正文仍由 agent 按需批读；长工具运行期间不保证即时提示。
-- 空闲：当前 Codex 实现通过文件事件检查信箱、原生回合状态、node/session 绑定和空输入框，满足条件才提交一条短读信提醒。
+- 空闲：产品实现通过入库/原生生命周期/用户输入事件检查信箱、node/session 绑定和空输入框，满足条件才提交一条短读信提醒。
 - 草稿、审批、用户中断、未知状态、身份不符时暂缓，不覆盖输入，不把“看起来闲”当可唤醒证据。
 - 被动 hook 提醒与主动 wake 使用独立去重状态；旧信未读不应吞掉后来新信的唤醒资格。
 - 不确定是否投递时不能承诺 exactly-once 或自动重试成功；存储幂等不等于模型执行幂等。
@@ -97,28 +105,23 @@ LLM 只处理当前回合可见的上下文。把每封消息直接提交到输�
 
 App/CLI 重启后，先核对原 node/session/cwd、实际进程、权限和启动参数，再核对信箱绑定、原生 hook 与 wake。不要因节点自动恢复就宣称全部服务恢复；也不要靠伪造环境中的 session ID 接管旧身份。恢复明确取消/中断的任务必须有新的用户授权。
 
-## 6. Qoder 验证与能力边界
+## 6. 兼容与验收范围（2026-11-03）
 
-2026-11-03 使用 Qoder CLI 1.1.71、独立 Git/cwd、临时节点、独立 SQLite 信箱验证；首任务经 nodeterm 启动参数送入。没有使用生产信箱，没有重启团队专员。测试入口由主管根据 native hook 的 session/node/cwd 明确登记，测试包装器不允许 agent 自行 bind。
+产品路径与旧本机团队路径区分：`runtime.mjs`与主进程是通用产品IM；`team.mjs`/`wake.mjs`及`agent-mail.json`保留为旧本机Codex信箱兼容入口。旧数据库不会自动搬迁。一个事项选择一个信箱，不能用两条通道重复投递。
 
-| 本轮检查 | 实际结果 |
+| 范围 | 已验事实 |
 |---|---|
-| 派遣与身份 | nodeterm 首单启动；native hook 核对 session/node/cwd，通过 |
-| 启动 memory | SessionStart 注入纲领与地图，模型按地图读到工作记忆标记，通过 |
-| 工作中通知 | PostToolUse 注入仅含元数据的 IM 提醒，模型明确辨认来源，通过；本轮首个 SessionStart 未携带邮件通知 |
-| 批读与确认 | 三条有效消息一次批读；read 后未读仍为3；ack实际receipt后为0，通过 |
-| 旧单替换 | supersedes保留关联，当前批读不含旧正文，通过 |
-| 交付 | Qoder通过stdin JSON向测试manager信箱回传实质结论，通过 |
-| 维护提醒 | 临时频率3次工具调用实际触发；不算默认50次验收 |
-| 权限 | 普通权限模式，测试审批由主管逐项处理；不声称无人值守自动批准 |
-| 当前生产适配/空闲唤醒 | Qoder尚未接入，未验；本轮不修改生产绑定或wake实现 |
-| compact/resume | 本轮未复测；启动证据不能替代恢复验收 |
+| Codex当前主管 | 原生初始化、身份、产品收发、工具边界提醒，已实测 |
+| Qoder CLI 1.1.81 | 新节点自动登记，原生提醒，正常空闲自动唤醒，批读→ack→回信，已实测 |
+| 纯Qoder | A→B→A，两次空闲唤醒，口令回传与确认，已实测；无需项目IM包装器 |
+| 状态保护 | 单测覆盖草稿/审批布局拒绝、输入观察期与提交期竞争、乱序事件、中断保护、回合去重及独立唤醒水位；真实Qoder审批期间保持暂缓；真实草稿跨重启保护与清空后唤醒通过 |
+| 恢复 | 存储/绑定epoch及不确定唤醒水位有回归；真实App重启后A/B身份自动恢复，A草稿和未读保留，清除草稿后自动唤醒；B无人工bootstrap回传恢复口令 |
+| 其他CLI/SSH/Server Edition | 本轮未接通自动通知/唤醒，不声称已兼容；手动接口也须有对应原生身份接入 |
+| Windows/Linux桌面 | 同源实现，未做本轮真实GUI验收，不以macOS成功代替 |
 
-核对以原生hook记录、模型记录与信箱操作结果三者交叉为准，不能只相信模型“成功”的自述。本轮16项信箱测试、4项nodeterm唤醒测试通过。
+窄Qoder footer、ANSI终端快照、idle_prompt推断事件均有专项回归。普通权限模式下执行命令仍遵循CLI审批，IM不会代替用户批准。新session接管尚需维护流程，不按节点标题自动继承。
 
-必须区分 **核心信箱能力**、**测试适配器**、**生产集成**：`team.mjs` 交互命令当前从 Codex 环境推导 session；`wake.mjs` 识别 Codex 回合日志和输入提示。Qoder 的原生 hook 可用，不自动代表这两层也支持 Qoder。尚未接入时应明确人工/受控启动读信，不能伪称自动空闲唤醒。
-
-复核命令：`node --no-warnings --test scripts/agent-mail/*.test.mjs`；`vitest run src/core/pty-mail-wake.test.ts`。单测不能代替真实 CLI 的启动、恢复、工具回调、草稿/审批/中断和空闲唤醒验收。
+复核：`node --no-warnings --test scripts/agent-mail/*.test.mjs`；定向vitest覆盖`hook-server.im`、`managed-script.im`、`agent-im-event`、`qoder-startup-ready`与`pty-mail-wake`。真实部署记录放项目证据目录，不把个人信箱、token或原始私有会话上传仓库。
 
 ## 7. 发布与文档闭环
 

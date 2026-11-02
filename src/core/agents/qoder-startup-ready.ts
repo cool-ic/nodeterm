@@ -3,13 +3,13 @@
  * an idle-looking screen during a turn is never permission to send a message. */
 export function qoderEmptyComposer(text: string | null): boolean {
   if (!text) return false
-  const lines = text.replace(/\r/g, '').trimEnd().split('\n')
+  const lines = text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\r/g, '').trimEnd().split('\n')
   const tail = lines.slice(-4).map((line) => line.trim())
   return tail.length === 4 &&
     /^[─━-]{8,}$/.test(tail[0]) &&
     /^>\s+Type your message or @path\/to\/file$/.test(tail[1]) &&
     /^[─━-]{8,}$/.test(tail[2]) &&
-    /^.+ Model\s*·\s*ctx\s+.+\s*·\s*.+$/.test(tail[3])
+    /^.+ Model\s*·\s*ctx\s+[^·]+(?:·\s*.+)?$/.test(tail[3])
 }
 
 /** No writes and no synthetic turn-end hook; require three identical visible frames. */

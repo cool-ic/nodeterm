@@ -583,6 +583,13 @@ export class HookServer {
     this.paneOrigin.forgetNode(nodeId)
   }
 
+  private imNoticeHandler?: (node:string,payload:Record<string,unknown>)=>unknown
+  setImNoticeHandler(handler:(node:string,payload:Record<string,unknown>)=>unknown):void {this.imNoticeHandler=handler}
+  private imHandler?: (node: string, operation: string, args: string[], input: unknown) => unknown
+  setImHandler(handler: (node: string, operation: string, args: string[], input: unknown) => unknown): void {
+    this.imHandler = handler
+  }
+
   // Raw payload listener: receives the parsed (un-normalized) hook JSON. Drives the
   // contextTail/subagentTail features, which need transcript_path (not in NormalizedAgentEvent).
   // `meta` carries what the transport knows about the caller (see HookEventMeta).
@@ -868,6 +875,21 @@ export class HookServer {
         }
         if (reqUrl.pathname.startsWith('/codex-thread/')) {
           await this.handleCodexThread(reqUrl.pathname, req, res)
+          return
+        }
+        if (reqUrl.pathname === '/im') {
+          const body = JSON.parse(await readBody(req))
+          const gate = this.identityGate(body.nodeId, 'send', req.headers['x-nodeterm-node-token'])
+          if (gate.verdict !== 'verified') { res.writeHead(403); res.end(); return }
+          try {
+            if (!this.imHandler) throw Error('IM service unavailable')
+            const result = this.imHandler(body.nodeId, body.operation, body.args ?? [], body.input)
+            res.writeHead(200, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ok:true,result}))
+          } catch (error) {
+            res.writeHead(400, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ok:false,error: error instanceof Error ? error.message : 'IM request failed'}))
+          }
           return
         }
         if (reqUrl.pathname.startsWith('/control/')) {
@@ -1202,6 +1224,10 @@ export class HookServer {
           else if (agentId === 'codex') this.codexGate().handle(nodeId, payload, labelled)
           else if (labelled && this.listener) this.listener(labelled)
           if (agentId === 'cursor') this.cursorWatch?.observe(nodeId, payload, verified)
+          if (verified && (agentId === 'codex' || agentId === 'qoder')) {
+            const notice=this.imNoticeHandler?.(nodeId,payload)
+            if(notice){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(notice));return}
+          }
         }
         res.writeHead(204)
         res.end()

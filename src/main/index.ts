@@ -1,3 +1,7 @@
+import { agentPidIn, isAgentPane } from '../shared/agents/pane-owner-predicate'
+import { imLifecycleEvent } from '../core/agent-im-event'
+import { IM_CLIENT_SOURCE } from '../core/agent-im-client'
+import { ImRuntime, type ImIdentity } from '../../scripts/agent-mail/runtime.mjs'
 import { registerUpdatePrepIpc } from './update-prep'
 import { startMailWake } from '../../scripts/agent-mail/wake.mjs'
 import { installOpenLinks } from './open-link-wiring'
@@ -12,8 +16,8 @@ import { startSessionNameSweep, displayNodeTitle } from '../core/session-name-sw
 import { startTriggerService } from '../core/trigger-service'
 import { readAgentSessionName, type AgentSessionNameDeps } from '../core/agent-session-name'
 import { readFile, readdir as fsReaddir, realpath as fsRealpath, lstat as fsLstat, writeFile as fsWriteFile } from 'fs/promises'
-import { existsSync, statSync, openSync, fstatSync, readFileSync, closeSync } from 'fs'
-import { homedir, hostname } from 'os'
+import { mkdirSync, writeFileSync, existsSync, statSync, openSync, fstatSync, readFileSync, closeSync } from 'fs'
+import { uptime, homedir, hostname } from 'os'
 import { randomUUID } from 'crypto'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, powerMonitor, safeStorage, screen, shell, systemPreferences, webContents } from 'electron'
 import { IPC } from '../shared/ipc'
@@ -3661,6 +3665,61 @@ app.whenReady().then(async () => {
     sendToMain(IPC.agentRateLimited, { nodeId: e.nodeId, verdict: scan.verdict })
   }
 
+  const imClientPath = join(corePlatform.userDataDir, 'canvas-control', 'im.mjs')
+  mkdirSync(join(corePlatform.userDataDir, 'canvas-control'), {recursive:true})
+  writeFileSync(imClientPath, IM_CLIENT_SOURCE)
+  const imLauncherPath=join(corePlatform.userDataDir,'canvas-control','im.sh')
+  writeFileSync(imLauncherPath,`#!/bin/sh\nexec env ELECTRON_RUN_AS_NODE=1 ${posixQuote(process.execPath)} ${posixQuote(imClientPath)} "$@"\n`,{mode:0o700})
+  const imRuntime = new ImRuntime(join(corePlatform.userDataDir, 'agent-im.sqlite'))
+  const imGeneration = `${process.pid}:${Date.now()}`
+  const imIdentities = new Map<string, ImIdentity>()
+  let imSequence = 0
+  const imOwnerRecorded=new Set<string>()
+  const imProof=async(identity:ImIdentity)=>{
+    const owner=await ptyManager.paneOwner(identity.node).catch(()=>null)
+    if(!owner || isAgentPane(owner,identity.cli)!=='agent')return null
+    const pid=agentPidIn(owner,identity.cli)
+    return pid ? {pid,pane:owner.paneId,tty:owner.tty,boot:Date.now()-uptime()*1000} : null
+  }
+  const recoverIm=async():Promise<void>=>{
+    for(const row of imRuntime.recoveryCandidates()) {
+      if(imIdentities.has(row.node))continue
+      if(!workspaceStore.persistedCanvases().some(c=>c.id===row.project && c.nodes.some(n=>n.id===row.node)))continue
+      const identity={...row,generation:imGeneration}
+      const proof=await imProof(identity)
+      if(proof && imRuntime.recover(identity,proof)) {imIdentities.set(row.node,identity);imOwnerRecorded.add(row.node)}
+    }
+  }
+
+  const imCommand = `sh ${JSON.stringify(imLauncherPath)}`
+  let imTimer: ReturnType<typeof setTimeout> | undefined
+  let imSweeping = false
+  let imAgain = false
+  const sweepIm = async ():Promise<void> => {
+    if(quitting) return
+    if(imSweeping){imAgain=true;return}
+    imSweeping=true
+    try {await recoverIm(); for(const identity of imIdentities.values()) {
+      if(identity.cli!=='codex' && identity.cli!=='qoder') continue
+      await imRuntime.wake(identity,(text,ready,claim)=>ptyManager.wakeMailbox(identity.node,text,
+        ()=>!quitting && (!mirrorEntry(identity.node)?.sessionId || mirrorEntry(identity.node)?.sessionId===identity.session) && ready(),claim,identity.cli as 'codex'|'qoder'),imCommand)
+    }} finally {imSweeping=false;if(imAgain){imAgain=false;scheduleIm()}}
+  }
+  const scheduleIm=():void=>{clearTimeout(imTimer);imTimer=setTimeout(()=>{void sweepIm().catch(e=>console.warn('[agent-im]',String(e)))},200)}
+  ptyManager.onMailboxInput(()=>scheduleIm())
+  hookServer.setImNoticeHandler((node,payload)=>{
+    const identity=imIdentities.get(node)
+    return identity ? imRuntime.notice(identity,payload,imCommand) : null
+  })
+  hookServer.setImHandler((node, operation, args, input) => {
+    const identity = imIdentities.get(node)
+    if (!identity || (mirrorEntry(node)?.sessionId && mirrorEntry(node)?.sessionId !== identity.session)) throw Error('IM identity not ready; native session verification required')
+    const result=imRuntime.dispatch(identity, operation, args, input)
+    scheduleIm()
+    return result
+  })
+  app.once('will-quit', () => {clearTimeout(imTimer);imRuntime.close()})
+  scheduleIm()
   const emitAgentStatus = (e: NormalizedAgentEvent): void => {
     // Claude subagent events first become one card per child (claudeSubagents); every other event
     // comes back as itself, so for them this loop runs exactly once, over `e`.
@@ -3669,6 +3728,25 @@ app.whenReady().then(async () => {
       // event ENRICHED for a needs-you edge (a question strips its pendingId), so the canvas keys off
       // the same single source of truth as the mirror/phone. Then broadcast the enriched event.
       const enriched = recordAgentEvent(out) ?? out
+      if (enriched.verified && enriched.sessionId) {
+        const project = workspaceStore.persistedCanvases().find(c => c.nodes.some(n => n.id === enriched.nodeId))
+        if (project) {
+          const identity = { project: project.id, node: enriched.nodeId, session: enriched.sessionId,
+            cli: enriched.agentId, generation: imGeneration }
+          try {
+            imRuntime.attach(identity)
+            imIdentities.set(identity.node, identity)
+            if(!imOwnerRecorded.has(identity.node)) {
+              imOwnerRecorded.add(identity.node)
+              void imProof(identity).then(proof=>{if(proof)imRuntime.rememberOwner(identity,proof);else imOwnerRecorded.delete(identity.node)}).catch(()=>imOwnerRecorded.delete(identity.node))
+            }
+            const event = imLifecycleEvent(enriched)
+            if (event) imRuntime.observe(identity, {sequence: ++imSequence, event})
+            scheduleIm()
+          } catch (error) { console.warn('[agent-im]', String(error)) }
+        }
+      }
+
       // T228: an errored turn's pane still holds the provider's own words, and those words are the
       // only place the WAIT is written down. Read them here, off the one stream every shell shares.
       if (enriched.state === 'done' && enriched.errored === true) void classifyRateLimit(enriched)

@@ -120,7 +120,7 @@ import {
  *     and any session the PHONE spawns on that host, which runs the host's installed script — stay
  *     `legacy` until the project reconnects.
  */
-export const MANAGED_SCRIPT_REVISION = 5
+export const MANAGED_SCRIPT_REVISION = 6
 /** The first revision that reads NODETERM_NODE_TOKEN_DIR and sends the node token (PR #195). */
 export const MIN_TOKEN_AWARE_REVISION = 3
 /* rev 4 (issue #384): the token read moved to the shared resolver in `node-token-sh.ts`, which
@@ -500,7 +500,7 @@ export function buildManagedScript(
     // The pipeline\'s exit status IS curl\'s (POSIX: the status of a pipeline is its last command),
     // which is what nt_send_request below reads to decide whether to fail over.
     '    nt_code=$(nt_hook_headers |',
-    `    curl -sS -o /dev/null -w '%{http_code}' -X POST --unix-socket "$NODETERM_HOOK_SOCK" "http://localhost/hook/${agentId}" \\`,
+    `    curl -sS -o ${agentId === 'codex' || agentId === 'qoder' ? '"${nt_payload_arg}.response"' : '/dev/null'} -w '%{http_code}' -X POST --unix-socket "$NODETERM_HOOK_SOCK" "http://localhost/hook/${agentId}" \\`,
     '      --connect-timeout 0.5 --max-time 1.5 --config - \\',
     '      -H "Content-Type: application/x-www-form-urlencoded" \\',
     '      --data-urlencode "nodeId=${NODETERM_NODE_ID}" \\',
@@ -512,7 +512,7 @@ export function buildManagedScript(
     '      --data-urlencode "payload@${nt_payload_arg}" 2>/dev/null) || return 1',
     '  elif [ -n "$NODETERM_HOOK_PORT" ]; then',
     '    nt_code=$(nt_hook_headers |',
-    `    curl -sS -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:\${NODETERM_HOOK_PORT}/hook/${agentId}" \\`,
+    `    curl -sS -o ${agentId === 'codex' || agentId === 'qoder' ? '"${nt_payload_arg}.response"' : '/dev/null'} -w '%{http_code}' -X POST "http://127.0.0.1:\${NODETERM_HOOK_PORT}/hook/${agentId}" \\`,
     '      --connect-timeout 0.5 --max-time 1.5 --config - \\',
     '      -H "Content-Type: application/x-www-form-urlencoded" \\',
     '      --data-urlencode "nodeId=${NODETERM_NODE_ID}" \\',
@@ -573,12 +573,21 @@ export function buildManagedScript(
     '# on the network (fire-and-forget, exactly as before).',
     'if [ -n "$nt_pending" ]; then',
     '  nt_send_request',
+    ...((agentId === 'codex' || agentId === 'qoder') ? [
+      'else',
+      '  nt_send_request',
+      '  # The verified IM server returns metadata only, never peer message bodies.',
+      '  if [ "$nt_code" = 200 ] && [ -s "$nt_payload_file.response" ]; then cat "$nt_payload_file.response"; fi',
+      '  rm -f "$nt_payload_file" "$nt_payload_file.response" 2>/dev/null || :',
+      'fi'
+    ] : [
     'else',
     '  # Background the POST (a live session\'s hot path never blocks) and delete the payload temp',
     '  # file only AFTER it — and its one fallback retry — have finished reading it, so the file',
     '  # never outlives its reader. The perm-wait branch keeps the file for its "answered" POST.',
     '  { nt_send_request; rm -f "$nt_payload_file" 2>/dev/null || :; } &',
-    'fi',
+    'fi'
+    ]),
     // The poll/decision section below is claude-only at BUILD time, like the arm above: with
     // nt_pending permanently empty it was already unreachable in other agents' scripts, but
     // keeping claude's decision JSON inside codex.sh is exactly the kind of latent cross-dialect
