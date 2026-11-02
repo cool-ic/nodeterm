@@ -27,20 +27,16 @@ REPO_COPY="$SCRIPT_DIR/../docs/canvas-protocol.md"
 PROTOCOL="$HOME/.nodeterm/canvas-protocol.md"
 SKILL_DIR="$HOME/.claude/skills/canvas-communication-protocol"
 
-POINTER="### Canvas communication protocol (nodeterm)
+POINTER="### Agent collaboration protocol (nodeterm)
 
-Agents on a nodeterm canvas talk ONLY through the canvas: envelopes into
-panes, turn-boundary status, report-outcome as the done signal. The protocol
-covers handshake/addressing (UNCONFIRMED blind window, the ownership ledger,
-opener wake), dispatch (first prompt rides the launch command; work-order
-shape; queue semantics), feedback (report-outcome semantics, station notices,
-queued != delivered), orchestration (--after / --after-success), and
-post-restart recovery.
-
-Read it BEFORE opening nodes, dispatching work, waiting on another agent, or
-reporting your own task: $PROTOCOL
-Verb/flag syntax: the manage-nodeterm-canvas skill (Claude) or the canvas
-control shim help."
+Read before dispatching agents, handling team messages, waiting for work, or
+reporting results: $PROTOCOL
+The protocol covers scoped work orders, verified node/session identity,
+independent IM inboxes, passive notices versus idle wake, memory recovery,
+and explicit orchestration dependencies. Projects using IM keep message
+bodies out of canvas prompts; report-outcome is for explicit dependencies,
+not every ordinary update. CLI support must be verified separately.
+Verb/flag syntax: the manage-nodeterm-canvas skill or canvas shim help."
 
 # ---------------------------------------------------------------- helpers ---
 

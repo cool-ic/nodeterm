@@ -111,6 +111,8 @@ App 重启后节点被接回来时，画布拿这行记录核对一遍：对得�
 
 ## 本机团队 IM（可选）
 
+派遣、IM、memory、恢复与验收的统一方法见 [团队协作协议](docs/canvas-protocol.md)。修改后运行 `sh scripts/install-canvas-protocol.sh install` 同步本机协议；项目自有指针需另行核对。
+
 `scripts/agent-mail/` 提供 SQLite 信箱、批读与显式确认；`team.mjs` 负责按配置绑定 session。项目 hook 只提供未读元数据，正文由 agent 主动读取，不再逐封强塞上下文。
 
 桌面主进程读取 userData 下 `agent-mail.json`（`enabled`、`projectId`、`teamConfig`），成员需显式 `wake: true`。`wake.mjs` 通过文件事件观察信箱和原生 Codex 回合状态，在已确认身份、正常结束和空输入框时合并唤醒一次；hook提醒按回合去重，主动唤醒按独立消息序号去重，旧信未读不会压住后来新信；忙碌、中断、草稿、审批或未知状态延后。关闭 enabled 即停用，不删除未读。此首版只覆盖本机 Codex；无额外服务/UI，不是同OS账号间安全隔离，也不承诺不确定投递的自动重试或 exactly-once。
