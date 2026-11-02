@@ -114,12 +114,25 @@ export function glassPanelFill(
   texts: readonly Rgb[]
 ): { rgb: Rgb; alpha: number } | null {
   if (t < 0) {
-    // Keep as much texture as contrast permits, rather than jumping straight to a flat panel.
-    for (let step = 0; step <= 54; step++) {
+    // Preserve visible paper first. If the original pigment would need an almost opaque
+    // wash, move it slightly lighter/darker before sacrificing texture. Check every text
+    // against the ORIGINAL panel's contrast requirement, never weaken readability.
+    for (let step = 0; step <= 40; step++) {
       const fill = { rgb: c, alpha: 0.45 + step * 0.01 }
       if (texts.every(f => panelTextOk(f, c, fill, theme, t))) return fill
     }
-    return null // Only genuinely impossible combinations retain an opaque background.
+    for (let shift = 1; shift <= 32; shift++) {
+      for (const direction of [1, -1]) {
+        const rgb = c.map(v => Math.max(0, Math.min(255, v + shift * direction))) as unknown as Rgb
+        const fill = { rgb, alpha: .85 }
+        if (texts.every(f => panelTextOk(f, c, fill, theme, t))) return fill
+      }
+    }
+    for (let step = 86; step <= 99; step++) {
+      const fill = { rgb: c, alpha: step / 100 }
+      if (texts.every(f => panelTextOk(f, c, fill, theme, t))) return fill
+    }
+    return null // Conflicting colours may still require the original opaque background.
   }
   const fill = panelFill(c, theme, t)
   return fill && texts.every((f) => panelTextOk(f, c, fill, theme, t)) ? fill : null

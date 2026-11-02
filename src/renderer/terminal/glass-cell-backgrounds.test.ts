@@ -271,7 +271,7 @@ describe('installGlassCellBackgrounds', () => {
     setGlassCellAlpha(rr._terminal, -1)
     const model = [{ fg: 0, bg, x: 0, endX: 1, y: 0 }]
     rr.updateBackgrounds(model)
-    expect(rr._vertices.attributes[7]).toBe(1)
+    expect(rr._vertices.attributes[7]).toBeGreaterThan(Math.sqrt(.45))
     cells[0].fg = CM_RGB | 0x302d38
     rr.updateBackgrounds(model)
     expect(rr._vertices.attributes[7]).toBeCloseTo(Math.sqrt(.45), 6)
@@ -421,6 +421,18 @@ describe('adaptive paper backgrounds', () => {
     expect(fill).not.toBeNull()
     expect(fill!.alpha).toBeGreaterThan(.45)
     expect(fill!.alpha).toBeLessThan(.99)
+  })
+  it('retains visible texture for the live Moonlit blue activity label and muted text', () => {
+    const panel: Rgb = [195,191,184]
+    const theme = { bg: [204,199,192] as Rgb, fg: [48,45,56] as Rgb }
+    const texts: Rgb[] = [[21,76,153], [86,83,86], [48,45,56]]
+    const fill = glassPanelFill(panel, theme, -1, texts)!
+    expect(fill).not.toBeNull()
+    expect(fill.alpha).toBeLessThanOrEqual(.85)
+    for (const text of texts) for (const scale of [.84,1.1]) {
+      const paper = theme.bg.map(v => Math.min(255, Math.round(v * scale))) as unknown as Rgb
+      expect(contrastRatio(text, composite(fill.rgb, paper, fill.alpha))).toBeGreaterThanOrEqual(Math.min(4.5, contrastRatio(text, panel)))
+    }
   })
   it('keeps the light input wash at its original opacity when contrast already passes', () => {
     expect(glassPanelFill([207,199,188], PAPER, -1, [[42,35,28]])?.alpha).toBe(.45)
