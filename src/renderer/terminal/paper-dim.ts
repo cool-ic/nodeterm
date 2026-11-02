@@ -1,3 +1,4 @@
+import grainUrl from '../assets/paper-grain.png?url'
 import { glassPanelFill } from './glass-cell-backgrounds'
 import type { Terminal } from '@xterm/xterm'
 import { PAPER_EXTENDED_ANSI } from './paper-colours'
@@ -48,6 +49,9 @@ export function installPaperDimReadability(term:Terminal):()=>void {
     if(!cell.isBgDefault()&&!cell.isInverse()&&(!bgOverride||(bgOverride.rgba>>>8)===(bg.rgba>>>8))){
       const colors=this._themeService.colors
       const fill=glassPanelFill(rgb(bg.rgba),{bg:rgb(colors.background.rgba),fg:rgb(colors.foreground.rgba)},-1,[rgb((fgOverride??fg).rgba)])
+      element.style.backgroundImage=`url("${grainUrl}")`
+      element.style.backgroundBlendMode='soft-light'
+      element.style.backgroundSize='var(--paper-tile-size, 680px)'
       if(fill)element.style.backgroundColor=`rgba(${fill.rgb.join(',')}, ${fill.alpha})`
     }
     if(!cell.isDim())return result

@@ -1,3 +1,4 @@
+import { withPaperBackgroundShader, installPaperBackgroundMaterial } from '../terminal/paper-background-material'
 import { paperLayoutStyle } from '../terminal/paper-layout'
 import { elementOnScreen } from '../terminal/on-screen'
 import { useContextEnsure } from '../terminal/useContextEnsure'
@@ -2667,7 +2668,8 @@ export function TerminalNode({
           if (webgl === a) webgl = null
           webglHandle?.contextLost()
         })
-        term.loadAddon(a)
+        withPaperBackgroundShader(() => term.loadAddon(a))
+        installPaperBackgroundMaterial(a, () => glassCellAlphaRef.current === -1)
         if (!installWebglAtlasIdentity(a)) throw new Error('WebGL atlas identity guard unavailable')
         webgl = a
         // Glass: app-painted cell backgrounds become tinted glass (glass-cell-backgrounds.ts). A
