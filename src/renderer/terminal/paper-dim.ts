@@ -1,5 +1,4 @@
-import grainUrl from '../assets/paper-grain.png?url'
-import { glassPanelFill } from './glass-cell-backgrounds'
+import {PAPER_MATERIALS,paperMaterialKind} from './paper-background-material'
 import type { Terminal } from '@xterm/xterm'
 import { PAPER_EXTENDED_ANSI } from './paper-colours'
 type Colour={rgba:number;css:string}
@@ -18,6 +17,7 @@ export function readableDim(fg:Colour,bg:Colour,defaultPaper=false):Colour {
 }
 const tagged=(colors:any)=>colors?.ansi?.[255]?.rgba===((parseInt(PAPER_EXTENDED_ANSI[239].slice(1),16)*256+255)>>>0)&&(colors?.background?.rgba&255)===0
 const ORIGINAL=Symbol.for('nodeterm.paperDim.original')
+const PAPER_HOST=Symbol.for('nodeterm.paperDim.host')
 /** Guarded renderer adapters; only our light-paper palette is affected. No buffer/PTY mutation. */
 export function installPaperDimReadability(term:Terminal):()=>void {
  let previous:unknown
@@ -28,6 +28,7 @@ export function installPaperDimReadability(term:Terminal):()=>void {
   const target=atlas??renderer?._rowFactory
   if(!target||target===previous)return
   previous=target
+  if(!atlas)target[PAPER_HOST]=()=>term.element?.closest('.terminal-paper')
   const proto=Object.getPrototypeOf(target)
   const method=atlas?'_getForegroundColor':'_applyMinimumContrast'
   if(proto[ORIGINAL])return
@@ -47,12 +48,14 @@ export function installPaperDimReadability(term:Terminal):()=>void {
     // The default paper is already textured. Only explicit app backgrounds get a pigment wash;
     // renderer overrides (selection/search) and inverse video retain their own appearance.
     if(!cell.isBgDefault()&&!cell.isInverse()&&(!bgOverride||(bgOverride.rgba>>>8)===(bg.rgba>>>8))){
-      const colors=this._themeService.colors
-      const fill=glassPanelFill(rgb(bg.rgba),{bg:rgb(colors.background.rgba),fg:rgb(colors.foreground.rgba)},-1,[rgb((fgOverride??fg).rgba)])
-      element.style.backgroundImage=`url("${grainUrl}")`
-      element.style.backgroundBlendMode='soft-light'
+      const material=PAPER_MATERIALS[paperMaterialKind(this[PAPER_HOST]?.())]
+      element.style.backgroundImage=`url("${material.url}")`
+      element.style.backgroundBlendMode='multiply'
       element.style.backgroundSize='var(--paper-tile-size, 680px)'
-      if(fill)element.style.backgroundColor=`rgba(${fill.rgb.join(',')}, ${fill.alpha})`
+      // Normalize the sheet's average colour, as the WebGL sampler does. The bitmap
+      // supplies relief even when the application requires a fully opaque background.
+      const pigment=rgb(bg.rgba).map((v,i)=>Math.min(255,Math.round(v*255/material.mean[i])))
+      element.style.backgroundColor=`rgb(${pigment.join(',')})`
     }
     if(!cell.isDim())return result
     const originalFg=fgOverride??fg

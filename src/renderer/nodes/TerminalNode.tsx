@@ -2669,7 +2669,7 @@ export function TerminalNode({
           webglHandle?.contextLost()
         })
         withPaperBackgroundShader(() => term.loadAddon(a))
-        installPaperBackgroundMaterial(a, () => glassCellAlphaRef.current === -1)
+        if (!installPaperBackgroundMaterial(a, () => glassCellAlphaRef.current === -1)) throw new Error('Paper background material adapter unavailable')
         if (!installWebglAtlasIdentity(a)) throw new Error('WebGL atlas identity guard unavailable')
         webgl = a
         // Glass: app-painted cell backgrounds become tinted glass (glass-cell-backgrounds.ts). A
