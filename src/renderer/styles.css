@@ -16215,7 +16215,7 @@ button.pull-checks__name {
 /* FitAddon subtracts the xterm child's padding. Do not inset the measured host/body. */
 .terminal-paper .xterm {
   box-sizing: border-box;
-  padding: calc(var(--paper-font-size, 15px) * 1.466667) max(calc(var(--paper-font-size, 15px) * 1.733333), 6%);
+  padding: calc(var(--paper-font-size, 15px) * 0.6) max(calc(var(--paper-font-size, 15px) * 1.733333), 6%);
 }
 .paper-presets {
   display: grid;
