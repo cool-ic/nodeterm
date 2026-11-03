@@ -27,3 +27,13 @@ it('restores texture bindings and active unit even when rectangle drawing throws
  expect(active).toBe(3);expect(bindings.get(7)).toBe('original-paper-unit')
  rr.dispose();expect(deleted).toBe(1)
 })
+
+it('keeps very dark coatings textured in both renderer models without changing light pigments',async()=>{
+ const {paperPigment,PAPER_PIGMENT_FLOOR}=await import('./paper-background-material')
+ const mean=PAPER_MATERIALS.cotton.mean
+ expect(paperPigment([0,0,0],mean)).toEqual(paperPigment([14,14,14],mean))
+ expect(paperPigment([200,190,180],mean)).toEqual([200,190,180].map((v,i)=>Math.round(v*255/mean[i])))
+ expect(PAPER_PIGMENT_FLOOR).toBe(14)
+ const shader=paperRectangleShader('precision lowp float;\nin vec4 v_color;\nvoid main(){ outColor = v_color; }')
+ expect(shader).toContain(`vec3(${(PAPER_PIGMENT_FLOOR/255).toFixed(9)}) * v_color.a`)
+})

@@ -9,6 +9,11 @@ export const PAPER_MATERIALS = {
   linen: {url:linen,mean:[202.4863,196.7548,190.5012]},
   moonlit: {url:moonlit,mean:[197.3814,196.0022,197.6287]}
 } as const
+/** A paper coating reflects some light even under black pigment; pure multiply erased all relief. */
+export const PAPER_PIGMENT_FLOOR = 14
+export function paperPigment(rgb: readonly number[], mean: readonly number[]): number[] {
+ return rgb.map((v,i)=>Math.min(255,Math.round(Math.max(PAPER_PIGMENT_FLOOR,v)*255/mean[i])))
+}
 export type PaperMaterial = keyof typeof PAPER_MATERIALS
 export function paperMaterialKind(host:Element|null|undefined):PaperMaterial {
  return host?.classList.contains('terminal-paper--cotton')?'cotton':host?.classList.contains('terminal-paper--moonlit')?'moonlit':'linen'
@@ -26,7 +31,8 @@ uniform float u_paperDpr;`)
     vec2 css = vec2(gl_FragCoord.x, u_paperGeometry.z * u_paperDpr - gl_FragCoord.y) / u_paperDpr;
     vec2 uv = (css + u_paperGeometry.xy) / u_paperGeometry.w;
     vec3 relief = texture(u_paperTexture, uv).rgb / u_paperMean;
-    outColor = vec4(clamp(v_color.rgb * relief, 0.0, 1.0), v_color.a);
+    vec3 coating = max(v_color.rgb, vec3(${(PAPER_PIGMENT_FLOOR/255).toFixed(9)}) * v_color.a);
+    outColor = vec4(clamp(coating * relief, 0.0, 1.0), v_color.a);
   }`)
 }
 export function withPaperBackgroundShader<T>(activate:()=>T):T {

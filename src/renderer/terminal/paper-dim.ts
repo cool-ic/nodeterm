@@ -1,4 +1,4 @@
-import {PAPER_MATERIALS,paperMaterialKind} from './paper-background-material'
+import {PAPER_MATERIALS,paperMaterialKind,paperPigment} from './paper-background-material'
 import type { Terminal } from '@xterm/xterm'
 import { PAPER_EXTENDED_ANSI } from './paper-colours'
 type Colour={rgba:number;css:string}
@@ -63,7 +63,7 @@ export function installPaperDimReadability(term:Terminal):()=>void {
       element.style.backgroundSize='var(--paper-tile-size, 680px)'
       // Normalize the sheet's average colour, as the WebGL sampler does. The bitmap
       // supplies relief even when the application requires a fully opaque background.
-      const pigment=rgb(bg.rgba).map((v,i)=>Math.min(255,Math.round(v*255/material.mean[i])))
+      const pigment=paperPigment(rgb(bg.rgba),material.mean)
       element.style.backgroundColor=`rgb(${pigment.join(',')})`
     }
     if(!cell.isDim())return result
