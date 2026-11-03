@@ -1,4 +1,4 @@
-import { qoderEmptyComposer } from './agents/qoder-startup-ready'
+import { qoderComposerState } from './agents/qoder-startup-ready'
 import { NODE_SCOPE_ENV, ensureTerminalCliBin, ensureTerminalZsh } from './terminal-cli'
 import type { ChatPromptBlocked, ChatPromptResult, EmptyPromptResult, TextDeliveryResult } from '../shared/text-delivery'
 import { claudeScreenBlocksInput, readClaudeComposer, readClaudeScreen } from '../shared/agents/claude-screen'
@@ -7336,27 +7336,43 @@ export class PtyManager {
    * accidental submit a messaging delivery must never perform — an empty envelope refuses here.
    * (`buildEnvelope` can never return '', so this is a guard against a future caller, not a path.)
    */
-  /** Opt-in mailbox wake. Only local Codex, a proven empty composer, and a still-idle bound turn.
+  /** Opt-in mailbox wake. Only local Codex/Qoder, a proven empty composer, and a still-idle bound turn.
    * Unknown/dialog/draft/interrupted paths never claim or type. This is not a general send API. */
-  async wakeMailbox(persistKey: string, notice: string, ready: () => boolean, claim: () => boolean, cli: 'codex' | 'qoder' = 'codex'): Promise<'sent' | 'held' | 'uncertain'> {
+  async wakeMailbox(persistKey: string, notice: string, ready: () => boolean, claim: () => boolean, cli: 'codex' | 'qoder' = 'codex'): Promise<'sent' | `held:${string}` | 'uncertain'> {
     return this.serializePaneWrite(persistKey, async () => {
       const input = { cancelled: false, committing: false, pending: [] as Array<() => void> }
       this.mailWakeInput.set(persistKey, input)
       try {
-      if (this.sessionByPersistKey(persistKey)?.sshRemote || !ready()) return 'held'
+      const composerHold = (text: string | null): `held:${string}` | null => {
+        if (cli === 'qoder') {
+          const state = qoderComposerState(text)
+          return state === 'empty' ? null : `held:qoder-composer-${state}`
+        }
+        return emptyCodexPrompt(text ?? '') ? null : 'held:codex-composer-not-empty-or-unknown'
+      }
+      if (this.sessionByPersistKey(persistKey)?.sshRemote) return 'held:remote-unsupported'
+      if (!ready()) return 'held:lifecycle-or-session-changed'
       const before = await this.paneOwner(persistKey).catch(() => null)
-      if (!before || isAgentPane(before, cli) !== 'agent') return 'held'
+      if (!before) return 'held:pane-owner-unavailable'
+      if (isAgentPane(before, cli) !== 'agent') return 'held:pane-owner-mismatch'
       const first = await this.captureSnapshot(persistKey).catch(() => '')
-      if (!(cli === 'qoder' ? qoderEmptyComposer(first) : emptyCodexPrompt(first))) return 'held'
+      const firstHold = composerHold(first)
+      if (firstHold) return firstHold
       await new Promise(resolve => setTimeout(resolve, 150))
       const second = await this.captureSnapshot(persistKey).catch(() => '')
       const after = await this.paneOwner(persistKey).catch(() => null)
-      if (input.cancelled || first !== second || !(cli === 'qoder' ? qoderEmptyComposer(second) : emptyCodexPrompt(second)) || !after || !ready()
-        || after.paneId !== before.paneId || after.tty !== before.tty
+      if (input.cancelled) return 'held:user-input-raced'
+      if (!ready()) return 'held:lifecycle-or-session-changed'
+      const secondHold = composerHold(second)
+      if (secondHold) return secondHold
+      if (first !== second) return 'held:screen-changed'
+      if (!after) return 'held:pane-owner-unavailable'
+      if (after.paneId !== before.paneId || after.tty !== before.tty
+        || isAgentPane(after, cli) !== 'agent'
         || agentPidIn(before, cli) === null
-        || agentPidIn(before, cli) !== agentPidIn(after, cli)) return 'held'
+        || agentPidIn(before, cli) !== agentPidIn(after, cli)) return 'held:pane-identity-changed'
       input.committing = true
-      if (!claim()) return 'held'
+      if (!claim()) return 'held:wake-already-claimed'
       // Preserve the claim even on uncertain write failure; resume/unread remain recoverable.
       return (await this.sendEnvelopeNow(persistKey, notice, after)) === true ? 'sent' : 'uncertain'
       } finally {

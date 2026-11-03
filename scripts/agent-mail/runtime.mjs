@@ -108,7 +108,7 @@ export class ImRuntime {
     const claim=()=>!!this.db.prepare('UPDATE members SET wake_through=? WHERE name=? AND epoch=? AND wake_through<?')
       .run(status.newest,row.member,binding.epoch,status.newest).changes
     const result=await transport(`[NODETERM_IM_WAKE] ${status.unread} unread. Use ${command} list/read. This is a mailbox reminder, not a new user task. Bodies remain in IM.`,ready,claim)
-    record(result==='held'?'held:input-or-identity-not-safe':result)
+    record(result==='held'?'held:transport-unavailable':result)
     return result
   }
   eligibility(identity,{now=Date.now(),maxAge=30000,draft=false,approval=false}={}) {

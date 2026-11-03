@@ -73,3 +73,26 @@ test('app recovery requires identical live process proof and preserves wake clai
  assert.equal(r.dispatch(next,'status').unread,1)
  assert.equal(await r.wake(next,async()=>{throw Error('duplicate wake')},'im'),'empty')
 })
+test('held diagnostics survive restart and existing mail wakes without sender resend when safe',async t=>{
+ const dir=mkdtempSync(join(tmpdir(),'im-held-recovery-'));const path=join(dir,'im.db')
+ let r=new ImRuntime(path)
+ t.after(()=>{r.close();rmSync(dir,{recursive:true})})
+ r.attach(a);r.attach(b);r.observe(a,{sequence:1,event:'idle'})
+ const proof={pid:123,pane:'%5',tty:'/dev/ttys5',boot:1000};r.rememberOwner(a,proof)
+ r.dispatch(b,'send',[],{to:'a',thread:'job',key:'only-send',body:'already stored'})
+ const reason='held:qoder-composer-footer-unknown'
+ assert.equal(await r.wake(a,async()=>reason,'im'),reason)
+ assert.equal(r.dispatch(a,'status').lastWake,reason)
+ assert.equal(r.box.member('node:a','sa').wake_through,0)
+ r.close();r=new ImRuntime(path)
+ const restored={...a,generation:'g2'}
+ assert.equal(r.recover(restored,proof),true)
+ assert.equal(r.dispatch(restored,'status').lastWake,reason)
+ let sends=0
+ const safe=async(_text,ready,claim)=>{assert.equal(ready(),true);assert.equal(claim(),true);sends++;return 'sent'}
+ assert.equal(await r.wake(restored,safe,'im'),'sent')
+ assert.equal(await r.wake(restored,safe,'im'),'empty')
+ assert.equal(sends,1)
+ assert.equal(r.dispatch(restored,'status').unread,1)
+ assert.equal(r.dispatch(restored,'read').messages[0].body,'already stored')
+})

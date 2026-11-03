@@ -1,5 +1,22 @@
 # Qoder CLI (`qoder`) as a nodeterm agent
 
+## IM empty-composer compatibility (2026-11-03)
+
+Idle IM wake accepts the legacy `> Type your message or @path/to/file` composer and the
+Qoder 1.1.81 layout reported in issue #1: `* Type your message or @path/to/file` with
+`Fast · 400K · ctx …` (with or without the working directory). Both separators and the
+complete bottom frame must match; a placeholder found in earlier output is insufficient.
+Unknown layouts remain held. This visual check never replaces verified native idle state,
+session/process ownership, user-interruption protection, or the second unchanged-frame check.
+
+`im status` reports specific `lastWake` reasons such as `held:qoder-composer-footer-unknown`,
+`held:qoder-composer-not-empty`, `held:pane-owner-mismatch`, `held:screen-changed` or
+`held:user-input-raced`. These are pre-delivery holds, not evidence of a Qoder security-hook rejection.
+While held, a CLI redraw schedules a debounced recheck through the existing IM scheduler.
+App recovery, native lifecycle changes and user input also re-evaluate stored unread messages;
+the sender need not resend. A held attempt does not advance the wake watermark or acknowledge mail.
+Successful or uncertain submissions keep their existing deduplication protection.
+
 ## Current local support (2026-10-15)
 
 Measured on Qoder CLI **1.1.71**, macOS/zsh, default `~/.qoder` configuration:

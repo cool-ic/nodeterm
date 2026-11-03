@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { qoderComposerSettled, qoderEmptyComposer } from './qoder-startup-ready'
 
 export const QODER_EMPTY = 'Previous response\n────────────────────\n >   Type your message or @path/to/file\n────────────────────\n Performance Model · ctx ▓░░░░░░░░░ 18% · ~/project\n'
+export const QODER_FAST_EMPTY = QODER_EMPTY.replace('>   Type', '*   Type')
+  .replace('Performance Model', 'Fast · 400K')
 
 describe('Qoder startup composer evidence', () => {
   it('recognizes the measured empty composer, including CRLF', () => {
@@ -12,6 +14,24 @@ describe('Qoder startup composer evidence', () => {
   it('accepts the measured narrow Qoder 1.1.71 footer without cwd', () => {
     expect(qoderEmptyComposer(QODER_EMPTY.replace('Performance Model', 'Auto Model').replace(' · ~/project',''))).toBe(true)
   })
+  it('accepts the Qoder 1.1.81 star composer and Fast/context-capacity footer (issue #1)', () => {
+    expect(qoderEmptyComposer(QODER_FAST_EMPTY)).toBe(true)
+    expect(qoderEmptyComposer(QODER_FAST_EMPTY.replace(' · ~/project', ''))).toBe(true)
+    expect(qoderEmptyComposer(QODER_FAST_EMPTY.replace(/\n/g, '\r\n'))).toBe(true)
+    expect(qoderEmptyComposer('\x1b[37m' + QODER_FAST_EMPTY.replace(/\n/g, '\x1b[0m\n\x1b[37m') + '\x1b[0m')).toBe(true)
+    expect(qoderEmptyComposer(QODER_EMPTY.replace('>   Type', '*   Type'))).toBe(true)
+    expect(qoderEmptyComposer(QODER_EMPTY.replace('Performance Model', 'Fast · 400K'))).toBe(true)
+  })
+  it.each([
+    QODER_FAST_EMPTY.replace('Type your message or @path/to/file', 'unfinished user draft'),
+    QODER_FAST_EMPTY.replace('Type your message or @path/to/file', 'Type your message or @path/to/file draft'),
+    QODER_FAST_EMPTY + 'Permission Required\nAllow this command to run?',
+    QODER_FAST_EMPTY + 'Select an option',
+    QODER_FAST_EMPTY.replace('Fast · 400K', 'Unknown layout'),
+    QODER_FAST_EMPTY.replace('*   Type', '$   Type')
+  ])('still rejects drafts, dialogs and unknown new layouts: %s', (screen) => {
+    expect(qoderEmptyComposer(screen)).toBe(false)
+  })
   it.each([null, '', '$ ', 'Permission Required\nAllow this command to run?\n1. Allow once',
     QODER_EMPTY.replace('Type your message or @path/to/file', 'unfinished user draft'),
     QODER_EMPTY + 'Select an option'])('rejects nonempty/unknown/modal surfaces: %s', (screen) => {
@@ -21,6 +41,7 @@ describe('Qoder startup composer evidence', () => {
     let count = 0
     expect(await qoderComposerSettled(async () => { count++; return QODER_EMPTY }, async () => {}, () => true)).toBe(true)
     expect(count).toBe(3)
+    expect(await qoderComposerSettled(async () => QODER_FAST_EMPTY, async () => {}, () => true)).toBe(true)
     let starting = true
     expect(await qoderComposerSettled(async () => { starting = false; return QODER_EMPTY }, async () => {}, () => starting)).toBe(false)
   })

@@ -1,5 +1,6 @@
 import { agentPidIn, isAgentPane } from '../shared/agents/pane-owner-predicate'
 import { imLifecycleEvent } from '../core/agent-im-event'
+import { ImWakeOutputRetry } from '../core/agent-im-wake-retry'
 import { IM_CLIENT_SOURCE } from '../core/agent-im-client'
 import { ImRuntime, type ImIdentity } from '../../scripts/agent-mail/runtime.mjs'
 import { registerUpdatePrepIpc } from './update-prep'
@@ -3701,11 +3702,14 @@ app.whenReady().then(async () => {
     imSweeping=true
     try {await recoverIm(); for(const identity of imIdentities.values()) {
       if(identity.cli!=='codex' && identity.cli!=='qoder') continue
-      await imRuntime.wake(identity,(text,ready,claim)=>ptyManager.wakeMailbox(identity.node,text,
+      imWakeOutputRetry.begin(identity.node)
+      const result=await imRuntime.wake(identity,(text,ready,claim)=>ptyManager.wakeMailbox(identity.node,text,
         ()=>!quitting && (!mirrorEntry(identity.node)?.sessionId || mirrorEntry(identity.node)?.sessionId===identity.session) && ready(),claim,identity.cli as 'codex'|'qoder'),imCommand)
+      imWakeOutputRetry.finish(identity.node,result)
     }} finally {imSweeping=false;if(imAgain){imAgain=false;scheduleIm()}}
   }
   const scheduleIm=():void=>{clearTimeout(imTimer);imTimer=setTimeout(()=>{void sweepIm().catch(e=>console.warn('[agent-im]',String(e)))},200)}
+  const imWakeOutputRetry=new ImWakeOutputRetry((node,changed)=>ptyManager.onOutput(node,changed),scheduleIm)
   ptyManager.onMailboxInput(()=>scheduleIm())
   hookServer.setImNoticeHandler((node,payload)=>{
     const identity=imIdentities.get(node)
@@ -3718,7 +3722,7 @@ app.whenReady().then(async () => {
     scheduleIm()
     return result
   })
-  app.once('will-quit', () => {clearTimeout(imTimer);imRuntime.close()})
+  app.once('will-quit', () => {clearTimeout(imTimer);imWakeOutputRetry.dispose();imRuntime.close()})
   scheduleIm()
   const emitAgentStatus = (e: NormalizedAgentEvent): void => {
     // Claude subagent events first become one card per child (claudeSubagents); every other event

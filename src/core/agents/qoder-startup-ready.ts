@@ -1,15 +1,19 @@
-/** Measured Qoder 1.1.68 empty composer. Unknown layouts deliberately fail closed.
- * This is only useful AFTER a verified SessionStart with no subsequent state;
- * an idle-looking screen during a turn is never permission to send a message. */
-export function qoderEmptyComposer(text: string | null): boolean {
-  if (!text) return false
+/** Layout evidence only: native lifecycle and process identity must independently permit a wake.
+ * Supports the measured legacy footer and the 1.1.81 Fast/capacity footer from issue #1.
+ * Do not search arbitrary transcript lines for a placeholder: inspect the complete bottom frame. */
+export function qoderComposerState(text: string | null): 'empty' | 'missing' | 'structure-unknown' | 'not-empty' | 'footer-unknown' {
+  if (!text) return 'missing'
   const lines = text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '').replace(/\r/g, '').trimEnd().split('\n')
   const tail = lines.slice(-4).map((line) => line.trim())
-  return tail.length === 4 &&
-    /^[─━-]{8,}$/.test(tail[0]) &&
-    /^>\s+Type your message or @path\/to\/file$/.test(tail[1]) &&
-    /^[─━-]{8,}$/.test(tail[2]) &&
-    /^.+ Model\s*·\s*ctx\s+[^·]+(?:·\s*.+)?$/.test(tail[3])
+  if (tail.length !== 4 || !/^[─━-]{8,}$/.test(tail[0]) || !/^[─━-]{8,}$/.test(tail[2])) return 'structure-unknown'
+  if (!/^[>*]\s+Type your message or @path\/to\/file$/.test(tail[1])) return 'not-empty'
+  const legacy = /^.+ Model\s*·\s*ctx\s+[^·]+(?:·\s*.+)?$/
+  const fast = /^Fast\s*·\s*\d+(?:\.\d+)?[KM]\s*·\s*ctx\s+[^·]+(?:·\s*.+)?$/
+  return legacy.test(tail[3]) || fast.test(tail[3]) ? 'empty' : 'footer-unknown'
+}
+
+export function qoderEmptyComposer(text: string | null): boolean {
+  return qoderComposerState(text) === 'empty'
 }
 
 /** No writes and no synthetic turn-end hook; require three identical visible frames. */
