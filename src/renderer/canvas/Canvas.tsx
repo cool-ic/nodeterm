@@ -29,6 +29,7 @@ import {
   Background,
   BackgroundVariant,
   MarkerType,
+  PanOnScrollMode,
   ReactFlow,
   SelectionMode,
   useEdgesState,
@@ -253,7 +254,7 @@ import { isSpaceRelease, spacePanKeydown } from '../lib/spacePan'
 import { handoffsFor, installHandoffFocusReset, noteHandoff, suppressDoneAfterHandoff } from '../lib/handoffPings'
 import { loadIdentity } from '../state/presence'
 import { runBoardKey } from '../lib/boardKeys'
-import { readCanvasLocked, writeCanvasLocked } from '../lib/canvasLock'
+import { readCanvasLockMode, writeCanvasLockMode, toggleCanvasLockMode, constrainCanvasPan, constrainPanDelta, type CanvasLockMode } from '../lib/canvasLock'
 import { installLockedMiddleGuard, installModifierPan } from '../lib/modifierPan'
 import {
   FLOW_NODE_CLASS,
@@ -1449,7 +1450,10 @@ export function Canvas() {
   // Flow's own lock convention. Transient unless `settings.rememberCanvasLock` says otherwise: a
   // lock that survives restart reads as "the app is frozen" to whoever opens it next, so it stays
   // opt-in, and an untouched install opens unlocked exactly as it always has.
-  const [canvasLocked, setCanvasLocked] = useState(false)
+  const [canvasLockMode, setCanvasLockMode] = useState<CanvasLockMode>('none')
+  const canvasLocked = canvasLockMode === 'all'
+  const toggleCanvasLock = useCallback(() => setCanvasLockMode(mode => toggleCanvasLockMode(mode, 'all')), [])
+  const toggleCanvasAxisLock = useCallback((axis: 'horizontal' | 'vertical') => setCanvasLockMode(mode => toggleCanvasLockMode(mode, axis)), [])
   /** SPACE is held: a left-drag pans instead of box-selecting, Figma-style (issue #86). */
   const [spacePan, setSpacePan] = useState(false)
 
@@ -1911,7 +1915,8 @@ export function Canvas() {
   keepBlurWhileMovingRef.current = keepGlassBlurWhileMoving(
     useSettings((s) => s.settings.glassBlurWhileMoving)
   )
-  const onCanvasMoveStart = useCallback(() => {
+  const onCanvasMoveStart = useCallback((_event: unknown, vp: Viewport) => {
+    viewportRef.current = vp
     if (movingClearRef.current) clearTimeout(movingClearRef.current)
     movingClearRef.current = null
     if (keepBlurWhileMovingRef.current) return
@@ -5181,8 +5186,17 @@ export function Canvas() {
   useEffect(() => {
     const wrap = flowWrapRef.current
     if (wrap === null) return
-    return installModifierPan(wrap, { isMac, getViewport, setViewport: (v) => void setViewport(v) })
-  }, [getViewport, setViewport])
+    return installModifierPan(wrap, { isMac, getViewport, setViewport: (v) => void setViewport(constrainCanvasPan(v, getViewport(), canvasLockMode)) })
+  }, [getViewport, setViewport, canvasLockMode])
+
+  // Node/connection edge auto-pan bypasses pointer callbacks. Keep its allowed axis working too.
+  useEffect(() => {
+    if (canvasLockMode !== 'horizontal' && canvasLockMode !== 'vertical') return
+    const original = rfStore.getState().panBy
+    const panBy: typeof original = delta => original(constrainPanDelta(delta, canvasLockMode))
+    rfStore.setState({ panBy })
+    return () => { if (rfStore.getState().panBy === panBy) rfStore.setState({ panBy: original }) }
+  }, [rfStore, canvasLockMode])
 
   // …and the lock really freezes a PLAIN middle-drag: React Flow lets a middle press on a node,
   // edge or selection pan even with `panOnDrag` off, so a drag started on a node header (or a
@@ -10689,7 +10703,7 @@ export function Canvas() {
       'canvas.fitAll': () => { fitAll(); return true },
       'canvas.tidy': () => { arrangeAllNodes(); return true },
       'canvas.tidyLineage': () => { arrangeByLineageAction(); return true },
-      'canvas.toggleLock': () => { setCanvasLocked((v) => !v); return true },
+      'canvas.toggleLock': () => { toggleCanvasLock(); return true },
       // The kanban board's keys — the mounted board decides (and declines when the focused control
       // owns the key, or when no per-project board is up: Omni registers none). lib/boardKeys.
       'board.openCard': () => runBoardKey('open'),
@@ -11756,6 +11770,18 @@ export function Canvas() {
   const gestureSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const onMove = useCallback(
     (_e: unknown, vp: Viewport) => {
+      if (_e) {
+        const constrained = constrainCanvasPan(vp, viewportRef.current, canvasLockMode)
+        if (constrained !== vp) {
+          // Sync both d3's gesture origin and React Flow's camera in this event, before paint.
+          // A camera-only correction would drift on the next packet; an async setViewport
+          // correction would briefly move the forbidden axis and misalign terminal glyphs.
+          viewportRef.current = constrained
+          rfStore.setState({ transform: [constrained.x, constrained.y, constrained.zoom] })
+          rfStore.getState().panZoom?.syncViewport(constrained)
+          vp = constrained
+        }
+      }
       viewportRef.current = vp
       markDirty()
       // SYNCHRONOUS, and deliberately OUTSIDE the coalescing rAF below. React Flow applies the
@@ -11794,7 +11820,7 @@ export function Canvas() {
         })
       }
     },
-    [markDirty]
+    [markDirty, canvasLockMode, rfStore]
   )
 
   // Focus a node by id (notification click): select + center it; if it lives in another
@@ -17592,11 +17618,11 @@ export function Canvas() {
     if (!settingsHydrated) return
     if (!canvasLockRestored.current) {
       canvasLockRestored.current = true
-      if (rememberCanvasLock) setCanvasLocked(readCanvasLocked())
+      if (rememberCanvasLock) setCanvasLockMode(readCanvasLockMode())
       return
     }
-    if (rememberCanvasLock) writeCanvasLocked(canvasLocked)
-  }, [settingsHydrated, rememberCanvasLock, canvasLocked])
+    if (rememberCanvasLock) writeCanvasLockMode(canvasLockMode)
+  }, [settingsHydrated, rememberCanvasLock, canvasLockMode])
 
   // Load saved SSH servers once so the RemotePicker / palette have them available.
   useEffect(() => {
@@ -19953,6 +19979,7 @@ export function Canvas() {
                 : [1]
           }
           panOnScroll={canvasLocked ? false : trackpadRouting || !wheelZoom}
+          panOnScrollMode={canvasLockMode === 'horizontal' ? PanOnScrollMode.Vertical : canvasLockMode === 'vertical' ? PanOnScrollMode.Horizontal : PanOnScrollMode.Free}
           zoomOnScroll={false}
           zoomOnPinch={false}
           // Off: a pane double-click is the overview-zoom gesture (see PANE_OVERVIEW_ZOOM) and a
@@ -20076,7 +20103,9 @@ export function Canvas() {
               onZoomOut={() => zoomOut({ duration: ZOOM_STEP_DURATION_MS })}
               onZoomTo={zoomToPct}
               canvasLocked={canvasLocked}
-              onToggleCanvasLock={() => setCanvasLocked((v) => !v)}
+              onToggleCanvasLock={toggleCanvasLock}
+              canvasLockMode={canvasLockMode}
+              onToggleCanvasAxisLock={toggleCanvasAxisLock}
               onDictate={toggleDictation}
               dictateActive={dictationOpen}
             />

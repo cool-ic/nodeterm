@@ -16,6 +16,7 @@ import { ZOOM_PRESETS, activeZoomPreset } from '../lib/zoomPresets'
 import { useCoreIsWindows } from '../terminal/use-core-platform'
 import { Tooltip } from './Tooltip'
 import { railMenuPlacement, type RailMenuPlacement, type RailSide } from '../lib/railMenu'
+import type { CanvasLockMode } from '../lib/canvasLock'
 
 const isMac = /Mac/i.test(navigator.platform || navigator.userAgent)
 
@@ -164,6 +165,8 @@ interface DockProps {
   /** T241: the camera lock — the one survivor of the old bottom-left Controls column. */
   canvasLocked: boolean
   onToggleCanvasLock: () => void
+  canvasLockMode: CanvasLockMode
+  onToggleCanvasAxisLock: (axis: 'horizontal' | 'vertical') => void
   onDictate: () => void
   dictateActive: boolean
 }
@@ -213,6 +216,8 @@ export function Dock({
   onZoomTo,
   canvasLocked,
   onToggleCanvasLock,
+  canvasLockMode,
+  onToggleCanvasAxisLock,
   onDictate,
   dictateActive
 }: DockProps) {
@@ -637,11 +642,26 @@ export function Dock({
           <button
             className={`dock-btn canvas-lock-btn${canvasLocked ? ' locked' : ''}`}
             aria-label={canvasLocked ? 'Unlock view' : 'Lock view'}
+            aria-pressed={canvasLocked}
             onClick={onToggleCanvasLock}
           >
             {canvasLocked ? <LockIcon /> : <UnlockIcon />}
           </button>
         </Tooltip>
+
+        {(['horizontal', 'vertical'] as const).map((axis) => (
+          <Tooltip key={axis}
+            label={axis === 'horizontal' ? 'Lock left/right pan; allow up/down' : 'Lock up/down pan; allow left/right'}
+            placement={tip}>
+            <button
+              className={`dock-btn canvas-lock-btn${canvasLockMode === axis ? ' locked' : ''}`}
+              aria-label={axis === 'horizontal' ? 'Lock left/right pan' : 'Lock up/down pan'}
+              aria-pressed={canvasLockMode === axis}
+              onClick={() => onToggleCanvasAxisLock(axis)}>
+              <AxisLockIcon axis={axis} />
+            </button>
+          </Tooltip>
+        ))}
 
         <span className="dock-sep" />
 
@@ -860,6 +880,15 @@ function UnlockIcon() {
     <svg {...S}>
       <rect x="4.5" y="10.5" width="15" height="10.5" rx="2.5" />
       <path d="M8 10.5V7a4 4 0 0 1 7.7-1.5" />
+    </svg>
+  )
+}
+function AxisLockIcon({ axis }: { axis: 'horizontal' | 'vertical' }) {
+  return (
+    <svg {...S}>
+      <g transform={axis === 'vertical' ? 'rotate(90 12 12)' : undefined}>
+        <path d="M3 5v14M21 5v14M5 12h14M8 9l-3 3 3 3M16 9l3 3-3 3" />
+      </g>
     </svg>
   )
 }

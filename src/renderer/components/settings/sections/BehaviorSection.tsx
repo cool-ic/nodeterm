@@ -300,7 +300,7 @@ export function BehaviorSection({ isActive }: { isActive: boolean }): React.JSX.
       <SearchableRow {...ROWS.rememberLock}>
         <FieldRow
           label="Remember the canvas lock"
-          description="The bottom-left lock stays on across restarts until you turn it off. Off: every launch starts unlocked."
+          description="Remember the toolbar's full, left/right or up/down lock across restarts. Off: every launch starts unlocked."
           control={
             <Switch
               checked={settings.rememberCanvasLock}

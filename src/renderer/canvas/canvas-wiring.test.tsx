@@ -119,7 +119,12 @@ describe('the old bottom-left controls column stays deleted (T241)', () => {
     expect(sepAfter).toBeGreaterThan(-1)
     // Canvas feeds the dock the same state the old Controls button used.
     expect(CANVAS_SRC).toMatch(/canvasLocked=\{canvasLocked\}/)
-    expect(CANVAS_SRC).toMatch(/onToggleCanvasLock=\{\(\) => setCanvasLocked\(\(v\) => !v\)\}/)
+    expect(CANVAS_SRC).toContain('onToggleCanvasLock={toggleCanvasLock}')
+    expect(CANVAS_SRC).toContain('canvasLockMode={canvasLockMode}')
+    expect(CANVAS_SRC).toContain('onToggleCanvasAxisLock={toggleCanvasAxisLock}')
+    expect(CANVAS_SRC).toContain("canvasLockMode === 'horizontal' ? PanOnScrollMode.Vertical")
+    expect(CANVAS_SRC).toContain('rfStore.getState().panZoom?.syncViewport(constrained)')
+    expect(CANVAS_SRC).toContain('original(constrainPanDelta(delta, canvasLockMode))')
     // The locked look survived the move: accent ink over a faint accent wash.
     expect(STYLES_SRC).toMatch(
       /\.dock-btn\.canvas-lock-btn\.locked \{[^}]*color: var\(--accent\);[^}]*background: color-mix\(in srgb, var\(--accent\) 14%, transparent\);/
@@ -574,18 +579,18 @@ describe('the canvas lock is remembered only when the user opted in', () => {
   )
 
   it('starts unlocked, so an install that never opts in is unchanged', () => {
-    expect(CANVAS_SRC).toContain('const [canvasLocked, setCanvasLocked] = useState(false)')
+    expect(CANVAS_SRC).toContain("const [canvasLockMode, setCanvasLockMode] = useState<CanvasLockMode>('none')")
   })
 
   it('restores and persists behind settings.rememberCanvasLock', () => {
     expect(effect).toContain('useSettings((s) => s.settings.rememberCanvasLock)')
-    expect(effect).toContain('if (rememberCanvasLock) setCanvasLocked(readCanvasLocked())')
-    expect(effect).toContain('if (rememberCanvasLock) writeCanvasLocked(canvasLocked)')
+    expect(effect).toContain('if (rememberCanvasLock) setCanvasLockMode(readCanvasLockMode())')
+    expect(effect).toContain('if (rememberCanvasLock) writeCanvasLockMode(canvasLockMode)')
     // The deps are the one line here that a deletion leaves green: without `canvasLocked` the
     // effect stops re-running on a toggle, so only a settings flip would ever write and a lock
     // engaged with the BUTTON would never survive a restart. There is no ESLint in this repo, so
     // exhaustive-deps cannot catch it either.
-    expect(effect).toContain('}, [settingsHydrated, rememberCanvasLock, canvasLocked])')
+    expect(effect).toContain('}, [settingsHydrated, rememberCanvasLock, canvasLockMode])')
   })
 
   it('waits for settings to hydrate before deciding either way', () => {
@@ -601,7 +606,7 @@ describe('the canvas lock is remembered only when the user opted in', () => {
     // Flipping the setting on mid-session must not reach into storage and lock a canvas somebody
     // is working on: the latch is what keeps a restore a launch-time event.
     expect(indexOfPresent(effect, 'canvasLockRestored.current = true')).toBeLessThan(
-      indexOfPresent(effect, 'if (rememberCanvasLock) setCanvasLocked(readCanvasLocked())')
+      indexOfPresent(effect, 'if (rememberCanvasLock) setCanvasLockMode(readCanvasLockMode())')
     )
     expect(effect).toContain('if (!canvasLockRestored.current) {')
   })
