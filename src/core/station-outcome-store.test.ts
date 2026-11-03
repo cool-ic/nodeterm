@@ -56,6 +56,95 @@ describe('handleReportOutcome', () => {
     expect(onRecorded).toHaveBeenCalledWith(d.store.get('st1'))
   })
 
+  it('--notify-opener sends the opener one nodeterm-written notice, and only when asked (#1356)', async () => {
+    const deliver = vi.fn(async () => ({ kind: 'delivered' }) as never)
+    const opener = {
+      recipientFor: () => ({ projectId: 'p1', recipientNodeId: 'orch', stationTitle: 'Tests' }),
+      deliver
+    }
+    await handleReportOutcome({ nodeId: 'st1', args: { outcome: 'failed' }, verified: true }, deps({ opener }))
+    expect(deliver).not.toHaveBeenCalled()
+
+    const r = await handleReportOutcome(
+      { nodeId: 'st1', args: { outcome: 'failed', note: 'flaky', 'notify-opener': '' }, verified: true },
+      deps({ opener })
+    )
+    expect(r.ok).toBe(true)
+    expect(r.message).toContain('Your opener orch was told.')
+    expect(deliver).toHaveBeenCalledTimes(1)
+    const notice = (deliver.mock.calls[0] as unknown as [{ recipientNodeId: string; body: string }])[0]
+    expect(notice.recipientNodeId).toBe('orch')
+    expect(notice.body).toContain('reported its task failed')
+    expect(notice.body).not.toContain('flaky') // the station's words never ride the app's envelope
+
+    // The same outcome again does not wake the opener a second time.
+    const d = deps({ opener })
+    const args = { outcome: 'succeeded', 'notify-opener': '' }
+    await handleReportOutcome({ nodeId: 'st3', args, verified: true }, d)
+    const again = await handleReportOutcome({ nodeId: 'st3', args, verified: true }, d)
+    expect(again.message).toContain('already told')
+    expect(deliver).toHaveBeenCalledTimes(2)
+
+    const refused = await handleReportOutcome(
+      { nodeId: 'st2', args: { outcome: 'succeeded', 'notify-opener': '' }, verified: true },
+      deps()
+    )
+    expect(refused.ok).toBe(false)
+  })
+
+  it('"already told" is read from what the opener HEARD, not from the previous record (#1356)', async () => {
+    const deliver = vi.fn(async () => ({ kind: 'delivered' }) as never)
+    const opener = {
+      recipientFor: () => ({ projectId: 'p1', recipientNodeId: 'orch', stationTitle: 'Tests' }),
+      deliver
+    }
+    const d = deps({ opener })
+    // A report made WITHOUT the flag told the opener nothing: a flagged repeat of the same outcome
+    // must still speak, or the orchestrator sleeps through a station that was done all along.
+    await handleReportOutcome({ nodeId: 'st1', args: { outcome: 'succeeded' }, verified: true }, d)
+    const r = await handleReportOutcome(
+      { nodeId: 'st1', args: { outcome: 'succeeded', 'notify-opener': '' }, verified: true },
+      d
+    )
+    expect(r.message).toContain('Your opener orch was told.')
+    expect(deliver).toHaveBeenCalledTimes(1)
+
+    // A notice that could NOT be sent (the project's switch off, say) is not "told": once it can
+    // be sent, the same outcome goes out.
+    deliver.mockResolvedValueOnce({ kind: 'notPermitted', reason: 'switch-off' } as never)
+    const args = { outcome: 'failed', 'notify-opener': '' }
+    const off = await handleReportOutcome({ nodeId: 'st2', args, verified: true }, d)
+    expect(off.message).toContain('could not be told (notPermitted:switch-off)')
+    const on = await handleReportOutcome({ nodeId: 'st2', args, verified: true }, d)
+    expect(on.message).toContain('Your opener orch was told.')
+    expect(deliver).toHaveBeenCalledTimes(3)
+
+    // Queued counts as told (the queue delivers it on the opener's next idle).
+    deliver.mockResolvedValueOnce({ kind: 'queued' } as never)
+    const q = await handleReportOutcome({ nodeId: 'st3', args, verified: true }, d)
+    expect(q.message).toContain('is told when it next goes idle')
+    const qAgain = await handleReportOutcome({ nodeId: 'st3', args, verified: true }, d)
+    expect(qAgain.message).toContain('already told')
+    expect(deliver).toHaveBeenCalledTimes(4)
+
+    // New work reaching the station withdraws its report AND what the opener heard about it: the
+    // report on the next task notifies again, even with the same outcome.
+    d.store.onHandover({ phase: 'landed', verb: 'send', targetNodeId: 'st3', at: 5_000 })
+    expect(d.store.get('st3')).toBeUndefined()
+    const next = await handleReportOutcome({ nodeId: 'st3', args, verified: true }, d)
+    expect(next.message).toContain('Your opener orch was told.')
+    expect(deliver).toHaveBeenCalledTimes(5)
+
+    // A station nobody opened through canvas control: the flag says so and sends nothing.
+    const alone = await handleReportOutcome(
+      { nodeId: 'st4', args, verified: true },
+      deps({ opener: { recipientFor: () => undefined, deliver } })
+    )
+    expect(alone.ok).toBe(true)
+    expect(alone.message).toContain('No opener to tell')
+    expect(deliver).toHaveBeenCalledTimes(5)
+  })
+
   it('refuses an unverified caller and records nothing — a forgeable success is not evidence', async () => {
     const d = deps()
     const r = await handleReportOutcome({ nodeId: 'st1', args: { outcome: 'succeeded' }, verified: false }, d)
@@ -101,41 +190,43 @@ describe('handleReportOutcome', () => {
     expect(d.store.list()).toHaveLength(1)
   })
 
-  it('report-outcome succeeded and failed each deliver an app-authored notice to the opener only', async () => {
+  it('explicit outcome notifications reach only the opener and leave station notes out of the body', async () => {
     const delivered: { stationNodeId: string; recipientNodeId: string; body: string }[] = []
     const d = deps({
-      recipientFor: (id) =>
+      opener: { recipientFor: (id) =>
         id === 'st1'
           ? { projectId: 'p1', recipientNodeId: 'orch', stationTitle: 'Worker' }
           : undefined,
       deliver: async (n) => {
         delivered.push(n)
         return { kind: 'delivered', traceId: 't', traced: 'memory', receipt: 'observed', signal: 'newTurn' }
-      }
+      } }
     })
     await handleReportOutcome(
-      { nodeId: 'st1', args: { outcome: 'succeeded', note: 'tests pass' }, verified: true },
+      { nodeId: 'st1', args: { outcome: 'succeeded', note: 'tests pass', 'notify-opener': '' }, verified: true },
       d
     )
-    await handleReportOutcome({ nodeId: 'st1', args: { outcome: 'failed', note: 'lint red' }, verified: true }, d)
+    await handleReportOutcome({ nodeId: 'st1', args: { outcome: 'failed', note: 'lint red', 'notify-opener': '' }, verified: true }, d)
     await handleReportOutcome({ nodeId: 'loner', args: { outcome: 'succeeded' }, verified: true }, d)
     expect(delivered).toHaveLength(2)
     expect(delivered[0]).toEqual({
       stationNodeId: 'st1',
       recipientNodeId: 'orch',
-      body: stationOutcomeNoticeBody({ id: 'st1', title: 'Worker' }, 'succeeded', 'tests pass')
+      body: stationOutcomeNoticeBody({ id: 'st1', title: 'Worker' }, 'succeeded')
     })
     expect(delivered[1]).toMatchObject({
       stationNodeId: 'st1',
       recipientNodeId: 'orch'
     })
-    expect(delivered[1].body).toContain('outcome: failed.')
+    expect(delivered[1].body).toContain('task failed.')
+    expect(delivered[0].body).not.toContain('tests pass')
+    expect(delivered[1].body).not.toContain('lint red')
     expect(delivered.some((n) => n.recipientNodeId !== 'orch')).toBe(false)
   })
 
   it('a missing opener is not invented — no notice, report still recorded', async () => {
     const deliver = vi.fn()
-    const d = deps({ recipientFor: () => undefined, deliver })
+    const d = deps({ opener: { recipientFor: () => undefined, deliver } })
     const r = await handleReportOutcome({ nodeId: 'st1', args: { outcome: 'succeeded' }, verified: true }, d)
     expect(r.ok).toBe(true)
     expect(d.store.get('st1')?.outcome).toBe('succeeded')

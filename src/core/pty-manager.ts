@@ -1,7 +1,7 @@
 import { qoderComposerState } from './agents/qoder-startup-ready'
 import { NODE_SCOPE_ENV, ensureTerminalCliBin, ensureTerminalZsh } from './terminal-cli'
 import type { ChatPromptBlocked, ChatPromptResult, EmptyPromptResult, TextDeliveryResult } from '../shared/text-delivery'
-import { claudeScreenBlocksInput, readClaudeComposer, readClaudeScreen } from '../shared/agents/claude-screen'
+import { claudeScreenBlocksInput, readClaudeComposer, readClaudeDraft, readClaudeScreen } from '../shared/agents/claude-screen'
 import os from 'os'
 import fs from 'fs'
 import path from 'path'
@@ -6795,12 +6795,18 @@ export class PtyManager {
         return false
       }
     }
+    // For an agent whose composer we can read, the settle check reads the draft in its input box
+    // (`readClaudeDraft`), which needs the styled capture: the placeholder is told apart by being dim.
+    const readsDraft = readsScreenDialogs(agentId)
     try {
       return await typeThenSubmitWhenSettled(text, {
         capture: async () => {
-          const screen = await this.captureSession(persistKey)
+          const screen = readsDraft
+            ? await this.captureStyledScreen(persistKey)
+            : await this.captureSession(persistKey)
           return screen === '' ? null : screen
         },
+        draftOf: readsDraft ? readClaudeDraft : undefined,
         type: (stdin) => ok(() => type(stdin)),
         // An empty capture is not evidence of a dialog (the `sendChatPrompt` rule).
         canSubmit: async () => {

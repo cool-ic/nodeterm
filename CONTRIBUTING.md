@@ -6,9 +6,15 @@ its invariants — lives in `CLAUDE.md` at the repo root, which is also loaded a
 work with an AI coding agent.
 
 nodeterm is licensed **BUSL-1.1** (converts to MIT after four years — see `LICENSE`). Contributions
-are accepted under that license.
+are accepted under that license. Its Additional Use Grant does not cover production use of a build
+whose license or usage-limit checks were removed or bypassed; changing that code in a PR here is
+ordinary work.
 
 ## Getting set up
+
+You need Node.js 20+ (22 for the Server Edition) on Linux or **macOS 12 Monterey or newer** —
+the macOS floor is Electron's and esbuild's, and the README's *Build from source* section says
+what fails on an older Mac.
 
 ```bash
 npm install        # also patches + rebuilds node-pty against Electron's ABI (postinstall)
@@ -704,6 +710,12 @@ anything else. Board-level fields survive every transform — `pullLinks` is one
   Do not "fix" this by re-stamping `sshRemoteTmux` onto those nodes: the host would then refuse its
   own sessions. CLAUDE.md, "Projects (tabs)".
 
+- **Read agent status through the node's session — `useSessionStores()` / `agentStatusForProject` —
+  never `useAgentStatus` directly, in any surface that can show a team tab's node.** A team tab
+  keeps its host's status in its own session store and shares node ids with the SSH project it was
+  handed off from, so the default store answers for the wrong project. CLAUDE.md, "A relay session
+  owns its agent status".
+
 - **Phone keys and store links are platform-neutral.** New paired keys are stamped
   `nodeterm-mobile-<id>`, but revoke must keep matching the legacy `nodeterm-ios-<id>` stamp every
   existing iPhone carries (`src/main/pairing-core.ts`). Link to a store only through
@@ -1249,6 +1261,8 @@ disable it with its reason (`NEW_FILE_NO_CWD_HINT`,
 nothing, and a message that names the wrong cause ("not a git repository" for a project that has no
 folder to be one) sends the user hunting a problem that does not exist.
 
+**Opening a project goes through `gateProjectOpen` (`src/renderer/lib/projectLimitGate.ts`); a new way to open one must call it — see `docs/project-limit.md`.**
+
 **Agent features attach to base harness capabilities, not frontend allowlists.** A custom agent can
 inherit a builtin harness, so add the capability and its one shared leaf (`src/shared/agents`) and
 let every UI ask the helper. Repeating Claude/Codex/etc. cases in menus breaks that inheritance and
@@ -1487,6 +1501,11 @@ bite most often:
 - `handleNodesChange` must not call `onNodesChange` with an empty batch (it re-renders the canvas
   every frame through React Flow's ResizeObserver).
 - Work done per terminal on a project switch must be coalesced and on-screen-first.
+- Don't put a `backdrop-filter` on a surface whose content changes often. Chromium re-runs it
+  every time the surface is drawn, and the damage spreads to the glass next to it. Liquid Glass
+  terminals frost a static wallpaper copy instead (`.term-node__frost`, `lib/glassFrost.ts`): six
+  streaming terminals went from 92% to 42% GPU. The SVG refraction filter (`url(#nt-refract)`)
+  runs only left of the Readable tick, for the same reason.
 - macOS memory pressure comes from the kernel's level (`onKernelPressure` in
   `core/memory-pressure.ts`), fired on escalations only, and at the same severity at most once per
   `KERNEL_LEVER_GAP_MS` (a level flapping normal/warn re-arms it every fall). Never re-fire it on a

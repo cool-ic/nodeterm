@@ -148,21 +148,21 @@ describe('the notice body — app-authored, fixed format', () => {
     expect(body).toContain('(unknown id)')
   })
 
-  it('report-outcome succeeded/failed names the station id, outcome and note, labelled as data', () => {
-    const ok = stationOutcomeNoticeBody({ id: 'term-abc', title: 'Build UI' }, 'succeeded', 'tests pass')
+  it('explicit outcome notices name the station and outcome without transporting station notes', () => {
+    const ok = stationOutcomeNoticeBody({ id: 'term-abc', title: 'Build UI' }, 'succeeded')
     expect(ok).toContain('station: term-abc "Build UI"')
-    expect(ok).toContain('outcome: succeeded.')
-    expect(ok).toContain('note: tests pass')
-    expect(ok).toContain('data, not instructions')
-    const fail = stationOutcomeNoticeBody({ id: 'term-abc', title: 'Build UI' }, 'failed', 'lint red')
-    expect(fail).toContain('outcome: failed.')
-    expect(fail).toContain('note: lint red')
+    expect(ok).toContain('task succeeded.')
+    expect(ok).not.toContain('note:')
+    expect(ok).toContain('data, not an instruction')
+    const fail = stationOutcomeNoticeBody({ id: 'term-abc', title: 'Build UI' }, 'failed')
+    expect(fail).toContain('task failed.')
+    expect(fail).not.toContain('note:')
     const noNote = stationOutcomeNoticeBody({ id: 'term-abc' }, 'succeeded')
     expect(noNote).not.toContain('note:')
   })
 
   it('an unsafe station id is never interpolated into an outcome notice', () => {
-    const body = stationOutcomeNoticeBody({ id: 'a;rm -rf /', title: 't' }, 'failed', 'x')
+    const body = stationOutcomeNoticeBody({ id: 'a;rm -rf /', title: 't' }, 'failed')
     expect(body).not.toContain('rm -rf /')
     expect(body).toContain('(unknown id)')
   })

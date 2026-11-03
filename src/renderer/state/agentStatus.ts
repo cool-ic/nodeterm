@@ -73,7 +73,9 @@ export interface AgentNodeStatus {
    * `saveClocks`) — never inside the main table, whose write cadence stays exactly what it was.
    * Bounded: `LAST_SEEN_MAX` newest, `LAST_SEEN_MAX_AGE_MS` old at most, dropped with the node by
    * `remove` (a deletion path that bypasses `remove` leaves a clock that ages out; it can never make
-   * a row, since rows come from canvas nodes).
+   * a row, since rows come from canvas nodes). The age-out is also the boot sweep's grace: an entry
+   * whose node is in no project is dropped once its clock is gone (`orphanStatusIds`,
+   * lib/unreadBadge.ts).
    *
    * It is a record of the PAST, restored as nothing else:
    *  - NOT as `state`: after a relaunch nothing has reported, a turn may have started or ended while
@@ -458,6 +460,9 @@ export interface AgentStatusStore {
    * PERSISTED state and the caller owes a log trace — never a silent rewrite.
    */
   pruneMissingNodes(known: Iterable<string> | undefined): string[]
+  /** Drop several entries with ONE write of each key (the boot sweep of orphaned entries —
+   *  `orphanStatusIds` in lib/unreadBadge.ts decides which). Ids not in the table are ignored. */
+  removeMany(ids: readonly string[]): void
 }
 
 /** The persisted "last seen" clock (see `AgentNodeStatus.lastSeen`). */
@@ -574,10 +579,16 @@ export interface AgentStatusSession {
  * instance hydrates from and saves to; `undefined` = in-memory only (load returns nothing,
  * save is a no-op — the instance never touches localStorage). See the module docblock for
  * why only the default instance has a key today.
+ *
+ * The two callbacks are this store's only reports OUT, and both are injected so that only the
+ * store that describes this machine's own core has them: `ackDone` (a read of a finished session,
+ * see `clearUnread`) and `reportHibernated` (the SLEEPING flag, see `setHibernated`). Absent = the
+ * fact stays in this store. A relay tab's store gets neither (`agentStatusForApi`).
  */
 export function createAgentStatusSession(
   persistKey?: string,
-  ackDone?: (nodeId: string) => void
+  ackDone?: (nodeId: string) => void,
+  reportHibernated?: (nodeId: string, on: boolean) => void
 ): AgentStatusSession {
   if (persistKey === KEY) migrateLegacyKey()
 
@@ -843,7 +854,14 @@ export function createAgentStatusSession(
         ) {
           // Same-state event: refresh freshness in place — stateAt is never rendered, and a
           // new object here would re-render every node header on each tool event.
-          if (s.byId[id]?.lastSeen?.restored) {
+          // OWN entries only: for an id with no entry of its own, a plain lookup of a name
+          // `Object.prototype` owns (`__proto__`, `constructor`, …) answers the prototype's value,
+          // and the in-place writes below would then land on `Object.prototype` (or `Object`) for
+          // the whole renderer. A relay host's ids are refused before they get here
+          // (`isHostNodeId`); this is the store's own guard, and for every real id it is the same
+          // lookup as before.
+          const own = Object.hasOwn(s.byId, id) ? s.byId[id] : undefined
+          if (own?.lastSeen?.restored) {
             // The FIRST event after a restart for a node whose state is still unknown (a
             // SessionStart from a cold-restore resume, say) is same-state by construction. Not in
             // place: the row must lose its "restored" label and re-sort NOW, not whenever another
@@ -853,20 +871,20 @@ export function createAgentStatusSession(
             return {
               byId: {
                 ...s.byId,
-                [id]: { ...s.byId[id], stateAt: now, stateVerified: verified === true, lastSeen: { at: now, state } }
+                [id]: { ...own, stateAt: now, stateVerified: verified === true, lastSeen: { at: now, state } }
               }
             }
           }
-          if (s.byId[id]) {
-            s.byId[id].stateAt = now
+          if (own) {
+            own.stateAt = now
             // "Last seen" is the last hook EVENT, so a same-state one moves it too — in place, like
             // `stateAt`, and saved on the trailing debounce rather than once per tool event.
-            s.byId[id].lastSeen = { at: now, state }
+            own.lastSeen = { at: now, state }
             scheduleClockSave()
             // The evidence rides along, in place and for the same reason: a re-assert of the SAME
             // state by a legacy POST must not leave an earlier `true` standing, or this copy would
             // disagree with the mirror the gate actually reads.
-            s.byId[id].stateVerified = verified === true
+            own.stateVerified = verified === true
           }
           return s
         }
@@ -1035,10 +1053,14 @@ export function createAgentStatusSession(
         const prev = s.byId[id] ?? EMPTY
         if (!!prev.hibernated === on) return s
         // The renderer owns this flag; the core only mirrors it (agent-status mirror → SLEEPING on
-        // the phone). Reported on the same edge the store changes, guarded because tests (and any
-        // non-preload context) run this store without a bridge.
+        // the phone). Reported on the same edge the store changes, through the injected callback:
+        // only the default store has one, because only its node ids are this desktop's own. A relay
+        // tab's pause reported here put the HOST's node id into THIS desktop's mirror, where a
+        // hibernated entry never expires and survives a restart, and nothing ever reported it
+        // false. Guarded because tests (and any non-preload context) run this store without a
+        // bridge.
         try {
-          window.nodeTerminal?.reportHibernated?.(id, on)
+          reportHibernated?.(id, on)
         } catch {
           /* the mirror is a side-channel; a failed report must never break the store */
         }
@@ -1292,7 +1314,22 @@ export function createAgentStatusSession(
         return { byId }
       })
       return removed
-    }
+    },
+
+    removeMany: (ids) =>
+      set((s) => {
+        const present = ids.filter((id) => id in s.byId)
+        if (present.length === 0) return s
+        const byId = { ...s.byId }
+        let clocks = false
+        for (const id of present) {
+          if (byId[id].lastSeen) clocks = true
+          delete byId[id]
+        }
+        save(byId)
+        if (clocks) saveClocks(byId)
+        return { byId }
+      })
   }))
 
   function inferInterruptAfterSettle(id: string, settleMs = INTERRUPT_SETTLE_MS): void {
@@ -1333,10 +1370,14 @@ const instanceByApi = new WeakMap<NodeTerminalApi, AgentStatusSession>()
 export function agentStatusForApi(api: NodeTerminalApi): AgentStatusSession {
   const existing = api ? instanceByApi.get(api) : undefined
   if (existing) return existing
-  // Keyless — remote status is never persisted (4a) — but the done-read ack routes to THAT core's
-  // api (a remote/relay core acks on its own host), so reading a finished remote session dismisses
-  // its phone activity too. A nullish api (node-env tests) gets no ack.
-  const session = createAgentStatusSession(undefined, api ? (id) => api.ackDone(id) : undefined)
+  // Keyless — remote status is never persisted (4a) — and with NO done-read ack: reading a remote
+  // session's finish clears unread on this desktop only (product decision 1). Nothing is sent back
+  // to that core (no `ackDone`, no `agent:ack-done`), so the host's own read state — its notch,
+  // its paired phone's Live Activity — stays as it was. And with NO hibernated report: a pause
+  // made on a team tab is this desktop's own view of the host's node. It is not the host's fact
+  // (v1 never tells the host), and it is not this desktop's either — its mirror (and the phone
+  // that reads it) describes this machine's nodes, and the host's node id has no place there.
+  const session = createAgentStatusSession(undefined, undefined, undefined)
   if (api) instanceByApi.set(api, session)
   return session
 }
@@ -1352,9 +1393,18 @@ export function agentStatusForApi(api: NodeTerminalApi): AgentStatusSession {
  */
 // The default (local core) acks the finished-session read to `window.nodeTerminal.ackDone` — guarded
 // for node-environment tests where no preload exists (the callback is invoked later, at clear time).
-const defaultAgentStatus = createAgentStatusSession(KEY, (id) => {
-  if (typeof window !== 'undefined') window.nodeTerminal?.ackDone?.(id)
-})
+const defaultAgentStatus = createAgentStatusSession(
+  KEY,
+  (id) => {
+    if (typeof window !== 'undefined') window.nodeTerminal?.ackDone?.(id)
+  },
+  // The SLEEPING flag, to this desktop's own mirror. Read at report time, like the ack: `window`
+  // has no bridge in node-environment tests, and the store's own try/catch keeps a throwing one
+  // from breaking the write.
+  (id, on) => {
+    if (typeof window !== 'undefined') window.nodeTerminal?.reportHibernated?.(id, on)
+  }
+)
 export { defaultAgentStatus }
 if (typeof window !== 'undefined' && window.nodeTerminal) {
   instanceByApi.set(window.nodeTerminal as NodeTerminalApi, defaultAgentStatus)
