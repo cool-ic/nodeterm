@@ -16,7 +16,7 @@ export function typewriterVolume(value: unknown): number {
 
 /** One upstream sound engine per renderer. No audio work is queued behind terminal input. */
 export class TypewriterSound {
-  private engine = new TypewriterSounds()
+  private engine = new TypewriterSounds(['key', 'space', 'return', 'backspace'])
   private lastAt = -Infinity
   constructor() {
     if (typeof OfflineAudioContext !== 'undefined') this.engine.configure({ sound: true, volume: 0.25, voice: 'standard', variation: 0.65 })
@@ -31,7 +31,8 @@ export class TypewriterSound {
       this.engine.play(kind)
     } catch { /* Audio is optional, input is not. */ }
   }
-  dispose(): void { this.engine.close() }
+  close(): void { this.engine.close() }
+  dispose(): void { this.engine.dispose() }
 }
 
 export function installTypewriterSound(doc: Document, play: (kind: Strike) => void): () => void {

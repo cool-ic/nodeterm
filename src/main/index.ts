@@ -1,6 +1,8 @@
 import { agentPidIn, isAgentPane } from '../shared/agents/pane-owner-predicate'
 import { imLifecycleEvent } from '../core/agent-im-event'
 import { ImWakeOutputRetry } from '../core/agent-im-wake-retry'
+import { ImOwnerProofs } from '../core/agent-im-owner'
+import { ImWakeScheduler } from '../core/agent-im-scheduler'
 import { IM_CLIENT_SOURCE } from '../core/agent-im-client'
 import { ImRuntime, type ImIdentity } from '../../scripts/agent-mail/runtime.mjs'
 import { registerUpdatePrepIpc } from './update-prep'
@@ -3693,25 +3695,24 @@ app.whenReady().then(async () => {
   const imGeneration = `${process.pid}:${Date.now()}`
   const imIdentities = new Map<string, ImIdentity>()
   let imSequence = 0
-  const imOwnerRecorded=new Set<string>()
   const imProof=async(identity:ImIdentity)=>{
     const owner=await ptyManager.paneOwner(identity.node).catch(()=>null)
     if(!owner || isAgentPane(owner,identity.cli)!=='agent')return null
     const pid=agentPidIn(owner,identity.cli)
     return pid ? {pid,pane:owner.paneId,tty:owner.tty,boot:Date.now()-uptime()*1000} : null
   }
+  const imOwnerProofs=new ImOwnerProofs(imProof,(identity,proof)=>imRuntime.rememberOwner(identity,proof))
   const recoverIm=async():Promise<void>=>{
     for(const row of imRuntime.recoveryCandidates()) {
       if(imIdentities.has(row.node))continue
-      if(!workspaceStore.persistedCanvases().some(c=>c.id===row.project && c.nodes.some(n=>n.id===row.node)))continue
+      if(!workspaceStore.projectIdsForNode(row.node).includes(row.project))continue
       const identity={...row,generation:imGeneration}
       const proof=await imProof(identity)
-      if(proof && imRuntime.recover(identity,proof)) {imIdentities.set(row.node,identity);imOwnerRecorded.add(row.node)}
+      if(proof && imRuntime.recover(identity,proof)) {imIdentities.set(row.node,identity);imOwnerProofs.recovered(identity)}
     }
   }
 
   const imCommand = `sh ${JSON.stringify(imLauncherPath)}`
-  let imTimer: ReturnType<typeof setTimeout> | undefined
   let imSweeping = false
   let imAgain = false
   const sweepIm = async ():Promise<void> => {
@@ -3726,7 +3727,8 @@ app.whenReady().then(async () => {
       imWakeOutputRetry.finish(identity.node,result)
     }} finally {imSweeping=false;if(imAgain){imAgain=false;scheduleIm()}}
   }
-  const scheduleIm=():void=>{clearTimeout(imTimer);imTimer=setTimeout(()=>{void sweepIm().catch(e=>console.warn('[agent-im]',String(e)))},200)}
+  const imScheduler=new ImWakeScheduler(()=>{void sweepIm().catch(e=>console.warn('[agent-im]',String(e)))})
+  const scheduleIm=():void=>imScheduler.request()
   const imWakeOutputRetry=new ImWakeOutputRetry((node,changed)=>ptyManager.onOutput(node,changed),scheduleIm)
   ptyManager.onMailboxInput(()=>scheduleIm())
   hookServer.setImNoticeHandler((node,payload)=>{
@@ -3740,7 +3742,7 @@ app.whenReady().then(async () => {
     scheduleIm()
     return result
   })
-  app.once('will-quit', () => {clearTimeout(imTimer);imWakeOutputRetry.dispose();imRuntime.close()})
+  app.once('will-quit', () => {imScheduler.dispose();imWakeOutputRetry.dispose();imRuntime.close()})
   scheduleIm()
   const emitAgentStatus = (e: NormalizedAgentEvent): void => {
     // Claude subagent events first become one card per child (claudeSubagents); every other event
@@ -3751,17 +3753,15 @@ app.whenReady().then(async () => {
       // the same single source of truth as the mirror/phone. Then broadcast the enriched event.
       const enriched = recordAgentEvent(out) ?? out
       if (enriched.verified && enriched.sessionId) {
-        const project = workspaceStore.persistedCanvases().find(c => c.nodes.some(n => n.id === enriched.nodeId))
-        if (project) {
-          const identity = { project: project.id, node: enriched.nodeId, session: enriched.sessionId,
+        const projectId = workspaceStore.projectIdsForNode(enriched.nodeId)[0]
+        if (projectId) {
+          const identity = { project: projectId, node: enriched.nodeId, session: enriched.sessionId,
             cli: enriched.agentId, generation: imGeneration }
           try {
             imRuntime.attach(identity)
             imIdentities.set(identity.node, identity)
-            if(!imOwnerRecorded.has(identity.node)) {
-              imOwnerRecorded.add(identity.node)
-              void imProof(identity).then(proof=>{if(proof)imRuntime.rememberOwner(identity,proof);else imOwnerRecorded.delete(identity.node)}).catch(()=>imOwnerRecorded.delete(identity.node))
-            }
+            if(enriched.kind==='session' && enriched.sessionPhase==='end') imOwnerProofs.forget(identity.node)
+            else void imOwnerProofs.refresh(identity,enriched.kind==='session' && enriched.sessionPhase==='start')
             const event = imLifecycleEvent(enriched)
             if (event) imRuntime.observe(identity, {sequence: ++imSequence, event})
             scheduleIm()

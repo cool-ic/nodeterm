@@ -356,6 +356,9 @@ export class TypewriterSounds {
   private settings: TypewriterSettings | null = null;
   private rand = random(Date.now());
 
+  private epoch = 0;
+  constructor(private readonly kinds: readonly SoundKind[] = KINDS) {}
+
   configure(settings: TypewriterSettings) {
     this.settings = settings;
     if (!settings.sound || settings.volume === 0) {
@@ -372,12 +375,15 @@ export class TypewriterSounds {
       return existing;
     }
     const voice = VOICES[voiceName];
+    const epoch = this.epoch;
     const work = Promise.all(
-      KINDS.map(async (kind) => {
+      this.kinds.map(async (kind) => {
         const variants: AudioBuffer[] = [];
         for (let i = 0; i < VARIANTS; i++) {
+          if (epoch !== this.epoch) return;
           variants.push(await render(kind, voice, i * 7919 + kind.length));
         }
+        if (epoch !== this.epoch) return;
         this.buffers.set(`${voiceName}:${kind}`, variants);
       })
     )
@@ -437,6 +443,15 @@ export class TypewriterSounds {
       void this.context.resume().catch(() => {});
     }
     return this.context;
+  }
+
+  /** Final unmount: fence unfinished offline renders so discarded engines stop preparing. */
+  dispose() {
+    this.epoch++;
+    this.settings = null;
+    this.buffers.clear();
+    this.preparing.clear();
+    this.close();
   }
 
   /** Releases the audio device. Buffers are kept so re-enabling is instant. */

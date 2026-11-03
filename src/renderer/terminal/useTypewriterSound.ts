@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useSettings } from '../state/settings'
 import { installTypewriterSound, TypewriterSound, typewriterVolume } from './typewriter-sound'
 
@@ -6,14 +6,17 @@ import { installTypewriterSound, TypewriterSound, typewriterVolume } from './typ
 export function useTypewriterSound(): void {
   const enabled = useSettings((s) => s.settings.terminalTypewriterSound)
   const volume = useSettings((s) => s.settings.terminalTypewriterVolume)
+  const currentVolume = useRef(typewriterVolume(volume))
+  currentVolume.current = typewriterVolume(volume)
+  const active = enabled === true && currentVolume.current > 0
   useEffect(() => {
-    if (enabled !== true || typewriterVolume(volume) === 0) return
+    if (!active) return
     const sound = new TypewriterSound()
-    const remove = installTypewriterSound(document, (kind) => sound.play(kind, typewriterVolume(volume)))
-    const stop = () => { if (document.hidden) sound.dispose() }
-    const blur = () => sound.dispose()
+    const remove = installTypewriterSound(document, (kind) => sound.play(kind, currentVolume.current))
+    const stop = () => { if (document.hidden) sound.close() }
+    const blur = () => sound.close()
     document.addEventListener('visibilitychange', stop)
     window.addEventListener('blur', blur)
     return () => { remove(); document.removeEventListener('visibilitychange', stop); window.removeEventListener('blur', blur); sound.dispose() }
-  }, [enabled, volume])
+  }, [active])
 }

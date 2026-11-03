@@ -1,3 +1,4 @@
+import { loadTerminalFonts, terminalFontsReady } from '../terminal/paper-fonts'
 /**
  * The MOUNTING SURFACE of the glyphgrid renderer (Phase 1b): the one WebGL2 canvas every
  * terminal on the board paints into, the rAF driver that submits its frames, and the two feeds
@@ -195,8 +196,23 @@ export function sharedGlyphActive(): boolean {
  * already proved it cannot build a context (`creationAttempted` with nothing live — a flag every
  * disposal resets, so a font change never looks like a failure).
  */
+let waitingFont: string | undefined
+function sharedFontReady(): boolean {
+  const family = useSettings.getState().settings.fontFamily
+  if (terminalFontsReady(family)) return true
+  if (waitingFont !== family) {
+    waitingFont = family
+    void loadTerminalFonts(family).then(() => {
+      if (waitingFont !== family) return
+      waitingFont = undefined
+      rebuildSharedContext()
+    })
+  }
+  return false
+}
+
 export function sharedGlyphAvailable(): boolean {
-  if (!sharedGlyphActive()) return false
+  if (!sharedGlyphActive() || !sharedFontReady()) return false
   return live !== null || !creationAttempted
 }
 
@@ -1453,7 +1469,7 @@ function reconcileAtlasCell(ctx: LiveContext, cell: DeviceCell | null): void {
  * of the context; a font change tears it down and the next caller rebuilds it with the new cell.
  */
 function ensureLiveContext(cell?: DeviceCell): LiveContext | null {
-  if (!sharedGlyphActive()) return null
+  if (!sharedGlyphActive() || !sharedFontReady()) return null
   if (live) {
     // `reconcileAtlasCell` CAN DISPOSE THE VERY CONTEXT IT IS HANDED — a cell drift rebuilds, and
     // `disposeContext()` nulls `live`. So the answer has to be re-read afterwards, and it is read

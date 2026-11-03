@@ -1,3 +1,4 @@
+import { useFontReadyVisual } from '../terminal/useFontReadyVisual'
 import { withPaperBackgroundShader, installPaperBackgroundMaterial } from '../terminal/paper-background-material'
 import { paperLayoutStyle } from '../terminal/paper-layout'
 import { elementOnScreen } from '../terminal/on-screen'
@@ -1446,7 +1447,7 @@ export function TerminalNode({
   // global settings for this node, and for no other project's nodes.
   // `data.terminalFontSize` is this node's own ⌘+ / ⌘− size (issue #915), layered last by the hook
   // so the card modal (which passes the same value) re-options through the identical path.
-  const visual = useXtermVisualSettings(owningProjectId(), data.terminalFontSize)
+  const { visual, fontsReady } = useFontReadyVisual(useXtermVisualSettings(owningProjectId(), data.terminalFontSize))
   // Mirrored for the lifecycle effect, which builds a NEW xterm on a refresh (`respawnNonce`) or an
   // offscreen revive without remounting — the [visual, glass] live-options effect does not re-run
   // then, so the instance must be born with the effective appearance (the node's font override, the
@@ -2464,6 +2465,7 @@ export function TerminalNode({
   // (kill the old session + dispose xterm), then recreates the session with the latest
   // `data.cwd`. The node `id` (= tmux persistKey) is unchanged, so it's the same target.
   useEffect(() => {
+    if (!fontsReady) return
     // Offscreen-disposed: this node gave its xterm + PTY client back and is showing the plate.
     // Spawn NOTHING until it is approached again (the observer below clears the flag and bumps the
     // epoch, which re-runs this effect). Returning no cleanup is deliberate: there is nothing of
@@ -5357,7 +5359,7 @@ export function TerminalNode({
     // (which disposes rather than parks — see `noParkIds` above), coming back up runs the body
     // again for a fresh warm attach. It carries no information itself; it is the trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.respawnNonce, offscreenEpoch, agentId])
+  }, [data.respawnNonce, offscreenEpoch, agentId, fontsReady])
 
   // A respawn asked for while this node is offscreen-disposed must not be swallowed. The effect
   // above early-returns while down, so the bump alone would do nothing and the request (Refresh, a

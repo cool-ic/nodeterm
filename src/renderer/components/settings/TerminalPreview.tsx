@@ -1,8 +1,8 @@
+import { useFontReadyVisual } from '../../terminal/useFontReadyVisual'
 import { installPaperDimReadability } from '../../terminal/paper-dim'
 import { paperLayoutStyle } from '../../terminal/paper-layout'
 import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
-import { useSettings } from '../../state/settings'
 import { applyLiveOptions, xtermOptionsFromSettings } from '../../terminal/terminal-config'
 import { useXtermVisualSettings } from '../../terminal/useXtermVisualSettings'
 import { activateUnicode11 } from '../../terminal/unicode-width'
@@ -55,12 +55,12 @@ export function TerminalPreview(): React.JSX.Element {
   // No project id, deliberately: this preview exists to show the GLOBAL appearance settings sitting
   // right beside it. Scoping it to the active project would repaint the picture with that project's
   // override, so the row the user is dragging would appear to do nothing.
-  const visual = useXtermVisualSettings()
+  const { visual, fontsReady } = useFontReadyVisual(useXtermVisualSettings())
 
   useEffect(() => {
-    const s = useSettings.getState().settings
+    if (!fontsReady) return
     const term = new Terminal({
-      ...xtermOptionsFromSettings(s),
+      ...xtermOptionsFromSettings(visual),
       cols: PREVIEW_COLS,
       rows: PREVIEW_ROWS,
       disableStdin: true
@@ -81,7 +81,7 @@ export function TerminalPreview(): React.JSX.Element {
       termRef.current = null
       term.dispose()
     }
-  }, [])
+  }, [fontsReady])
 
   // Same live-apply path as the real terminals. No re-fit: the grid is fixed, so a metrics change
   // just makes the sample render bigger or smaller — which is the point of previewing it.

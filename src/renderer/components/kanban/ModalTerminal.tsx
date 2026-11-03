@@ -1,3 +1,4 @@
+import { useFontReadyVisual } from '../../terminal/useFontReadyVisual'
 import { paperLayoutStyle } from '../../terminal/paper-layout'
 import { useContextEnsure } from '../../terminal/useContextEnsure'
 import { PaperInkAddon } from '../../terminal/paper-ink'
@@ -234,7 +235,7 @@ export function ModalTerminal({
   // answers a project×host attachment id for a session on a foreign host, which names no project at
   // all — the per-project appearance would silently vanish for exactly those cards.
   // …and the NODE's own font size (issue #915), so this second view matches the canvas one.
-  const visual = useXtermVisualSettings(owningProjectId(), spawn.terminalFontSize)
+  const { visual, fontsReady } = useFontReadyVisual(useXtermVisualSettings(owningProjectId(), spawn.terminalFontSize))
   // MIRROR TerminalNode: the xterm is BUILT from the effective appearance, not the bare globals.
   const visualRef = useRef(visual)
   visualRef.current = visual
@@ -295,6 +296,7 @@ export function ModalTerminal({
   }, [search])
 
   useEffect(() => {
+    if (!fontsReady) return
     // A unique viewerId per mount: the core namespaces it per connection, so uniqueness only has to
     // hold within THIS window. It makes the modal a second subscriber of the node's shared session.
     const viewerId = `modal-${nodeId}-${Math.random().toString(36).slice(2, 8)}`
@@ -688,7 +690,7 @@ export function ModalTerminal({
       transportRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeId])
+  }, [nodeId, fontsReady])
 
   // Live-apply the appearance settings, mirroring the canvas node's effect (see TerminalNode) —
   // without this the modal kept whatever it was built with, so changing the font or the theme with

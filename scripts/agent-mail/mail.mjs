@@ -121,7 +121,9 @@ export class Mailbox {
       const selected = []; let size = 0
       for (const row of rows) {
         const n = JSON.stringify(row).length
-        if (size + n > LIMIT.chars) break
+        // A valid 4000-character body can expand to 24000 JSON characters. Let the first
+        // message stand alone so legacy/escaped messages can always be read and acknowledged.
+        if (selected.length && size + n > LIMIT.chars) break
         selected.push(row); size += n
       }
       // A repeated fetch of the same snapshot uses the same receipt, not a growing pile of tokens.
@@ -153,7 +155,7 @@ export class Mailbox {
       FROM messages WHERE thread=? AND (sender=? OR recipient=?) AND id>? ORDER BY id LIMIT ?`)
       .all(thread, agent, agent, after, LIMIT.batch)
     const selected = []; let size = 0
-    for (const r of rows) { const n = JSON.stringify(r).length; if (size+n>LIMIT.chars) break; selected.push(r); size+=n }
+    for (const r of rows) { const n = JSON.stringify(r).length; if (selected.length && size+n>LIMIT.chars) break; selected.push(r); size+=n }
     return { messages: selected, next: selected.at(-1)?.id ?? after }
   }
   notice(agent, session, event, context = '') {

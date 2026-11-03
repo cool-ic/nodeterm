@@ -968,6 +968,25 @@ describe('sharedGlyphAvailable', () => {
     expect(sharedGlyphAvailable()).toBe(false)
   })
 
+  it('waits for the atlas font and emits one retry for many terminals', async () => {
+    const before = useSettings.getState().settings
+    const releases: Array<() => void> = []
+    const load = vi.fn(() => new Promise<void>((r) => releases.push(r)))
+    vi.stubGlobal('document', { fonts: { load } })
+    try {
+      useSettings.setState({ settings: { ...before, fontFamily: '"Nodeterm Maple Mono", monospace' } })
+      useSharedGlyph.getState().setEnabled(true)
+      const generation = useSharedGlyph.getState().generation
+      for (let i = 0; i < 10; i++) expect(sharedGlyphAvailable()).toBe(false)
+      expect(getSharedGlyphContext(CELL)).toBeNull()
+      expect(load).toHaveBeenCalledTimes(2)
+      releases.forEach((release) => release())
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+      expect(sharedGlyphAvailable()).toBe(true)
+      expect(useSharedGlyph.getState().generation).toBe(generation + 1)
+    } finally { vi.unstubAllGlobals(); useSettings.setState({ settings: before }) }
+  })
+
   it('is TRUE with the mode on and no context built yet — the fresh-mount state', () => {
     useSharedGlyph.getState().setEnabled(true)
     // Nothing has asked for a context, so none exists. A probe that reported "not shared" here

@@ -96,3 +96,15 @@ test('held diagnostics survive restart and existing mail wakes without sender re
  assert.equal(r.dispatch(restored,'status').unread,1)
  assert.equal(r.dispatch(restored,'read').messages[0].body,'already stored')
 })
+
+test('same-session native restart records a new PID for the next app recovery', t=>{
+ const r=fixture(t);r.attach(b);r.observe(b,{sequence:1,event:'idle'})
+ const proof={pid:111,pane:'%5',tty:'/dev/ttys5',boot:1000}
+ r.rememberOwner(b,proof)
+ r.observe(b,{sequence:2,event:'resume'})
+ r.rememberOwner(b,{...proof,pid:222})
+ r.observe(b,{sequence:3,event:'idle'})
+ const next={...b,generation:'g2'}
+ assert.equal(r.recover(next,proof),false)
+ assert.equal(r.recover(next,{...proof,pid:222}),true)
+})

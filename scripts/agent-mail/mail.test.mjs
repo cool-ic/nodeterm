@@ -115,3 +115,27 @@ test('deployment adapter derives identity, refuses wrong nodes, and ignores inhe
   assert.ok(team(config,'hook',[],JSON.stringify(p),{}).hookSpecificOutput.additionalContext.includes('1'))
   assert.equal(team(config,'hook',[],JSON.stringify(p),{}),null)
 })
+
+test('escaped maximum bodies remain readable, acknowledgeable and pageable', t => {
+  const {b,send}=fixture(t)
+  for (const [i,body] of ['\0'.repeat(4000), '\x01'.repeat(4000)].entries()) {
+    send('escaped'+i,body)
+    send('following'+i,'normal')
+    const read=b.read('reader','s2')
+    assert.equal(read.messages.length,1)
+    assert.equal(read.messages[0].body,body)
+    assert.ok(read.receipt)
+    assert.ok(JSON.stringify(read.messages[0]).length<26000)
+    assert.equal(b.ack('reader','s2',read.receipt).unread,1)
+    const normal=b.read('reader','s2')
+    assert.equal(normal.messages[0].body,'normal')
+    b.ack('reader','s2',normal.receipt)
+  }
+  let after=0, bodies=[]
+  for(let page=0;page<4;page++) {
+    const history=b.thread('reader','s2','work',after)
+    assert.ok(history.next>after)
+    bodies.push(...history.messages.map(x=>x.body)); after=history.next
+  }
+  assert.deepEqual(bodies,['\0'.repeat(4000),'normal','\x01'.repeat(4000),'normal'])
+})
