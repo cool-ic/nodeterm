@@ -29,11 +29,13 @@
  *   - `.term-md__content` — terminal ⌘M markdown view (TerminalNode) and the editor's Preview
  *   - `.term-chat__text`  — ⌘M transcript bubbles (ChatPanel)
  *   - `.sticky-node__md`  — sticky notes, canvas node AND kanban card modal (NoteMarkdown)
+ *   - `.paper-markdown__prose` — the paper Markdown editor's reading mode
  */
 export const RENDERED_MARKDOWN_CONTAINERS: readonly string[] = [
   '.term-md__content',
   '.term-chat__text',
-  '.sticky-node__md'
+  '.sticky-node__md',
+  '.paper-markdown__prose'
 ]
 
 export type MarkdownLinkDecision =

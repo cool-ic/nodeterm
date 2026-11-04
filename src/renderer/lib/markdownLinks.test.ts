@@ -69,6 +69,14 @@ describe('installMarkdownLinkGuard', () => {
     expect(openExternal).not.toHaveBeenCalled()
   })
 
+  it('keeps local and modifier-click links in the paper editor from replacing the canvas', () => {
+    const { openExternal, notifyLocal } = setup('<div class="paper-markdown__prose"><a href="./notes.md">notes</a></div>')
+    const event = click(document.querySelector('a')!, { metaKey: true })
+    expect(event.defaultPrevented).toBe(true)
+    expect(notifyLocal).toHaveBeenCalledOnce()
+    expect(openExternal).not.toHaveBeenCalled()
+  })
+
   it('routes an https link through openExternal in every container', () => {
     for (const sel of RENDERED_MARKDOWN_CONTAINERS) {
       const cls = sel.slice(1)
