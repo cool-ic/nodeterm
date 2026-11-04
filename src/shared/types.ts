@@ -2009,6 +2009,8 @@ export interface Settings {
   /** Local, passive keyboard feedback. Never driven by PTY output. */
   terminalTypewriterSound: boolean
   terminalTypewriterVolume: number
+  /** Show the paper sheet's font-relative content margins; absent = edge-to-edge. */
+  terminalPaperMargins?: boolean
   /** Empty string = use the system default shell. */
   defaultShell: string
   gridSize: number
@@ -2568,6 +2570,7 @@ export const DEFAULT_SETTINGS: Settings = {
   terminalLetterSpacing: 0,
   terminalTypewriterSound: false,
   terminalTypewriterVolume: 25,
+  terminalPaperMargins: false,
   defaultShell: '',
   gridSize: 24,
   snapToGrid: false,

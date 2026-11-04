@@ -840,7 +840,7 @@ export function ModalTerminal({
           onClose={onCloseSearch}
         />
       )}
-      <div ref={hostRef} style={paperLayoutStyle(visual.terminalTheme, visual.fontSize)} className={`kanban-modal__term${paperThemeClass(visual.terminalTheme)}`} {...{ [FONT_ZOOM_NODE_ATTR]: nodeId }} />
+      <div ref={hostRef} style={paperLayoutStyle(visual.terminalTheme, visual.fontSize, visual.terminalPaperMargins)} className={`kanban-modal__term${paperThemeClass(visual.terminalTheme)}`} {...{ [FONT_ZOOM_NODE_ATTR]: nodeId }} />
       {linkMenu && (
         <ContextMenu
           x={linkMenu.x}

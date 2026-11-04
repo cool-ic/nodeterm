@@ -6716,7 +6716,7 @@ export function TerminalNode({
       >
         <div
           className={`term-node__xterm nodrag nowheel${paperThemeClass(visual.terminalTheme)}${co.letterbox ? ' letterboxed' : ''}`}
-          style={paperLayoutStyle(visual.terminalTheme, visual.fontSize)}
+          style={paperLayoutStyle(visual.terminalTheme, visual.fontSize, visual.terminalPaperMargins)}
           ref={bodyRef}
           {...{ [FONT_ZOOM_NODE_ATTR]: id }}
         />

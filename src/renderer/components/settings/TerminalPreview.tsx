@@ -93,7 +93,7 @@ export function TerminalPreview(): React.JSX.Element {
 
   return (
     <div className="settings-term-preview">
-      <div ref={hostRef} style={paperLayoutStyle(visual.terminalTheme, visual.fontSize)} className={paperThemeClass(visual.terminalTheme).trim() || undefined} />
+      <div ref={hostRef} style={paperLayoutStyle(visual.terminalTheme, visual.fontSize, visual.terminalPaperMargins)} className={paperThemeClass(visual.terminalTheme).trim() || undefined} />
     </div>
   )
 }

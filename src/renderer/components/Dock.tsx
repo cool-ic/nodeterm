@@ -262,6 +262,7 @@ export function Dock({
   // The selector returns a STRING, so zustand's default equality keeps an unrelated settings
   // write from re-rendering the dock.
   const dictationShortcut = useSettings(() => dictationBinding())
+  const paperMargins = useSettings((s) => s.settings.terminalPaperMargins === true)
   const speechEngine = useSettings((s) => s.settings.speech.engine)
   const speechModel = useSettings((s) => s.settings.speech.model)
   // Whisper with the explicit None selection = dictation off (issue #143). The mic stays visible
@@ -580,6 +581,19 @@ export function Dock({
             <FrameIcon />
           </button>
         </Tooltip>
+        <Tooltip label={paperMargins ? 'Remove paper margins' : 'Add paper margins'} placement={tip}>
+          <button
+            className={`dock-btn${paperMargins ? ' active' : ''}`}
+            aria-label="Paper margins"
+            aria-pressed={paperMargins}
+            onClick={() => {
+              const store = useSettings.getState()
+              store.update({ terminalPaperMargins: store.settings.terminalPaperMargins !== true })
+            }}
+          >
+            <PaperMarginsIcon />
+          </button>
+        </Tooltip>
         {group !== 'compact' && (<>
         <Tooltip label="Zoom out" placement={tip}>
           <button className="dock-btn" aria-label="Zoom out" onClick={onZoomOut}>
@@ -855,6 +869,14 @@ function SaveIcon() {
     <svg {...S}>
       <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
       <path d="M17 21v-8H7v8M7 3v5h8" />
+    </svg>
+  )
+}
+function PaperMarginsIcon() {
+  return (
+    <svg {...S}>
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M7 6v12M17 6v12M10 9h4M10 12h4M10 15h4" />
     </svg>
   )
 }

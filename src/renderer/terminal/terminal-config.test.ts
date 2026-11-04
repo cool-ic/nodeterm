@@ -955,6 +955,21 @@ describe('applyLiveOptions', () => {
     expect(term.writes).toEqual([])
   })
 
+  it('requests fit for live paper margin changes without rewriting terminal options', () => {
+    const s = visual({ terminalTheme: 'paper-cotton', terminalPaperMargins: false })
+    const term = fakeTerm(s)
+    expect(applyLiveOptions(term, s).metricsChanged).toBe(false)
+    const on = { ...s, terminalPaperMargins: true }
+    expect(applyLiveOptions(term, on).metricsChanged).toBe(true)
+    expect(applyLiveOptions(term, on).metricsChanged).toBe(false)
+    expect(applyLiveOptions(term, s).metricsChanged).toBe(true)
+    expect(term.writes).toEqual([])
+    const ordinary = visual()
+    const other = fakeTerm(ordinary)
+    applyLiveOptions(other, ordinary)
+    expect(applyLiveOptions(other, { ...ordinary, terminalPaperMargins: true }).metricsChanged).toBe(false)
+  })
+
   it('paper renders glyphs over its own material and restores opaque ordinary themes', () => {
     const ordinary = visual()
     const term = fakeTerm(ordinary)

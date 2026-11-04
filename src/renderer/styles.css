@@ -16612,10 +16612,13 @@ button.pull-checks__name {
    Both host and xterm must be padding-free: FitAddon measures both boxes. */
 .kanban-modal__termwrap:has(> .terminal-paper),
 .term-node__xterm.terminal-paper,
-.kanban-modal__term.terminal-paper,
-.terminal-paper .xterm {
+.kanban-modal__term.terminal-paper {
   box-sizing: border-box;
   padding: 0;
+}
+.terminal-paper .xterm {
+  box-sizing: border-box;
+  padding: var(--paper-margin-block, 0px) var(--paper-margin-inline, 0px);
 }
 .paper-presets {
   display: grid;

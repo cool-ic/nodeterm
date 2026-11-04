@@ -23,3 +23,15 @@ it('removes both levels of paper padding, including the modal wrapper',()=>{
  expect(block).toContain('padding: 0;')
  expect(block).not.toContain('6%')
 })
+
+it('toggles margins independently of type/material ratios, with legacy absent values edge-to-edge',()=>{
+ const off=paperLayoutStyle('paper-cotton',15) as Record<string,string>
+ const on=paperLayoutStyle('paper-cotton',15,true) as Record<string,string>
+ expect(off['--paper-margin-block']).toBe('0px')
+ expect(off['--paper-margin-inline']).toBe('0px')
+ expect(on['--paper-margin-block']).toBe('9px')
+ expect(on['--paper-margin-inline']).toBe('max(26px, 6%)')
+ expect(on['--paper-tile-size']).toBe(off['--paper-tile-size'])
+ expect((paperLayoutStyle('paper-cotton',30,true) as Record<string,string>)['--paper-margin-block']).toBe('18px')
+ expect(paperLayoutStyle('nord',15,true)).toBeUndefined()
+})
