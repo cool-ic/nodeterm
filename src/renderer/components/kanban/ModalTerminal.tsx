@@ -2,7 +2,7 @@ import { useFontReadyVisual } from '../../terminal/useFontReadyVisual'
 import { paperLayoutStyle } from '../../terminal/paper-layout'
 import { useContextEnsure } from '../../terminal/useContextEnsure'
 import { PaperInkAddon } from '../../terminal/paper-ink'
-import { paperThemeClass } from '../../terminal/themes'
+import { isPaperTheme, paperThemeClass } from '../../terminal/themes'
 import { transcriptSessionFor } from '../../lib/transcriptSession'
 import { FIND_DECORATIONS } from '../../lib/palette'
 import { isLocalOnSshCanvas } from '../../lib/localOnSshCanvas'
@@ -237,6 +237,8 @@ export function ModalTerminal({
   // …and the NODE's own font size (issue #915), so this second view matches the canvas one.
   const { visual, fontsReady } = useFontReadyVisual(useXtermVisualSettings(owningProjectId(), spawn.terminalFontSize))
   // MIRROR TerminalNode: the xterm is BUILT from the effective appearance, not the bare globals.
+  const paperMargins = isPaperTheme(visual.terminalTheme) && visual.terminalPaperMargins === true
+  const paperMarginsRef = useRef(paperMargins)
   const visualRef = useRef(visual)
   visualRef.current = visual
   // Liquid Glass: the same glass as the canvas node (a second view of one session must look like
@@ -701,14 +703,17 @@ export function ModalTerminal({
   // smallest subscriber's grid. A viewer that changes its cell geometry without re-reporting keeps
   // clamping the shared pty to its pre-change size — i.e. shrinks the canvas terminal too.
   useEffect(() => {
+    // Track the desired layout even while fonts/terminal are not mounted yet.
+    const marginsChanged = paperMarginsRef.current !== paperMargins
+    paperMarginsRef.current = paperMargins
     const term = termRef.current
     if (!term) return
     const { metricsChanged } = applyLiveOptions(term, visual, glass)
-    if (!metricsChanged) return
+    if (!metricsChanged && !marginsChanged) return
     fitRef.current?.fit()
     const sid = sessionIdRef.current
     if (sid) transportRef.current?.resize(sid, term.cols, term.rows)
-  }, [visual, glass])
+  }, [visual, glass, fontsReady, paperMargins])
 
   // File drop → paste the path(s) into the co-attached session, just like the canvas node.
   const onDragOver = (e: React.DragEvent) => {

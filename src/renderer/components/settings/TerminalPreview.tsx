@@ -89,7 +89,7 @@ export function TerminalPreview(): React.JSX.Element {
     const term = termRef.current
     if (!term) return
     applyLiveOptions(term, visual)
-  }, [visual])
+  }, [visual, fontsReady])
 
   return (
     <div className="settings-term-preview">

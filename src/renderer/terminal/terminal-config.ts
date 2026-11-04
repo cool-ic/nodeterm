@@ -414,8 +414,6 @@ export interface LiveOptionEffects {
   themeChanged: boolean
 }
 
-const paperMarginState = new WeakMap<LiveOptionTarget, boolean>()
-
 /**
  * Apply appearance settings to a LIVE terminal, reporting what the caller still owes.
  *
@@ -431,15 +429,10 @@ export function applyLiveOptions(
 ): LiveOptionEffects {
   const next = xtermOptionsFromSettings(s, glass)
   const o = term.options
-  const paperMargins = isPaperTheme(s.terminalTheme) && s.terminalPaperMargins === true
-  const previousMargins = paperMarginState.get(term)
-  paperMarginState.set(term, paperMargins)
-  const marginsChanged = previousMargins !== undefined && previousMargins !== paperMargins
   // Deliberately NOT including the font WEIGHTS. xterm derives its cell size from
   // `CharSizeService`, which re-measures only on `fontFamily`/`fontSize` — a weight change never
   // moves the grid, so re-fitting on one would report a resize to the shared pty for nothing.
   const metricsChanged =
-    marginsChanged ||
     o.fontFamily !== next.fontFamily ||
     o.fontSize !== next.fontSize ||
     o.lineHeight !== next.lineHeight ||

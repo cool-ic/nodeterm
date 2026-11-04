@@ -1452,6 +1452,8 @@ export function TerminalNode({
   // offscreen revive without remounting — the [visual, glass] live-options effect does not re-run
   // then, so the instance must be born with the effective appearance (the node's font override, the
   // project's theme/font), not the bare global settings (review round 2 of #915).
+  const paperMargins = isPaperTheme(visual.terminalTheme) && visual.terminalPaperMargins === true
+  const paperMarginsRef = useRef(paperMargins)
   const visualRef = useRef(visual)
   visualRef.current = visual
   // The GLOBAL size the shared glyph atlas is rasterized for (see `fontLeavesAtlas`).
@@ -5655,12 +5657,15 @@ export function TerminalNode({
   // size, so it must go through it or this client would silently keep clamping the shared pty to
   // its pre-change grid. A palette change costs no resize — just a repaint we force ourselves.
   useEffect(() => {
+    // Track the desired layout even while fonts/terminal are not mounted yet.
+    const marginsChanged = paperMarginsRef.current !== paperMargins
+    paperMarginsRef.current = paperMargins
     const term = termRef.current
     if (!term) return
     const { metricsChanged, themeChanged } = applyLiveOptions(term, visual, glass)
-    if (metricsChanged) applyFitRef.current?.()
+    if (metricsChanged || marginsChanged) applyFitRef.current?.()
     if (themeChanged) fullRepaintRef.current?.()
-  }, [visual, glass])
+  }, [visual, glass, fontsReady, paperMargins])
 
   // glyphgrid participation — whether this node should hold a grid RIGHT NOW.
   //
