@@ -3,13 +3,14 @@ import { isPaperTheme } from './themes'
 
 export const PAPER_REFERENCE_FONT = 15
 export const PAPER_REFERENCE_TILE = 680
+const PAPER_REFERENCE_BLOCK_MARGIN = 22
 /** Font-relative material and margins; outer canvas zoom transforms paper and glyphs together. */
 export function paperLayoutStyle(theme: string, fontSize: number, margins = false): CSSProperties | undefined {
   if (!isPaperTheme(theme)) return undefined
   return {
     '--paper-font-size': `${fontSize}px`,
     '--paper-tile-size': `${PAPER_REFERENCE_TILE * fontSize / PAPER_REFERENCE_FONT}px`,
-    '--paper-margin-block': margins === true ? `${fontSize * 0.6}px` : '0px',
+    '--paper-margin-block': margins === true ? `${fontSize * PAPER_REFERENCE_BLOCK_MARGIN / PAPER_REFERENCE_FONT}px` : '0px',
     '--paper-margin-inline': margins === true ? `max(${fontSize * 26 / PAPER_REFERENCE_FONT}px, 6%)` : '0px'
   } as CSSProperties
 }

@@ -29,9 +29,9 @@ it('toggles margins independently of type/material ratios, with legacy absent va
  const on=paperLayoutStyle('paper-cotton',15,true) as Record<string,string>
  expect(off['--paper-margin-block']).toBe('0px')
  expect(off['--paper-margin-inline']).toBe('0px')
- expect(on['--paper-margin-block']).toBe('9px')
+ expect(on['--paper-margin-block']).toBe('22px')
  expect(on['--paper-margin-inline']).toBe('max(26px, 6%)')
  expect(on['--paper-tile-size']).toBe(off['--paper-tile-size'])
- expect((paperLayoutStyle('paper-cotton',30,true) as Record<string,string>)['--paper-margin-block']).toBe('18px')
+ expect((paperLayoutStyle('paper-cotton',30,true) as Record<string,string>)['--paper-margin-block']).toBe('44px')
  expect(paperLayoutStyle('nord',15,true)).toBeUndefined()
 })
