@@ -40,6 +40,7 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
   const theme = useSettings(s => s.settings.terminalTheme)
   const size = useSettings(s => s.settings.fontSize)
   const spacing = useSettings(s => s.settings.terminalLineHeight)
+  const paperMargins = useSettings(s => s.settings.terminalPaperMargins === true)
   const paperTheme = isPaperTheme(theme) ? theme : 'paper-ink'
   const palette = resolveTerminalTheme(paperTheme).theme
   const fontSize = Number.isFinite(size) ? Math.max(8, Math.min(32, size)) : 15
@@ -51,7 +52,7 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
     if (!data.fileMissing) void doc.load().then(() => { if (!disposed) { initialText.current = doc.text; paint() } })
     return () => { disposed = true; alive.current = false }
   }, [doc])
-  useEffect(() => { if (!reading) editor.current?.requestMeasure() }, [reading])
+  useEffect(() => { if (!reading) editor.current?.requestMeasure() }, [reading, paperMargins, fontSize, lineHeight])
   const save = async () => {
     if (data.fileMissing || editor.current?.compositionStarted) return
     const pending = doc.save()
@@ -76,7 +77,7 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
   }
   const previewHtml = useMemo(() => reading && doc.loaded ? renderMarkdown(doc.text) : '', [reading, doc.text, doc.loaded])
   const style = {
-    ...paperLayoutStyle(paperTheme, fontSize),
+    ...paperLayoutStyle(paperTheme, fontSize, paperMargins),
     '--paper-md-font': BUNDLED_TERMINAL_FONT,
     '--paper-md-line-height': lineHeight,
     '--paper-md-ink': palette.foreground,

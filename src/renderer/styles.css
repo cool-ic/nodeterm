@@ -16658,9 +16658,9 @@ button.pull-checks__name {
 .paper-markdown__source .cm-content, .paper-markdown__prose {
   box-sizing: border-box;
   width: 100%;
-  max-width: 80ch;
-  margin: 0 auto;
-  padding: 1.5em clamp(1em, 5%, 3em) 3em;
+  max-width: none;
+  margin: 0;
+  padding: var(--paper-margin-block, 0px) var(--paper-margin-inline, 0px);
   caret-color: var(--paper-md-ink);
 }
 .paper-markdown__source .cm-line { padding: 0; }

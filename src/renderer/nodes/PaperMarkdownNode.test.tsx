@@ -59,3 +59,21 @@ it('keeps the draft accessible and refuses saves after the worktree is removed',
   expect(host.querySelector('[role="alert"]')!.textContent).toContain('Copy your edits')
   await click('Save Markdown'); expect(fake.fs.write).not.toHaveBeenCalled()
 })
+it('shares the live margin setting in writing and reading without replacing the draft editor', async () => {
+  const { host, click } = await mount()
+  const source = host.querySelector('textarea')!
+  await act(async () => fake.change('an unsaved draft'))
+  const paper = host.querySelector<HTMLElement>('.paper-markdown')!
+  expect(paper.style.getPropertyValue('--paper-margin-inline')).toBe('0px')
+  await act(async () => useSettings.setState({ settings: { ...useSettings.getState().settings, terminalPaperMargins: true } }))
+  expect(paper.style.getPropertyValue('--paper-margin-inline')).not.toBe('0px')
+  expect(host.querySelector('textarea')).toBe(source)
+  await click('Read Markdown')
+  expect(host.querySelector('article')!.textContent?.trim()).toBe('an unsaved draft')
+  await act(async () => useSettings.setState({ settings: { ...useSettings.getState().settings, terminalPaperMargins: false } }))
+  expect(paper.style.getPropertyValue('--paper-margin-block')).toBe('0px')
+  await click('Edit Markdown')
+  expect(host.querySelector('textarea')).toBe(source)
+  expect(host.querySelector('.term-node__title-text')!.textContent).toContain('●')
+  expect(fake.fs.write).not.toHaveBeenCalled()
+})
