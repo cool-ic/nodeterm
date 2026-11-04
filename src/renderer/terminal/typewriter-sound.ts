@@ -36,8 +36,8 @@ export class TypewriterSound {
 }
 
 export function installTypewriterSound(doc: Document, play: (kind: Strike) => void): () => void {
-  const isTerminal = (target: EventTarget | null): target is HTMLTextAreaElement =>
-    target instanceof HTMLTextAreaElement && target.matches('.xterm-helper-textarea') &&
+  const isTerminal = (target: EventTarget | null): target is HTMLElement =>
+    target instanceof HTMLElement && target.matches('.xterm-helper-textarea, .paper-markdown__source .cm-content[contenteditable="true"]') &&
     doc.activeElement === target && !target.closest('.settings-term-preview') &&
     !target.closest('[inert], [aria-hidden="true"]') && doc.visibilityState === 'visible' && doc.hasFocus()
   const key = (e: KeyboardEvent) => {

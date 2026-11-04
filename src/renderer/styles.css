@@ -16620,6 +16620,83 @@ button.pull-checks__name {
   box-sizing: border-box;
   padding: var(--paper-margin-block, 0px) var(--paper-margin-inline, 0px);
 }
+
+/* A Markdown document is one sheet, using the same material/font scale as the terminals.
+   CodeMirror owns input/IME/selection; transparent layers keep the paper beneath everything. */
+.paper-markdown__paper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  color: var(--paper-md-ink);
+  font-family: var(--paper-md-font);
+  font-size: var(--paper-font-size);
+  line-height: var(--paper-md-line-height);
+}
+.paper-markdown .paper-markdown__button {
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--folio-ink);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.paper-markdown .paper-markdown__button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--folio-ink) 8%, transparent);
+}
+.paper-markdown .paper-markdown__button:disabled { opacity: .45; cursor: default; }
+.paper-markdown__write, .paper-markdown__source { height: 100%; min-height: 0; }
+.paper-markdown__write[hidden] { display: none; }
+.paper-markdown__source .cm-editor { height: 100%; background: transparent; color: inherit; }
+.paper-markdown__source .cm-editor.cm-focused { outline: none; }
+.paper-markdown__source .cm-scroller {
+  overflow: auto;
+  font-family: var(--paper-md-font);
+  font-size: var(--paper-font-size);
+  line-height: var(--paper-md-line-height);
+}
+.paper-markdown__source .cm-content, .paper-markdown__prose {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 80ch;
+  margin: 0 auto;
+  padding: 1.5em clamp(1em, 5%, 3em) 3em;
+  caret-color: var(--paper-md-ink);
+}
+.paper-markdown__source .cm-line { padding: 0; }
+.paper-markdown__source .cm-cursor { border-left: 2px solid var(--paper-md-ink); }
+.paper-markdown__source .cm-selectionBackground,
+.paper-markdown__source .cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+  background: color-mix(in srgb, var(--paper-md-accent) 20%, transparent);
+}
+.paper-markdown__source .paper-md-heading { font-weight: 700; color: var(--paper-md-ink); --paper-md-dry-ink: var(--paper-md-ink); }
+.paper-markdown__source .paper-md-link { color: var(--paper-md-accent); --paper-md-dry-ink: var(--paper-md-accent); }
+.paper-markdown__source .paper-md-code { color: var(--paper-md-code); --paper-md-dry-ink: var(--paper-md-code); }
+.paper-markdown__source .paper-md-marker { color: var(--paper-md-muted); --paper-md-dry-ink: var(--paper-md-muted); }
+.paper-md-ink, .paper-md-ink span { animation: paper-md-settle 420ms ease-out both; }
+@keyframes paper-md-settle {
+  from { color: var(--paper-md-wet); text-shadow: 0 0 .045em currentColor; }
+  to { color: var(--paper-md-dry-ink, var(--paper-md-ink)); text-shadow: none; }
+}
+.paper-markdown__read { flex: 1; min-height: 0; overflow: auto; outline: none; }
+.paper-markdown__prose { overflow-wrap: anywhere; user-select: text; }
+.paper-markdown__prose > :first-child { margin-top: 0; }
+.paper-markdown__prose p, .paper-markdown__prose ul, .paper-markdown__prose ol { margin: 0 0 1em; }
+.paper-markdown__prose h1 { font-size: 1.55em; }
+.paper-markdown__prose h2 { font-size: 1.3em; }
+.paper-markdown__prose h3 { font-size: 1.1em; }
+.paper-markdown__prose h1, .paper-markdown__prose h2, .paper-markdown__prose h3 { line-height: 1.4; margin: 1.4em 0 .65em; }
+.paper-markdown__prose a { color: var(--paper-md-accent); text-decoration-thickness: 1px; text-underline-offset: .15em; }
+.paper-markdown__prose code { font-family: inherit; font-size: .95em; color: var(--paper-md-code); }
+.paper-markdown__prose pre { overflow: auto; padding: 1em; background: color-mix(in srgb, var(--paper-md-ink) 5%, transparent); border-radius: 3px; }
+.paper-markdown__prose blockquote { margin: 1em 0; padding-left: 1em; border-left: 2px solid var(--paper-md-muted); }
+.paper-markdown__prose img { max-width: 100%; }
+.paper-markdown__prose table { border-collapse: collapse; width: 100%; }
+.paper-markdown__prose th, .paper-markdown__prose td { padding: .4em .65em; border: 1px solid color-mix(in srgb, var(--paper-md-ink) 25%, transparent); }
+.paper-markdown__prose hr { margin: 1.5em 0; border: 0; border-top: 1px solid var(--paper-md-muted); }
+.paper-markdown__message { padding: 1.5em; }
+.paper-markdown__error { position: absolute; bottom: 0; left: 0; right: 0; padding: .75em 1em; font-size: .85em; background: var(--paper-base); color: var(--paper-md-ink); border-top: 1px solid var(--paper-md-muted); }
+@media (prefers-reduced-motion: reduce) { .paper-md-ink, .paper-md-ink span { animation: none; } }
 .paper-presets {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

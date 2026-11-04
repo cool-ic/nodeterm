@@ -1,6 +1,7 @@
 import { Suspense, lazy } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import type { CanvasNode } from '../state/workspace'
+import { isMarkdownExt } from '../lib/markdownPreview'
 
 // EditorNode/DiffNode pull in the whole of monaco-editor (several MB of JS). Importing them
 // statically put Monaco in the startup chunk for every launch — including the common canvas
@@ -8,6 +9,7 @@ import type { CanvasNode } from '../state/workspace'
 // Monaco's chunk is fetched the first time an editor/diff node actually mounts.
 const EditorInner = lazy(() => import('./EditorNode').then((m) => ({ default: m.EditorNode })))
 const DiffInner = lazy(() => import('./DiffNode').then((m) => ({ default: m.DiffNode })))
+const MarkdownInner = lazy(() => import('./PaperMarkdownNode').then((m) => ({ default: m.PaperMarkdownNode })))
 
 function LoadingBody() {
   return (
@@ -30,9 +32,10 @@ function LoadingBody() {
 }
 
 export function LazyEditorNode(props: NodeProps<CanvasNode>) {
+  const ext = String(props.data.filePath ?? '').split('.').pop() ?? ''
   return (
     <Suspense fallback={<LoadingBody />}>
-      <EditorInner {...props} />
+      {isMarkdownExt(ext) ? <MarkdownInner key={String(props.data.filePath)} {...props} /> : <EditorInner {...props} />}
     </Suspense>
   )
 }

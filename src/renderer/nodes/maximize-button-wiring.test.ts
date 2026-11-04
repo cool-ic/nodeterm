@@ -12,6 +12,7 @@ const read = (f: string): string =>
 const HEADER_NODES = [
   'TerminalNode.tsx',
   'EditorNode.tsx',
+  'PaperMarkdownNode.tsx',
   'DiffNode.tsx',
   'BrowserNode.tsx',
   'WebNode.tsx',

@@ -23,6 +23,7 @@ const read = (f: string): string =>
 const FILTERED_ROOTS: Record<string, string> = {
   'TerminalNode.tsx': 'term-node${',
   'EditorNode.tsx': 'term-node editor-node',
+  'PaperMarkdownNode.tsx': 'term-node editor-node',
   'DiffNode.tsx': 'term-node editor-node',
   'BrowserNode.tsx': 'term-node browser-node',
   'VideoNode.tsx': 'term-node video-node',
