@@ -157,6 +157,17 @@ export class PaperInkAddon implements ITerminalAddon {
       appearance = nextAppearance; theme = term.options.theme
       const changed = changes.capture(term.buffer.active, term.cols, term.rows, start, end, output)
       output = false
+      if (changes.uncertain) clear()
+      if (changes.moves.length && strikes.length) {
+        const positions = new Map(changes.moves.map((m) => [`${m.fromLine}:${m.fromCol}`, m]))
+        // Relocate the existing wash with its ORIGINAL time; moving text is not a new strike.
+        const destinations = new Set(changes.moves.map((m) => `${m.line}:${m.col}`))
+        strikes = strikes.flatMap((s) => {
+          const moved = positions.get(`${s.line}:${s.col}`)
+          if (moved && moved.chars === s.chars) return [{ ...s, ...moved }]
+          return destinations.has(`${s.line}:${s.col}`) ? [] : [s]
+        })
+      }
       if (changed.length) {
         const at = performance.now(), replaced = new Set(changed.map((s) => `${s.line}:${s.col}`))
         strikes = strikes.filter((s) => at - s.at < INK_SETTLE_MS && !replaced.has(`${s.line}:${s.col}`))
