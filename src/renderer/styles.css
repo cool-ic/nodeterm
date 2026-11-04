@@ -16693,7 +16693,10 @@ button.pull-checks__name {
 .paper-markdown__prose img { max-width: 100%; height: auto; }
 .paper-markdown__image-error { color: var(--paper-md-muted); overflow-wrap: anywhere; }
 .paper-markdown__prose table { border-collapse: collapse; width: 100%; }
-.paper-markdown__prose th, .paper-markdown__prose td { padding: .4em .65em; border: 1px solid color-mix(in srgb, var(--paper-md-ink) 25%, transparent); }
+.paper-markdown__prose th, .paper-markdown__prose td {
+  padding: .4em .65em;
+  border: max(1.5px, .1em) solid color-mix(in srgb, var(--paper-md-ink) 60%, transparent);
+}
 .paper-markdown__prose hr { margin: 1.5em 0; border: 0; border-top: 1px solid var(--paper-md-muted); }
 .paper-markdown__message { padding: 1.5em; }
 .paper-markdown__error { position: absolute; bottom: 0; left: 0; right: 0; padding: .75em 1em; font-size: .85em; background: var(--paper-base); color: var(--paper-md-ink); border-top: 1px solid var(--paper-md-muted); }
