@@ -16583,8 +16583,8 @@ button.pull-checks__name {
 /* Opaque, fully lit paper beneath transparent xterm glyphs: no texture filter over ink. */
 .terminal-paper {
   --paper-base: #ebe5d8;
-  --paper-font-size: 15px;
-  --paper-tile-size: 680px;
+  /* Scale comes from the owning view. Local defaults here would shadow an ancestor's live
+     paperLayoutStyle (notably the Markdown sheet), freezing its text/material at 15px/680px. */
   background: var(--paper-base) url('./assets/paper-linen.png') repeat;
   background-size: var(--paper-tile-size, 680px) var(--paper-tile-size, 680px);
 }
@@ -16629,7 +16629,7 @@ button.pull-checks__name {
   flex-direction: column;
   color: var(--paper-md-ink);
   font-family: var(--paper-md-font);
-  font-size: var(--paper-font-size);
+  font-size: var(--paper-font-size, 15px);
   line-height: var(--paper-md-line-height);
 }
 .paper-markdown .paper-markdown__button {
@@ -16652,7 +16652,7 @@ button.pull-checks__name {
 .paper-markdown__source .cm-scroller {
   overflow: auto;
   font-family: var(--paper-md-font);
-  font-size: var(--paper-font-size);
+  font-size: var(--paper-font-size, 15px);
   line-height: var(--paper-md-line-height);
 }
 .paper-markdown__source .cm-content, .paper-markdown__prose {
