@@ -12,8 +12,8 @@ import { BUNDLED_TERMINAL_FONT } from '../terminal/paper-fonts'
 import { paperLayoutStyle } from '../terminal/paper-layout'
 import { effectiveTerminalFontSize, forwardedResetMatches, nextTerminalFontSizeOverride, normalizeTerminalFontSize, terminalFontZoomChord, type TerminalFontZoomAction } from '../terminal/terminal-font-zoom'
 import { PaperMarkdownEditor } from '../editor/PaperMarkdownEditor'
+import { PaperMarkdownRead } from '../editor/PaperMarkdownRead'
 import { MarkdownDocument } from '../editor/markdown-document'
-import { renderMarkdown } from '../lib/markdown'
 import { canvasOwnsMarkdownChord } from '../lib/markdownChord'
 import { isGlobalKanbanOpen, isKanbanOpen } from '../state/viewMode'
 import { NODE_MIN_SIZES } from '../lib/nodeSizing'
@@ -101,7 +101,6 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
       e.preventDefault(); e.stopPropagation(); void save()
     }
   }
-  const previewHtml = useMemo(() => reading && doc.loaded ? renderMarkdown(doc.text) : '', [reading, doc.text, doc.loaded])
   const style = {
     ...paperLayoutStyle(paperTheme, fontSize, paperMargins),
     '--paper-md-font': BUNDLED_TERMINAL_FONT,
@@ -140,7 +139,9 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
                 onChange={text => { const wasDirty = doc.dirty; doc.text = text; if (wasDirty !== doc.dirty) paint() }} onSave={() => void save()} onReady={view => { editor.current = view }} />
             </div>
             {reading && <article className="paper-markdown__read nodrag nowheel nokey" tabIndex={0} aria-label={`Read ${name}`}>
-              <div className="paper-markdown__prose" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+              <PaperMarkdownRead text={doc.text} filePath={filePath} fs={fs} openImage={path => {
+                window.dispatchEvent(new CustomEvent('nodeterm:open-file', { detail: { path, ssh: !!data.sshFs, view: true } }))
+              }} />
             </article>}
             {(doc.error || data.fileMissing) && <div className="paper-markdown__error nodrag" role="alert">{data.fileMissing ? 'Worktree removed. Copy your edits before closing; saving is disabled.' : doc.error}</div>}
           </>}

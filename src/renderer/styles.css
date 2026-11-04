@@ -16690,7 +16690,8 @@ button.pull-checks__name {
 .paper-markdown__prose code { font-family: inherit; font-size: .95em; color: var(--paper-md-code); }
 .paper-markdown__prose pre { overflow: auto; padding: 1em; background: color-mix(in srgb, var(--paper-md-ink) 5%, transparent); border-radius: 3px; }
 .paper-markdown__prose blockquote { margin: 1em 0; padding-left: 1em; border-left: 2px solid var(--paper-md-muted); }
-.paper-markdown__prose img { max-width: 100%; }
+.paper-markdown__prose img { max-width: 100%; height: auto; }
+.paper-markdown__image-error { color: var(--paper-md-muted); overflow-wrap: anywhere; }
 .paper-markdown__prose table { border-collapse: collapse; width: 100%; }
 .paper-markdown__prose th, .paper-markdown__prose td { padding: .4em .65em; border: 1px solid color-mix(in srgb, var(--paper-md-ink) 25%, transparent); }
 .paper-markdown__prose hr { margin: 1.5em 0; border: 0; border-top: 1px solid var(--paper-md-muted); }
