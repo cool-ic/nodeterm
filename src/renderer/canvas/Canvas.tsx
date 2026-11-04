@@ -11680,7 +11680,7 @@ export function Canvas() {
       if (sig === undefined) {
         sig = `${n.id}:${n.data.title}:${n.data.color}:${n.data.text ?? ''}:${
           n.data.collapsed ? 1 : 0
-        }:${((n.data.tags as string[]) ?? []).join(',')}`
+        }:${((n.data.tags as string[]) ?? []).join(',')}:${n.data.markdownFontSize ?? ''}`
         cache.set(n.data, sig)
       }
       sigs[i] = sig

@@ -8,9 +8,9 @@ import { DEFAULT_SETTINGS } from '@shared/types'
 
 const fake = vi.hoisted(() => ({
   fs: { exists: vi.fn(), read: vi.fn(), write: vi.fn() },
-  remove: vi.fn(), change: (_: string) => {}, toggle: () => {}, created: 0
+  remove: vi.fn(), updateData: vi.fn(), change: (_: string) => {}, toggle: () => {}, reset: (_mods: { meta: boolean; control: boolean }) => {}, created: 0
 }))
-vi.mock('@xyflow/react', () => ({ Handle: () => null, NodeResizer: () => null, Position: { Top: 'top' }, useReactFlow: () => ({ deleteElements: fake.remove }) }))
+vi.mock('@xyflow/react', () => ({ Handle: () => null, NodeResizer: () => null, Position: { Top: 'top' }, useReactFlow: () => ({ deleteElements: fake.remove, updateNodeData: fake.updateData }) }))
 vi.mock('../session/session', () => ({ useSession: () => ({ api: { fs: fake.fs } }) }))
 vi.mock('../components/Tooltip', () => ({ Tooltip: ({ children }: any) => children }))
 vi.mock('./MaximizeButton', () => ({ MaximizeButton: () => null }))
@@ -20,17 +20,25 @@ vi.mock('../editor/PaperMarkdownEditor', () => ({ PaperMarkdownEditor: (props: a
 } }))
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 let cleanup: (() => Promise<void>) | undefined
-afterEach(async () => { await cleanup?.(); cleanup = undefined; vi.clearAllMocks() })
+afterEach(async () => { await cleanup?.(); cleanup = undefined; vi.clearAllMocks(); vi.restoreAllMocks() })
 async function mount() {
   let disk = '# Hello\n\n中文 **Markdown**\n<script>alert(1)</script>'
   fake.fs.exists.mockResolvedValue(true); fake.fs.read.mockImplementation(async () => disk)
   fake.fs.write.mockImplementation(async (_path, content) => { disk = content; return true })
   const bridge = window.nodeTerminal, settings = useSettings.getState()
-  ;(window as any).nodeTerminal = { onMarkdownToggle: (fn: () => void) => { fake.toggle = fn; return () => {} } }
+  ;(window as any).nodeTerminal = {
+    onMarkdownToggle: (fn: () => void) => { fake.toggle = fn; return () => {} },
+    onZoomActualSize: (fn: typeof fake.reset) => { fake.reset = fn; return () => {} }
+  }
   useSettings.setState({ settings: { ...DEFAULT_SETTINGS, terminalTheme: 'paper-cotton', openMarkdownPreview: false }, hydrated: true })
   const host = document.createElement('div'); document.body.append(host)
   const root = createRoot(host)
   let props = { id: 'test-md', data: { filePath: '/test.md', color: '#abc' }, selected: false } as ComponentProps<typeof PaperMarkdownNode>
+  fake.updateData.mockImplementation((_id: string, updater: any) => {
+    const patch = typeof updater === 'function' ? updater({ id: props.id, data: props.data }) : updater
+    props = { ...props, data: { ...props.data, ...patch } }
+    root.render(<PaperMarkdownNode {...props} />)
+  })
   await act(async () => root.render(<PaperMarkdownNode {...props} />))
   cleanup = async () => { await act(async () => root.unmount()); host.remove(); useSettings.setState(settings); window.nodeTerminal = bridge }
   const click = async (name: string) => { await act(async () => host.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!.click()) }
@@ -76,4 +84,55 @@ it('shares the live margin setting in writing and reading without replacing the 
   expect(host.querySelector('textarea')).toBe(source)
   expect(host.querySelector('.term-node__title-text')!.textContent).toContain('●')
   expect(fake.fs.write).not.toHaveBeenCalled()
+})
+it('zooms only this document in both modes, scales its material, and resets via desktop focus routing', async () => {
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
+  const { host, click } = await mount()
+  const paper = host.querySelector<HTMLElement>('.paper-markdown')!
+  const source = host.querySelector('textarea')!
+  const press = async (key: string, code: string, extra: KeyboardEventInit = {}) => {
+    const event = new KeyboardEvent('keydown', { key, code, metaKey: true, bubbles: true, cancelable: true, ...extra })
+    await act(async () => (document.activeElement ?? source).dispatchEvent(event))
+    return event
+  }
+  source.focus()
+  const base = useSettings.getState().settings.fontSize
+  expect((await press('=', 'Equal')).defaultPrevented).toBe(true)
+  expect(paper.style.getPropertyValue('--paper-font-size')).toBe(`${base + 1}px`)
+  expect(parseFloat(paper.style.getPropertyValue('--paper-tile-size'))).toBeCloseTo(680 * (base + 1) / 15)
+  await act(async () => fake.change('a draft'))
+  await click('Read Markdown')
+  host.querySelector<HTMLElement>('article')!.focus()
+  await press('+', 'Equal', { shiftKey: true })
+  expect(paper.style.getPropertyValue('--paper-font-size')).toBe(`${base + 2}px`)
+  await press('-', 'Minus')
+  expect(paper.style.getPropertyValue('--paper-font-size')).toBe(`${base + 1}px`)
+  const outside = document.createElement('input'); document.body.append(outside); outside.focus()
+  await act(async () => fake.reset({ meta: true, control: false }))
+  expect(paper.style.getPropertyValue('--paper-font-size')).toBe(`${base + 1}px`)
+  host.querySelector<HTMLElement>('article')!.focus()
+  await act(async () => fake.reset({ meta: true, control: false }))
+  expect(paper.style.getPropertyValue('--paper-font-size')).toBe(`${base}px`)
+  await click('Edit Markdown')
+  expect(host.querySelector('textarea')).toBe(source)
+  expect(host.querySelector('.term-node__title-text')!.textContent).toContain('●')
+  expect(useSettings.getState().settings.fontSize).toBe(base)
+  expect(fake.fs.write).not.toHaveBeenCalled()
+  outside.remove()
+})
+it('leaves ordinary typing, alternate modifiers and IME composition alone', async () => {
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel')
+  const { host } = await mount()
+  const source = host.querySelector('textarea')!; source.focus()
+  for (const event of [
+    { key: '=', code: 'Equal' },
+    { key: '-', code: 'Minus', ctrlKey: true },
+    { key: '+', code: 'Equal', metaKey: true, isComposing: true },
+    { key: '+', code: 'Equal', metaKey: true, altKey: true }
+  ]) {
+    const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...event })
+    await act(async () => source.dispatchEvent(e))
+    expect(e.defaultPrevented).toBe(false)
+  }
+  expect(fake.updateData).not.toHaveBeenCalled()
 })

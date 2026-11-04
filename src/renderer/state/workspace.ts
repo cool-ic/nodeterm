@@ -151,6 +151,8 @@ export interface NodeData {
   mdMode?: boolean
   /** Terminal nodes: own font size (issue #915) — see CanvasNodeState.terminalFontSize. */
   terminalFontSize?: number
+  /** Paper Markdown editing and reading share this persisted font size. */
+  markdownFontSize?: number
   /** Expanded height to restore when un-collapsing (kept out of the persisted size). */
   expandedHeight?: number
   /**
@@ -2959,6 +2961,7 @@ export function nodeStatesToFlow(states: CanvasNodeState[]): CanvasNode[] {
         // Validated at the same seam as the icon below: project.json is hand-editable and shared,
         // and xterm must never be handed a font size outside the Settings range (issue #915).
         terminalFontSize: normalizeTerminalFontSize(n.terminalFontSize),
+        markdownFontSize: normalizeTerminalFontSize(n.markdownFontSize),
         // Validated HERE, at the seam where a git-shared, hand-editable project file becomes live
         // node data — so every surface that renders an icon gets a value this module vouched for
         // rather than each one re-deciding. An unrecognized icon becomes no icon.
@@ -3066,6 +3069,7 @@ export function flowToNodeStates(nodes: CanvasNode[], retainInitialCommand = tru
         mdMode: n.data.mdMode || undefined,
         // Re-validated on the way OUT, same reasoning as the icon below (issue #915).
         terminalFontSize: normalizeTerminalFontSize(n.data.terminalFontSize),
+        markdownFontSize: normalizeTerminalFontSize(n.data.markdownFontSize),
         // React Flow's node `data` is `Record<string, unknown>`, so the icon comes back out
         // untyped. Re-validating on the way OUT (not just on the way in) also means a value a
         // peer canvas mutation or a future caller put on live node data cannot be written to the

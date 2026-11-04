@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Handle, NodeResizer, Position, useReactFlow, type NodeProps } from '@xyflow/react'
 import type { EditorView } from '@codemirror/view'
 import type { CanvasNode } from '../state/workspace'
+import { isMacPlatform } from '@shared/platform-utils'
 import { useSession } from '../session/session'
 import { useProjects } from '../state/projects'
 import { useSettings } from '../state/settings'
@@ -9,6 +10,7 @@ import { sshFs } from '../terminal/ssh-fs'
 import { isPaperTheme, paperThemeClass, resolveTerminalTheme } from '../terminal/themes'
 import { BUNDLED_TERMINAL_FONT } from '../terminal/paper-fonts'
 import { paperLayoutStyle } from '../terminal/paper-layout'
+import { effectiveTerminalFontSize, forwardedResetMatches, nextTerminalFontSizeOverride, normalizeTerminalFontSize, terminalFontZoomChord, type TerminalFontZoomAction } from '../terminal/terminal-font-zoom'
 import { PaperMarkdownEditor } from '../editor/PaperMarkdownEditor'
 import { MarkdownDocument } from '../editor/markdown-document'
 import { renderMarkdown } from '../lib/markdown'
@@ -22,7 +24,7 @@ import { MaximizeButton } from './MaximizeButton'
 
 /** The existing editor node/file route, with a small Markdown-specific surface and no Monaco. */
 export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>) {
-  const { deleteElements } = useReactFlow()
+  const { deleteElements, updateNodeData } = useReactFlow()
   const { api } = useSession()
   const activeProjectId = useProjects(s => s.activeProjectId)
   const fs = useMemo(() => data.sshFs && activeProjectId ? sshFs(activeProjectId) : api.fs,
@@ -34,6 +36,7 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
   const [reading, setReading] = useState(() => useSettings.getState().settings.openMarkdownPreview)
   const [confirmClose, setConfirmClose] = useState(false)
   const editor = useRef<EditorView | null>(null)
+  const sheet = useRef<HTMLDivElement>(null)
   const hovered = useRef(false)
   const alive = useRef(false)
   const initialText = useRef('')
@@ -43,7 +46,8 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
   const paperMargins = useSettings(s => s.settings.terminalPaperMargins === true)
   const paperTheme = isPaperTheme(theme) ? theme : 'paper-ink'
   const palette = resolveTerminalTheme(paperTheme).theme
-  const fontSize = Number.isFinite(size) ? Math.max(8, Math.min(32, size)) : 15
+  const baseSize = normalizeTerminalFontSize(size) ?? 15
+  const fontSize = effectiveTerminalFontSize(baseSize, data.markdownFontSize)
   const lineHeight = Number.isFinite(spacing) ? Math.max(1.45, Math.min(2, spacing)) : 1.45
   const paint = () => { if (alive.current) refresh(n => n + 1) }
   useEffect(() => {
@@ -69,6 +73,28 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
   useEffect(() => window.nodeTerminal.onMarkdownToggle(() => {
     if (canvasOwnsMarkdownChord(hovered.current, isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId ?? ''))) toggleRef.current()
   }), [])
+  const zoomFont = (action: TerminalFontZoomAction) => {
+    if (editor.current?.compositionStarted) return
+    updateNodeData(id, node => ({
+      markdownFontSize: nextTerminalFontSizeOverride(action, node.data.markdownFontSize, baseSize)
+    }))
+  }
+  const zoomRef = useRef(zoomFont)
+  zoomRef.current = zoomFont
+  // Desktop claims ⌘0 before DOM keydown. Reuse its existing signal; only the focused sheet acts.
+  useEffect(() => window.nodeTerminal.onZoomActualSize(mods => {
+    if (forwardedResetMatches(mods, isMacPlatform()) && sheet.current?.contains(document.activeElement)) {
+      zoomRef.current('reset')
+    }
+  }), [])
+  const zoomKeyDown = (e: React.KeyboardEvent) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229 || editor.current?.compositionStarted) return
+    const action = terminalFontZoomChord(e, isMacPlatform())
+    if (!action) return
+    e.preventDefault()
+    e.stopPropagation()
+    zoomFont(action)
+  }
   // Keep ⌘S available while reading. Source mode owns its shortcut through CodeMirror.
   const keyDown = (e: React.KeyboardEvent) => {
     if (reading && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
@@ -88,9 +114,9 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
   } as CSSProperties
   const close = () => { if (doc.dirty || doc.saving) setConfirmClose(true); else void deleteElements({ nodes: [{ id }] }) }
   return <>
-    <div className={`term-node editor-node paper-markdown${selected ? ' selected' : ''}`}
+    <div ref={sheet} className={`term-node editor-node paper-markdown${selected ? ' selected' : ''}`} data-nt-keyboard-owner
       data-paper-theme={paperTheme} style={{ ...style, borderTopColor: data.color }}
-      onMouseEnter={() => { hovered.current = true }} onMouseLeave={() => { hovered.current = false }} onKeyDown={keyDown}>
+      onMouseEnter={() => { hovered.current = true }} onMouseLeave={() => { hovered.current = false }} onKeyDownCapture={zoomKeyDown} onKeyDown={keyDown}>
       <NodeResizer isVisible={selected} color={data.color} lineClassName="nt-resize-ghost" handleClassName="nt-resize-ghost" />
       <Handle id="flow-in" type="target" position={Position.Top} isConnectable={false} style={{ opacity: 0, pointerEvents: 'none', top: 0 }} />
       <div className="term-node__header">
@@ -107,7 +133,7 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
         <MaximizeButton id={id} maximized={!!data.premaxRect} />
         <Tooltip label="Close"><button className="term-node__close" aria-label="Close" onClick={close}><IconClose /></button></Tooltip>
       </div>
-      <div className={`editor-node__body paper-markdown__paper${paperThemeClass(paperTheme)}`} data-nt-keyboard-owner>
+      <div className={`editor-node__body paper-markdown__paper${paperThemeClass(paperTheme)}`}>
         {!doc.loaded ? <div className="paper-markdown__message" role="status">{data.fileMissing ? 'This file’s worktree was removed.' : doc.error || 'Loading…'}</div> : <>
             <div className="paper-markdown__write" hidden={reading}>
               <PaperMarkdownEditor initialText={initialText.current} fileName={name}

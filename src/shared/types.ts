@@ -597,6 +597,8 @@ export interface CanvasNodeState {
    *  `settings.terminalFontZoomKeys` is on; absent = follow the global `fontSize`. Hand-editable,
    *  so every reader goes through `normalizeTerminalFontSize` (renderer/terminal/terminal-font-zoom). */
   terminalFontSize?: number
+  /** Paper Markdown editor/reader: per-node font size; absent follows global fontSize. */
+  markdownFontSize?: number
   shell?: string
   cwd?: string
   /** Which agent runs in this terminal node (claude/codex/gemini/custom). */
