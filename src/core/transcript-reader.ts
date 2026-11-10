@@ -10,6 +10,7 @@ import { linkedClaudeConfigDirFor } from './claude-config-dir'
 import { platform } from './platform'
 import { capText, toolBody } from './chat-tool-body'
 import { isRecord } from '../shared/is-record'
+import { CLAUDE_TOOL_INTERRUPT_MARKER, claudeInterruptMarkerOf } from '../shared/agents/claude-interrupt'
 import { ASK_USER_QUESTION_TOOL, readQuestions } from '../shared/agents/permission-answer'
 import { BASH_COMMAND_TOOL, CHAT_TOOL_ARG_MAX, COMMAND_OUTPUT_TOOL } from '../shared/chat-command'
 import {
@@ -19,6 +20,7 @@ import {
   SYSTEM_TOOL,
   expandPastedContent
 } from '../shared/chat-system-records'
+import { teammateElementText, teammateElements, type TeammateElement } from './chat-teammate'
 
 // Transcript root for a managed account (its `projects` dir) or the system default
 // (`~/.claude/projects` when accountId is undefined — bit-for-bit the old behavior). Impure
@@ -197,6 +199,9 @@ export function classifyLocalCommand(content: string): LocalCommandRecord | null
 //                      `<agent-message from="…">` (a subagent hand-back) or `<cross-session-message
 //                      from="…" from-name="…" from-mode="…">` element + a fixed instruction trailer.
 //   auto-continuation / coordinator  (isMeta)  plain text.
+//   (no origin)        an agent team's teammate: "Another Claude session sent a message:\n" + one or
+//                      more `<teammate-message teammate_id="…">` elements + a fixed trailer, with no
+//                      `origin` / `promptSource` / `isMeta` at all (core/chat-teammate.ts).
 // Each renders as ONE assistant tool part — the #991 local-command pattern: no new role, part kind
 // or field, so a v1 decoder (the phone) reads it as an ordinary tool chip. A human paste
 // (`<pasted_content id="…">…</pasted_content id="…">` inside typed text) stays the user's bubble.
@@ -346,7 +351,36 @@ export function classifySystemRecord(
   }
   if (kind === 'peer') return peerMessage(content)
   if (kind === 'auto-continuation' || kind === 'coordinator') return fallback(SYSTEM_TOOL, content)
+  const team = teammateElements(rec, content)
+  if (team !== null) return teammateRecord(team)
   return null
+}
+
+/** A teammate record (core/chat-teammate.ts) as ONE `Agent message` part: `arg` names the sender(s),
+ *  `result` holds each element as text. The rich read draws `teammate` parts instead. */
+function teammateRecord(team: TeammateElement[]): SystemRecord {
+  const senders = [...new Set(team.map((el) => (el.unverified ? `${el.from} (unverified)` : el.from)))]
+  return {
+    name: AGENT_MESSAGE_TOOL,
+    arg: capArg(senders.join(', ')),
+    result: capResult(team.map(teammateElementText).join('\n\n'))
+  }
+}
+
+/** A teammate element as the `teammate` part the rich read draws. */
+function teammatePart(el: TeammateElement): Extract<ChatPart, { kind: 'teammate' }> {
+  return { kind: 'teammate', ...el }
+}
+
+/** What a tool call cancelled by an interrupt shows as its result (`ChatParseOptions.rich`). */
+export const INTERRUPTED_TOOL_RESULT = 'Interrupted'
+
+/** The result Claude Code writes for a tool call the user cancelled or refused. MEASURED on 2.1.285
+ *  (`__fixtures__/claude/interrupt-capture.json`): an `is_error` tool_result starting with this. */
+const TOOL_REJECTION_PREFIX = "The user doesn't want to proceed with this tool use."
+
+function isToolRejection(c: { is_error?: unknown; content?: unknown }): boolean {
+  return c.is_error === true && summarizeResult(c.content).startsWith(TOOL_REJECTION_PREFIX)
 }
 
 /** A system record's tool part (`result` only when non-empty). */
@@ -378,8 +412,9 @@ export interface ChatParseOptions {
    * default, like `thinking`: the golden fixtures and the phone's `chat.page` never set it.
    * Also: a `diff` on each `Edit` / `Write` tool part whose input reads (`toolDiff`), a
    * `Compaction` chip for each context compaction (`compactionPart`) in place of the long summary
-   * record the model continues from, which is skipped, and a checklist `body` on each `TodoWrite`
-   * tool part whose `todos` read (`toolBody`).
+   * record the model continues from, which is skipped, a checklist `body` on each `TodoWrite`
+   * tool part whose `todos` read (`toolBody`), and a `teammate` part for each message of an agent
+   * team's teammate (`teammateElements`) in place of the one `Agent message` chip.
    */
   rich?: boolean
 }
@@ -612,6 +647,9 @@ function parseChatRecords(
   // The stamp of the newest `user` record so far, hidden meta lines included: when the request a
   // thinking record answers was made, so its `ms` (see the type). Read only on the opt-in branch.
   let lastUserAt: number | undefined
+  // The tool part the LAST user/assistant record rejected (Claude's canned "doesn't want to proceed"
+  // result), for an interrupt marker right after it. Read only on the opt-in branch.
+  let rejectedTool: Extract<ChatPart, { kind: 'tool' }> | null = null
   const push = (m: ChatMessage, offset: number): void => {
     awaitingOutput = null
     // `at` rides BOTH paths (additive): the time the line was written, for the thread's relative
@@ -654,6 +692,17 @@ function parseChatRecords(
       continue
     }
     if (opts?.rich && o.type === 'user' && o.isCompactSummary === true) continue
+    // Opt-in (see `ChatParseOptions.rich`): an interrupt marker is Claude's, not the user's words.
+    // A tool call it cancelled was answered just before with a canned rejection ("The user doesn't
+    // want to proceed with this tool use…"), which reads as the tool's output; it says Interrupted.
+    const interrupt = opts?.rich && o.type === 'user' ? claudeInterruptMarkerOf(content) : null
+    if (interrupt !== null) {
+      if (interrupt === CLAUDE_TOOL_INTERRUPT_MARKER && rejectedTool) rejectedTool.result = INTERRUPTED_TOOL_RESULT
+      rejectedTool = null
+      push({ role: 'assistant', parts: [{ kind: 'interrupt' }] }, offset)
+      continue
+    }
+    if (o.type === 'user' || o.type === 'assistant') rejectedTool = null
     if (o.type === 'assistant' && Array.isArray(content)) {
       const parts: ChatPart[] = []
       for (const c of content as Array<{
@@ -707,6 +756,7 @@ function parseChatRecords(
         tool_use_id?: string
         content?: unknown
         source?: unknown
+        is_error?: unknown
       }>) {
         if (!c || typeof c !== 'object') continue
         // A non-string `text` is passed through as before; only a string is a paste to expand.
@@ -720,6 +770,7 @@ function parseChatRecords(
           const s = summarizeResult(c.content)
           if (tool) {
             if (s) tool.result = s
+            if (opts?.rich && isToolRejection(c)) rejectedTool = tool
           } else if (paged && s && typeof c.tool_use_id === 'string' && c.tool_use_id) {
             // Its tool_use is in an OLDER window (claude writes the call before its result, so it
             // can never be in a newer one). Carried so the renderer can attach it later.
@@ -731,6 +782,13 @@ function parseChatRecords(
     } else if (o.type === 'user' && typeof content === 'string' && content.trim()) {
       // Not the user's words (a background task's completion, another session's message, an
       // auto-continuation): one assistant tool part, like a local command.
+      // Opt-in (see `ChatParseOptions.rich`): a teammate's messages are drawn as the TUI draws them;
+      // without it the record is one `Agent message` chip, like any other system record.
+      const team = opts?.rich ? teammateElements(o, content) : null
+      if (team !== null) {
+        push({ role: 'assistant', parts: team.map(teammatePart) }, offset)
+        continue
+      }
       const sys = classifySystemRecord(o, content)
       if (sys) {
         push({ role: 'assistant', parts: [systemPart(sys)] }, offset)

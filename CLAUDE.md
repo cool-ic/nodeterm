@@ -3555,7 +3555,19 @@ its agent status" under Hosted team relay.
   `settings` block (`claudePermissionMode`/`autoSupported`/`claudeAccounts`) so the phone can
   launch agents with the desktop's permission mode + managed accounts, and SSH slices get their
   **per-host** settings (remote CLI caps + host-matched accounts) injected via
-  `remote-status-push`'s `settingsFor` dep. `settings.customAgents` (`[{id, label, baseAgent?,
+  `remote-status-push`'s `settingsFor` dep. **`settings.claudeSessionIdFlag`** (present only as
+  `true`) is how a phone-started node gets the persisted conversation id every canvas-minted node
+  has: the phone launches `claude --session-id <uuid>` only when the HOST's own `claude --help`
+  advertised the flag (an unknown option makes claude exit), then hands that id over with the node
+  it registers — `RemoteNodeInput.agentSessionId` on `projects.registerNode`, the same key in the
+  node it writes over direct SSH — and `appendProjectNode` persists it as `data.agentSessionId`.
+  Before this a phone node had ONE route to its session (a hook event reaching this desktop), so
+  whenever none had arrived its ⌘M fell back to the markdown view, its title never adopted the
+  session name and a cold restore relaunched blank. Three writers publish the block and each must
+  answer with the probe for the machine its file describes — local claude caps in both shells, the
+  host's own probe (`core/remote-ssh/claude-session-id-probe.ts`) for an SSH slice; all three go
+  through `mirrorClaudeSessionIdFlag` and are pinned in `mirror-session-id-flag.test.ts`.
+  `settings.customAgents` (`[{id, label, baseAgent?,
   binaries}]`) lets the phone chat with a custom agent: built ONLY by `core/mirror-custom-agents.ts`
   (one definition for all three providers — local file, which relay `projects.list` also serves,
   SSH slices, Server Edition), `binaries` = `binariesFor` from the pane-owner predicate, published
@@ -4358,6 +4370,16 @@ command-bearing opens; this does not add a human-confirm dialog or change mobile
   a turn boundary in `assistantTurnEnds`) and fences a human paste's `<pasted_content>` span (the
   CLI's own 4-hex-id grammar only; titles keep the raw text) — all `indexOf` scans, never a
   backtracking regex (quadratic on unclosed tags); exact rules in `src/shared/chat-fixtures/README.md`.
+  **An agent team's teammate writing to the lead is one more of these** (`core/chat-teammate.ts`,
+  README rule 2b): a user record with NO `origin`, `promptSource` or `isMeta` (measured on CLI
+  2.1.285–2.1.316), the "Another Claude session sent a message:" line, one or more
+  `<teammate-message teammate_id="…">` elements (a markdown body, or an `idle_notification` JSON
+  object) and a fixed trailer. On the wire it is one `Agent message` chip; the desktop's `rich` read
+  draws a `teammate` part per element instead, as Claude Code's TUI does: an idle notification is a
+  status line ("✓ Teammate @pc-02 finished") with a one-line preview, and consecutive plain
+  messages from one teammate fold into one "N messages from @x" row (`nodes/ChatTeammate.tsx`). The
+  missing `origin` is the human guard: a person who types or pastes the same text is recorded with
+  `origin.kind:"human"` / `promptSource:"typed"` and keeps their bubble.
   **Paged reads (2026-09).** `chat.readTranscript` takes a trailing optional `page`
   (`{before?, maxBytes?}`, `shared/chat-page.ts`). Absent = the legacy 5 MB-tail read, byte for byte
   (result is exactly `{messages, found}`). Present = ONE window of at most `maxBytes` (clamped
@@ -4449,6 +4471,26 @@ command-bearing opens; this does not add a human-confirm dialog or change mobile
   elsewhere; the screen-wide count never rose and every such send ended `pasted-not-submitted` with
   the answer sitting in the box. The screen-wide count stays only as the fallback for a poll with
   no readable input box (a draft too tall for the box reader).
+  **Esc in the chat view interrupts a running turn** (`lib/chatEscInterrupt.ts`, core
+  `PtyManager.interruptChat`, `pty:interrupt-chat`), as Esc in the terminal would. Only when ALL of:
+  the agent is in `CHAT_INTERRUPT_CAPABLE` (claude, MEASURED on 2.1.318), the state is `working`
+  (idle, two Escs open Claude's rewind picker, which fires no hook; blocked/waiting, Esc cancels the
+  dialog), and the composer is EMPTY (with a draft, Esc means "never mind"). Core reads the screen
+  first and refuses on a dialog, then sends a lone Esc through `sendPaneKeys`. An Esc before the
+  reply's first token makes Claude put the prompt back into its own input box (measured 0.05-0.11 s);
+  core takes it back out ONLY when the box holds exactly the chat view's last send, and hands it to
+  the composer. It clears the box with Ctrl-U, never Ctrl-C: Ctrl-C clears it too but then arms
+  "Press Ctrl-C again to exit" for a few seconds. Claude still writes such a prompt to the
+  transcript as a branch it drops from its context, so the chat view keeps showing it (the reader
+  does not follow `parentUuid`; known gap). The panel also makes the terminal's interrupt guess
+  (`inferInterruptAfterSettle`), since an early Esc writes no transcript marker.
+  **An interrupt is drawn as Claude draws it, not as a user bubble.** Claude saves its marker
+  (`CLAUDE_INTERRUPT_MARKERS`, now in `shared/agents/claude-interrupt.ts`, shared with the context
+  tail) as a USER record. On the `rich` read the parser turns it into an `interrupt` part on the
+  assistant side, drawn as `⎿ Interrupted · What should Claude do instead?`, and a tool call it
+  cancelled shows "Interrupted" instead of Claude's canned "The user doesn't want to proceed…"
+  result. Without `rich` (the phone's `chat.page`, the golden fixtures) nothing changes; the iOS
+  reader owes the same treatment (@eneskirca).
   **The agent's OWN dialogs are read off the screen** (`shared/agents/claude-screen.ts`, claude
   only — `SCREEN_DIALOG_READABLE`). The folder-trust prompt, `/model` and one-time setup questions
   fire NO hook, so the state gate above reads `done` while one owns the keyboard, and a paste into
@@ -4461,6 +4503,26 @@ command-bearing opens; this does not add a human-confirm dialog or change mobile
   re-reads at once; unknown focus polls), to disable the composer and show the dialog's lines; SSH and relay panes are not polled (a round trip per read) and rely
   on the send-time check. Another CLI's layout would read as a permanent dialog, so an agent joins
   the list only with its own measured reader.
+  The live box must end within `BOX_TAIL_LINES` (8) non-blank lines of the bottom, so an old box in
+  the history is not taken for it; the agent list Claude Code draws under its status lines while
+  background agents or teammates run (`● main`, `○ <name> …` rows, `↓ N more`; measured on 2.1.319)
+  does not count toward those lines (`isAgentListLine`). Before that, five agents were enough for the
+  view to say the input box was not on screen.
+  **Claude's suggested next prompt is the composer's placeholder** (`readClaudeSuggestion`,
+  `pty.readChatScreen`). A few seconds after a turn ends, and only when there is an obvious next
+  step, Claude draws a suggestion as plain DIM text on its prompt line (MEASURED on 2.1.318); → in
+  its TUI accepts it, and → in an EMPTY composer does the same here: it fills the draft with the
+  caret at the end, and nothing is sent. The poll now makes ONE styled read for both the dialog
+  check and the suggestion (a styled capture is the only way to tell dim text from a draft; a pane
+  with no styled capture still gets the dialog check from the plain one). Two other dim texts sit
+  in the same place and are refused: the fresh-session tips (always `Try "…"`) and `Press up to
+  edit queued messages`. Shown only while a message could be sent and no dialog is on screen;
+  cleared on every state change and on send. Claude draws it 1.1-2.2 s after the turn ends
+  (measured, 5 turns), and the 2 s poll added up to 2 s more, which read as a lag; so after a turn
+  ends a local pane is read every 300 ms for up to 5 s, stopping at the first suggestion
+  (`SUGGESTION_BURST_MS`, at most ~15 extra reads per turn). An SSH node is never polled, so it is
+  read twice after each turn (`REMOTE_SUGGESTION_READ_DELAYS_MS`, 2.5 s and 6 s); relay tabs offer
+  none.
   **Live progress (2026-09).** While the agent works, a `role=status` row closes the thread (the ONE
   spinner + the placeholder's own "<agent> is working…"/"waiting for an answer" sentence; optimistic
   right after a send, bounded by `CHAT_OPTIMISTIC_WORKING_MS`), and every hook event re-reads the
@@ -4579,8 +4641,16 @@ command-bearing opens; this does not add a human-confirm dialog or change mobile
   otherwise it is the terminal as before. Every refusal says so in one `nodeterm:toast`
   (`announceChatDictationRefusal`, naming the composer mic) instead of a silent dead key.
 - **The composer completes `/` and `@` (2026-09-30).** Typing `/` at the START of the message (after
-  optional whitespace — every CLI measured reads `/x` mid-sentence as text) opens a menu of the
-  node's CATALOG; `@` at the start of a word opens the node's files. Arrows move, Enter/Tab ACCEPT,
+  optional whitespace) opens a menu of the node's CATALOG, and so does a `/` after whitespace anywhere
+  in the message once a character follows it (2026-11-05, matching Claude Code 2.1.318's TUI, which
+  opens its menu there too: `please use /tid`; never inside a word or path, `src/tid`). Mid-message a
+  `/name` is text the model reads (a skill it may use), not a command the CLI runs, so the
+  interactive-built-in flip (`isInteractiveBuiltin`) still looks at the start only. `@` at the start
+  of a word opens the node's files. **A known `/command` is colored, as the TUI colors it**
+  (`lib/chatComposerHighlight.ts`): a textarea cannot color part of its text, so while the draft holds
+  one the textarea's text goes transparent and a layer behind it draws the same text (same box, font,
+  padding and wrap; nothing that changes a glyph's width), and spell checking is off for that draft
+  (a textarea checks all of its text or none). A draft with no known command renders as before. Arrows move, Enter/Tab ACCEPT,
   Esc closes the menu only (CardModal's capture-phase Esc already stands aside inside
   `.term-chat__compose`). **Accepting only inserts text** (`/name ` / `@path `): nothing is typed into
   the pane, and the send is still the composer's own gated Enter (`chatSendRefusal`) — completing
@@ -4622,6 +4692,21 @@ command-bearing opens; this does not add a human-confirm dialog or change mobile
     custom-commands reference). Precedence project > user > built-in, deduped by name. Other agents'
     custom locations were not measured, so they list none — a guessed location offers commands the
     CLI does not have.
+  - **Plugins, synced skills and `skillOverrides` (claude, LOCAL nodes; `claudeLocalExtras`)**,
+    measured 2026-11-05 against Claude Code 2.1.318's own `/` menu with test settings passed by
+    `--settings`. A plugin lists `/<plugin>:<skill>` and `/<plugin>:<command>` only when it is in
+    `<configDir>/plugins/installed_plugins.json` AND `enabledPlugins["<plugin>@<marketplace>"]` is
+    `true` (user < project < local settings); a plugin only in the cache, a disabled one, or a
+    `project`/`local` install for another folder lists nothing. Files come from the install's
+    `installPath` (older cached versions are ignored), the plugin manifest's `skills` / `commands`
+    paths when it names them (a listed folder holding a SKILL.md is one skill), never a path outside
+    the plugin. claude.ai-synced skills (`<configDir>/skills/synced/<bucket>/<name>/SKILL.md`) list
+    as `/<name>`. `skillOverrides: "off"` hides a user, project or synced skill (`"<name>"`, and for a
+    synced one `"anthropic-skills:<name>"`); `name-only` and `user-invocable-only` keep it; nothing
+    hides a PLUGIN's skill that way (measured). Note that Claude Code's `/skills` menu writes to the
+    folder's `.claude/settings.local.json`, so an "off" there applies to that folder only. **SSH nodes
+    do not get any of this yet** (the remote leg reads the base roots only): a follow-up needs the
+    host's settings and `installed_plugins.json`, i.e. a second round trip.
   - **A PROJECT root follows no symlink, at any level** (`CatalogRoot.within`). A cloned repository's
     `.claude/commands/notes.md -> ~/.git-credentials` otherwise put the token-bearing first line in
     the menu and in the phone's catalog (reproduced in review, both legs). Locally entries are
@@ -9105,7 +9190,21 @@ the Settings section and ShortcutsPanel start disagreeing about what a chord mea
   events are stored but no card feed shows them; canvas-born nodes get no card-created; no
   card-deleted type.
   Per-column "+ New session" menus create agents/terminal/sticky nodes assigned to the column
-  (assignment written UN-pruned — the fresh node isn't in the derived list yet). The column
+  (assignment written UN-pruned — the fresh node isn't in the derived list yet).
+  **Multi-select** (2026-11, both boards): ⌘/Ctrl-click toggles a session card, Shift-click extends
+  from the last picked card in BOARD order, and while anything is selected a plain click keeps
+  picking instead of opening the modal (Esc / the bar's ✕ leave; the card menu's **Select** row is
+  the way in without a modifier). The floating `CardSelectionBar` and the right-click menu of a card
+  INSIDE a multi-card selection (`buildBulkCardMenuItems`) act on all of them — **Move to**
+  (`assignNodes`, which lands the group together and in board order at every anchor; a loop of
+  `assignNode` would reverse it at the top) and **Delete** (ONE canvas confirm: `onDeleteNodes`, or
+  `nodeterm:global-delete` with `nodeIds` from an Omni lane) — and dragging a selected card carries
+  the selection. Load-bearing: the selection is pruned against the cards ON SCREEN and callers read
+  the pruned value in the same render (`useCardSelection`), so a bulk delete can never reach a card
+  that a filter, a collapsed lane or a hidden closed column took out of sight; GitHub cards are
+  never selectable (their column is the provider's); on the Omni board a selection lives in ONE
+  lane (`selectionOwner` — two projects share no columns). Rules are pure in
+  `lib/cardSelection.ts`. No keyboard chord yet (no `board.*` registry command selects or deletes). The column
   half-pill itself: (`components/kanban/ColumnPill.tsx`, `columnForNode` in lib/kanban; rendered
   as a SIBLING of the node root — the roots are overflow:hidden — hidden for Ungrouped/dangling,
   click opens the board). Server Edition works as-is (pure renderer + workspace.save). Scope: no
@@ -10917,7 +11016,13 @@ tour, Settings, palette, dictation, …), and no key was pressed for 4 s. It the
 — and takes Escape in the CAPTURE phase: xterm stops propagation of Escape, so a bubble listener
 never hears it and the agent in the pane gets an ESC that interrupts its turn. Its button opens
 `url`, or with `action: 'upgrade'` starts the Pro checkout — an upgrade popup is skipped for a Pro
-user, dropped the moment the plan flips, and closes when Pro arrives. Server Edition: the bridge answers `[]` (it does not read the feed). Mobile:
+user, dropped the moment the plan flips, and closes when Pro arrives. A popup may carry a picture
+(`image`, a SHA-256): `fetchPopupImage` in `core/check.ts` gets it from `API_BASE` by that hash, so
+the feed can name no URL, checks the hash and the magic bytes, caps the size while reading, and hands
+the renderer a `data:` URL because the CSP's `img-src` takes no network source. It is fetched as part
+of the feed read, and a popup whose picture cannot be had waits for the next read, unrecorded: it
+shows only once, and it was written around that picture. Never add HTML to these messages: a
+picture carries a design with no code in it. Server Edition: the bridge answers `[]` (it does not read the feed). Mobile:
 N/A for v1 (follow-up in the iOS repo). The call no-ops under
 `DO_NOT_TRACK`/`NODETERM_TELEMETRY_DISABLED` or in unpackaged builds (unless `NODETERM_API_BASE`
 targets a local server). Schema example:

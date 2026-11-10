@@ -30,6 +30,8 @@ export const IPC = {
   ptySendText: 'pty:send-text',
   ptySendChatPrompt: 'pty:send-chat-prompt',
   ptySendToEmptyPrompt: 'pty:send-to-empty-prompt',
+  ptyReadChatScreen: 'pty:read-chat-screen',
+  ptyInterruptChat: 'pty:interrupt-chat',
   ptyTmuxStatus: 'pty:tmux-status',
   /** The foreground command of a node's tmux pane (`#{pane_current_command}`) — how the in-place
    *  agent restart sees that the CLI has exited and a shell owns the pane again. */
@@ -406,6 +408,7 @@ export const IPC = {
   appRestartToUpdate: 'app:restart-to-update',
   announcementsFetch: 'announcements:fetch',
   announcementsPopups: 'announcements:popups',
+  announcementsPopupImage: 'announcements:popup-image',
   usageFetch: 'usage:fetch',
   usageRefresh: 'usage:refresh',
   usageUpdate: 'usage:update',

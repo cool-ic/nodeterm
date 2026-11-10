@@ -46,8 +46,24 @@ const isFooter = (line: string): boolean => {
 }
 
 /** Non-blank lines allowed under the box's bottom rule — the status lines (a custom statusline can
- *  take several). */
+ *  take several). The agent list below them does not count (`isAgentListLine`). */
 const BOX_TAIL_LINES = 8
+/** At most this many agent-list lines are skipped, so an old box far up the history still is not
+ *  taken for the live one. */
+const AGENT_LIST_MAX_LINES = 40
+
+/**
+ * A line of the agent list Claude Code draws UNDER its status lines while background agents or
+ * teammates run (MEASURED on 2.1.319, field screenshot + binary): one row per agent, starting with its
+ * status dot — `● main` for the one in view, `○ <name>  <task>  <state>` for the rest — and, when the
+ * list is longer than the space it gets, an overflow line `↓ 3 more` (`↑ 2 more · ↓ 3 more` once
+ * scrolled). With a few agents it pushed the input box past `BOX_TAIL_LINES` and the ⌘M view read the
+ * screen as having no input box.
+ */
+const isAgentListLine = (line: string): boolean => {
+  const t = line.trim()
+  return /^[●○] \S/.test(t) || /^(?:↑ \d+ more(?: · ↓ \d+ more)?|↓ \d+ more)$/.test(t)
+}
 /** A footer with no box: a dialog's key hints are its last line (measured: trust prompt, /model). */
 const FOOTER_TAIL_LINES = 3
 /** A footer above a live box: a dialog drawn right on top of the input box. */
@@ -64,7 +80,18 @@ const nonBlankFromBottom = (lines: readonly string[]): number[] =>
 
 /** The live input box: `[top rule, bottom rule]` line indexes, or null. */
 function inputBox(lines: readonly string[]): [number, number] | null {
-  const tail = nonBlankFromBottom(lines).slice(0, BOX_TAIL_LINES + 1)
+  // The bottom lines a box may end on: the first BOX_TAIL_LINES + 1 non-blank lines from the bottom,
+  // not counting the agent list's lines (up to AGENT_LIST_MAX_LINES of them).
+  const tail: number[] = []
+  let listLines = 0
+  for (const i of nonBlankFromBottom(lines)) {
+    if (tail.length > BOX_TAIL_LINES) break
+    if (isAgentListLine(lines[i]) && listLines < AGENT_LIST_MAX_LINES) {
+      listLines++
+      continue
+    }
+    tail.push(i)
+  }
   for (const bottom of tail) {
     if (bottom === 0 || !isRule(lines[bottom])) continue
     for (let top = bottom - 1; top >= 0 && bottom - top <= 40; top--) {
@@ -101,6 +128,13 @@ export function readClaudeScreen(screen: string): ClaudeScreen {
   const footer = candidates.find((i) => isFooter(lines[i]))
   if (footer !== undefined) return { kind: 'dialog', text: dialogText(lines, footer) }
   return box ? { kind: 'prompt' } : { kind: 'no-prompt' }
+}
+
+/** What the ⌘M chat view's screen poll learns from one read of the pane (`pty.readChatScreen`): who
+ *  owns the keyboard, and the suggested next prompt, if any. */
+export interface ChatScreenRead {
+  screen: ClaudeScreen
+  suggestion: string | null
 }
 
 /** Refuse to type: anything but a visible input box, except a screen we could not read at all. */
@@ -224,3 +258,33 @@ export function readClaudeDraft(styledScreen: string): string | null {
   }
   return draft.replace(/\s/g, '')
 }
+
+/**
+ * The next prompt Claude Code suggests after a turn, read from a STYLED capture: the dim text on its
+ * prompt line while the input box holds no draft. null when there is none to offer.
+ *
+ * MEASURED on Claude Code 2.1.318: a few seconds after a turn ends, and only when there is an
+ * obvious next step, Claude draws a suggestion as plain dim text (`❯ run it in the background`);
+ * pressing → in its TUI accepts it. Two other dim texts sit in the same place and are NOT
+ * suggestions: the fresh-session tips, always `Try "…"`, and `Press up to edit queued messages`
+ * while a turn runs with a message queued. Both are refused here.
+ *
+ * Only dim text counts, so a capture that lost its SGR reads as a draft (`readClaudeComposer`) and
+ * offers nothing.
+ */
+export function readClaudeSuggestion(styledScreen: string): string | null {
+  const styled = styledScreen.split(/\r?\n/)
+  const lines = styled.map((l) => l.replace(ANSI, '').trimEnd())
+  if (lines.every((l) => l === '')) return null
+  if (readClaudeScreen(styledScreen).kind !== 'prompt') return null
+  // `empty`: a `❯` prompt line holding only dim text, and nothing on the lines under it.
+  if (readClaudeComposer(styledScreen) !== 'empty') return null
+  const box = inputBox(lines)
+  if (!box) return null
+  const suggestion = lines[box[0] + 1].slice(1).trim()
+  if (suggestion === '' || NOT_SUGGESTIONS.some((re) => re.test(suggestion))) return null
+  return suggestion
+}
+
+/** Dim texts on the prompt line that Claude Code draws but does not suggest (see above). */
+const NOT_SUGGESTIONS: readonly RegExp[] = [/^Try "/, /^Press up to edit queued messages$/]

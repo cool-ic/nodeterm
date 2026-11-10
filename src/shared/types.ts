@@ -1,4 +1,5 @@
-import type { ChatPromptResult, EmptyPromptResult, TextDeliveryResult } from './text-delivery'
+import type { ChatInterruptResult, ChatPromptResult, EmptyPromptResult, TextDeliveryResult } from './text-delivery'
+import type { ChatScreenRead } from './agents/claude-screen'
 import type { PushWebhookMinted, PushWebhookResult, PushWebhookTokenInfo } from './push-webhook'
 import type { IdentitySeedEntry } from './agent-identity-seed'
 import type { AgentStatusSnapshotEntry } from './agent-status-snapshot'
@@ -1462,6 +1463,15 @@ export interface PtyApi {
    *  (issue #1144 — the app's own link notes). Refused, with the reason, before anything is written
    *  when the composer holds a draft, a dialog owns the keyboard, or emptiness cannot be proven. */
   sendToEmptyPrompt(persistKey: string, text: string, agentId: string): Promise<EmptyPromptResult>
+  /** One read of an agent's screen for the ⌘M chat view's poll: who owns the keyboard, and the
+   *  prompt the agent suggests next (claude: `readClaudeSuggestion`). An agent with no measured
+   *  reader, or a pane that could not be read, answers `{ screen: { kind: 'unknown' }, suggestion: null }`. */
+  readChatScreen(persistKey: string, agentId: string): Promise<ChatScreenRead>
+  /** Esc from the ⌘M chat view: interrupt a running turn, for an agent whose interrupt is measured
+   *  (claude). Refused before writing when the agent's own dialog owns the keyboard. `sentText` (the
+   *  chat view's last send) lets core take it back out of the agent's input box when the Esc landed
+   *  before the reply started; it comes back as `restored`. Never rejects on the desktop. */
+  interruptChat(persistKey: string, agentId: string, sentText?: string): Promise<ChatInterruptResult>
   /** Is tmux available on this host (else the silent plain-shell fallback), plus a suggested
    *  install command for the "tmux not found" banner. */
   tmuxStatus(): Promise<TmuxStatus>
@@ -3143,6 +3153,8 @@ export interface PopupAnnouncement extends Announcement {
   ctaLabel?: string
   /** 'upgrade' = the button starts the app's own Pro checkout instead of opening `url`. */
   action?: 'upgrade'
+  /** The SHA-256 naming its picture, fetched with `AnnouncementsApi.popupImage`. */
+  image?: string
 }
 
 export interface AnnouncementsApi {
@@ -3151,6 +3163,8 @@ export interface AnnouncementsApi {
   /** The feed's one-time popups ([] on any failure, and on the Server Edition, which does not read
    *  the feed). Which of them were already shown is the renderer's record, not the feed's. */
   popups(): Promise<PopupAnnouncement[]>
+  /** A popup's picture as a `data:` URL, or null when it cannot be had. */
+  popupImage(sha256: string): Promise<string | null>
 }
 
 export interface NotifyPayload {
@@ -3679,6 +3693,31 @@ export type ChatPart =
       data: string
     }
   | {
+      /**
+       * A message from an agent team's teammate (core/chat-teammate.ts): Claude Code records it in the
+       * lead's transcript as a user record, but nobody typed it. Present only on the opt-in `rich`
+       * read; without it the record is one `Agent message` tool part. `text` = a plain message's
+       * markdown body; `idle` = the teammate reporting that its turn ended (then `text` is absent).
+       * `color` is the teammate's TUI color name, as recorded (untrusted: map it, never use it as CSS).
+       */
+      kind: 'teammate'
+      from: string
+      color?: string
+      summary?: string
+      unverified?: boolean
+      text?: string
+      idle?: ChatTeammateIdle
+    }
+  | {
+      /**
+       * The user interrupted the turn here (Esc, or Ctrl+C once): one of Claude Code's fixed marker
+       * records (`CLAUDE_INTERRUPT_MARKERS`), which it saves as a USER record but which the user did
+       * not type. Present only on the opt-in `rich` read; without it the marker stays a user text
+       * part, as before. The renderer draws Claude's own TUI line for it.
+       */
+      kind: 'interrupt'
+    }
+  | {
       kind: 'tool'
       name: string
       arg: string
@@ -3701,6 +3740,18 @@ export type ChatPart =
        *  present): a result carried across a page boundary (`unmatchedResults`) is attached by it. */
       id?: string
     }
+
+/** An `idle_notification` from a teammate (`ChatPart` teammate `idle`). Every field is optional:
+ *  the notification names only what the teammate reported. */
+export interface ChatTeammateIdle {
+  reason?: 'available' | 'interrupted' | 'failed'
+  /** The teammate's last direct message, one line. */
+  summary?: string
+  failureReason?: string
+  taskId?: string
+  /** The teammate's report, markdown, capped. */
+  result?: string
+}
 
 /**
  * The change an `Edit` / `Write` tool call asked for (`ChatPart` tool `diff`). Edit's

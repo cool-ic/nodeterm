@@ -116,6 +116,9 @@ const api: NodeTerminalApi = {
       ipcRenderer.invoke(IPC.ptySendChatPrompt, persistKey, text, agentId),
     sendToEmptyPrompt: (persistKey, text, agentId) =>
       ipcRenderer.invoke(IPC.ptySendToEmptyPrompt, persistKey, text, agentId),
+    readChatScreen: (persistKey, agentId) => ipcRenderer.invoke(IPC.ptyReadChatScreen, persistKey, agentId),
+    interruptChat: (persistKey, agentId, sentText) =>
+      ipcRenderer.invoke(IPC.ptyInterruptChat, persistKey, agentId, sentText),
     tmuxStatus: () => ipcRenderer.invoke(IPC.ptyTmuxStatus),
     paneCommand: (persistKey, opts) => ipcRenderer.invoke(IPC.ptyPaneCommand, persistKey, opts),
     paneCwd: (persistKey) => ipcRenderer.invoke(IPC.ptyPaneCwd, persistKey),
@@ -567,7 +570,8 @@ const api: NodeTerminalApi = {
   },
   announcements: {
     fetch: () => ipcRenderer.invoke(IPC.announcementsFetch),
-    popups: () => ipcRenderer.invoke(IPC.announcementsPopups)
+    popups: () => ipcRenderer.invoke(IPC.announcementsPopups),
+    popupImage: (sha256: string) => ipcRenderer.invoke(IPC.announcementsPopupImage, sha256)
   },
   usage: {
     fetch: (accountId?: string) => ipcRenderer.invoke(IPC.usageFetch, accountId),
