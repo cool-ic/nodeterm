@@ -3,7 +3,7 @@
 import { b64urlToBytes, bytesToB64url } from './bytes'
 import { WATCH_LINK_SECRET_BYTES } from './keys'
 
-export const WATCH_LINK_ORIGIN = 'https://nodeterm.dev'
+export const WATCH_LINK_ORIGIN = ''
 export const WATCH_LINK_FRAGMENT_VERSION = '1'
 export const LINK_ID_RE = /^[A-Za-z0-9_-]{22}$/
 

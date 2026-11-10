@@ -63,9 +63,9 @@ import { resumeRepaintText } from '../../shared/capture-paint'
 
 // Default relay endpoint; `NODETERM_RELAY_URL` overrides it (mirrors license.ts's API_BASE /
 // CHECKOUT_URL env-override pattern — used both as the dev gate and for local testing).
-export const RELAY_URL = process.env.NODETERM_RELAY_URL || 'wss://relay.nodeterm.dev'
+export const RELAY_URL = ''
 
-export const API_BASE = process.env.NODETERM_API_BASE || 'https://api.nodeterm.dev'
+export const API_BASE = ''
 
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
@@ -1482,26 +1482,7 @@ interface PairTokenResponse {
 // Exported so the NEW interactive relay host (relay-host-service.ts) mints its offer token the same
 // way (same `POST /v1/pair/token`, same entitlement proof) instead of duplicating the call.
 export async function mintPairingToken(entitlement: string): Promise<PairTokenResponse> {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 8000)
-  let res: Response
-  try {
-    res = await fetch(`${API_BASE}/v1/pair/token`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ entitlement }),
-      signal: ctrl.signal
-    })
-  } catch {
-    throw new Error('Could not reach the pairing server.')
-  } finally {
-    clearTimeout(timer)
-  }
-  const json = (await res.json().catch(() => ({}))) as Partial<PairTokenResponse> & { error?: string }
-  if (!res.ok || !json.pairingToken) {
-    throw new Error(json.error ? `Pairing failed: ${json.error}` : 'Pairing failed.')
-  }
-  return { pairingId: json.pairingId ?? '', pairingToken: json.pairingToken, exp: json.exp ?? 0 }
+  throw new Error('Official cloud pairing has been removed from this build.')
 }
 
 // --- persisted host keypair --------------------------------------------------
@@ -1522,7 +1503,7 @@ export { loadOrCreateHostKeyPair as loadOrCreateKeyPair, HostKeyLockedError }
 // Never hit the real relay/API from an unpackaged build unless a relay is explicitly targeted
 // (mirrors license.ts's `allowed()` gate). Packaged builds are always allowed.
 export function relayAllowed(): boolean {
-  return app.isPackaged || !!process.env.NODETERM_RELAY_URL
+  return false
 }
 
 // --- shared host session (interactive host + standing phone host) ------------

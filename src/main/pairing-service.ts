@@ -88,39 +88,7 @@ async function mintRelayDevice(
      *  itself; only the phone can supply it). */
     priorDeviceToken?: string
   }
-): Promise<RelayDeviceResponse | null> {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 8000)
-  try {
-    const res = await fetch(`${apiBase}/v1/relay/device`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(
-        body.entitlement
-          ? // hostDeviceId rides the ENTITLED mint too: without it the row lands with
-            // hostDev=null and the backend's same-desktop C2 allowance can never match a
-            // later free re-pair from this same machine (decoded live from a reauth log).
-            { ...body, hostDeviceId: getDeviceId() }
-          : {
-              deviceId: body.deviceId,
-              hostDeviceId: getDeviceId(),
-              hostPublicKeyB64: body.hostPublicKeyB64,
-              label: body.label,
-              priorDeviceToken: body.priorDeviceToken
-            }
-      ),
-      signal: ctrl.signal
-    })
-    if (!res.ok) return null
-    const json = (await res.json().catch(() => ({}))) as Partial<RelayDeviceResponse>
-    if (!json.deviceToken) return null
-    return { deviceToken: json.deviceToken, hostId: json.hostId ?? '', exp: json.exp ?? 0 }
-  } catch {
-    return null
-  } finally {
-    clearTimeout(timer)
-  }
-}
+): Promise<RelayDeviceResponse | null> { return null }
 
 /** How long a revoke waits for the backend before calling it unreachable. */
 const REVOKE_TIMEOUT_MS = 8000
@@ -147,25 +115,7 @@ export async function revokeRelayDevice(
   apiBase: string,
   relayDeviceId: string,
   entitlement: string | null
-): Promise<DeviceRevokeServerOutcome> {
-  // Authorization for anything that moves a license is the signed entitlement, never a deviceId.
-  if (!entitlement || !relayDeviceId || !apiBase) return 'skipped'
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), REVOKE_TIMEOUT_MS)
-  try {
-    const res = await fetch(`${apiBase}/v1/relay/device/revoke`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deviceId: relayDeviceId, entitlement }),
-      signal: ctrl.signal
-    })
-    return res.ok ? 'ok' : 'failed'
-  } catch {
-    return 'failed'
-  } finally {
-    clearTimeout(timer)
-  }
-}
+): Promise<DeviceRevokeServerOutcome> { return 'skipped' }
 
 /**
  * Compute this host's relay reachability block WITHOUT any network call (just the host key →

@@ -18,7 +18,6 @@ import {
 } from '@shared/pairing-gate'
 import { thisMachine } from '../../../lib/machineName'
 import { isBrowserRuntime } from '@renderer/bridge/runtime'
-import { PushWebhookPanel } from './PushWebhookPanel'
 
 const ROWS = {
   remote: {
@@ -185,26 +184,7 @@ export function PhoneSection({ isActive }: { isActive: boolean }): React.JSX.Ele
       isActive={isActive}
       searchEntries={showWebhook ? ENTRIES : BROWSER_ENTRIES}
     >
-      <SearchableRow {...ROWS.remote}>
-        <div className="space-y-3">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h4 className="text-[13px] font-medium text-text">Remote access from your phone</h4>
-              <p className="mt-1 text-sm text-muted">
-                Reach {thisMachine()} from anywhere — not just your local network — end-to-end
-                encrypted
-                over the relay. Your paired phone connects through the relay; the connection is
-                verified with a code the first time.
-              </p>
-            </div>
-            <Switch
-              checked={phoneAccessEnabled}
-              onChange={togglePhoneAccess}
-              ariaLabel="Remote access from your phone"
-            />
-          </div>
-        </div>
-      </SearchableRow>
+      {null}
 
       <SearchableRow {...ROWS.pair}>
         <div className="space-y-4">
@@ -408,11 +388,7 @@ export function PhoneSection({ isActive }: { isActive: boolean }): React.JSX.Ele
         </div>
       </SearchableRow>
 
-      {showWebhook ? (
-        <SearchableRow {...ROWS.webhook}>
-          <PushWebhookPanel />
-        </SearchableRow>
-      ) : null}
+      {null}
 
       {pendingRevoke ? (
         <ConfirmDialog

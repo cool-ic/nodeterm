@@ -13,8 +13,7 @@ import { sessionCount, sessionForProject, useProjectSession } from '../session/s
 import { tabClickAction } from '../session/relay-tab'
 import { useMenuFlip } from '../ui/useMenuFlip'
 import { commandTooltip } from '../lib/keybindingOverrides'
-import { IconCanvasView, IconKanban, IconMoreVertical, IconPlus, IconUpdate } from './icons'
-import { runPendingUpdate, usePendingUpdate } from '../state/pendingUpdate'
+import { IconCanvasView, IconKanban, IconMoreVertical, IconPlus } from './icons'
 import { ProjectGlyph } from './ProjectGlyph'
 import { useTooltip } from './Tooltip'
 import { projectTabTooltip } from '../lib/projectTabTooltip'
@@ -302,7 +301,6 @@ export function TabBar({
   // While a tab is dragged the strip scrolls itself near (or past) its left/right edge, so a tab
   // can travel from the far end to the front in one drag.
   useDragAutoScroll(tabsRef, 'x', dragId !== null)
-  const pendingUpdate = usePendingUpdate((s) => s.pending)
   useEffect(() => {
     tabsRef.current
       ?.querySelector('.tab.active')
@@ -340,26 +338,6 @@ export function TabBar({
       )}
 
       <div className="tabbar">
-        {pendingUpdate && (
-          // Figma-style: first thing after the traffic lights, accent-filled, no ✕. It stays until
-          // the update is installed, the card's dismiss never reaches it.
-          <button
-            className="tabbar__update"
-            title={
-              pendingUpdate.kind === 'downloaded'
-                ? `nodeterm v${pendingUpdate.version} is ready, restart to update`
-                : pendingUpdate.kind === 'available'
-                  ? `nodeterm v${pendingUpdate.version} is available, click to download it`
-                  : pendingUpdate.kind === 'manual'
-                    ? `nodeterm v${pendingUpdate.version} is available, download it to update`
-                    : 'This version is no longer supported, update to continue'
-            }
-            onClick={() => runPendingUpdate(pendingUpdate)}
-          >
-            <IconUpdate />
-            Update
-          </button>
-        )}
         {/* Projects group: the pill scrolls; the + is a SIBLING so it cannot scroll away
             with the tabs (issue #375). End-zone drop lives on this wrapper (covers the
             4px gap and the +); per-tab handlers still stopPropagation. */}
@@ -600,14 +578,6 @@ export function TabBar({
                   {menuProject.storeInAppData ? 'Store canvas in folder' : 'Store canvas in app data'}
                 </button>
               )}
-            <button
-              onClick={() => {
-                onRemoteAccess()
-                closeMenu()
-              }}
-            >
-              Remote access…
-            </button>
             {menuProject.ssh &&
               !menuProject.remote &&
               onShareWithTeam &&

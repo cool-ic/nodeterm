@@ -56,20 +56,3 @@ describe('trayIconPath', () => {
     expect(trayIconPath({ ...base, isPackaged: false })).toBe(join('/b', 'icon.png'))
   })
 })
-
-describe('the restart-to-update item', () => {
-  it('appears only while an update is ready, above Quit, with its version', () => {
-    expect(trayMenuModel({ unread: 0, phoneAccess: false }).some((i) => i.type === 'normal' && i.action === 'restart-update')).toBe(false)
-    expect(trayMenuModel({ unread: 0, phoneAccess: false, updateReady: null }).some((i) => i.type === 'normal' && i.action === 'restart-update')).toBe(false)
-    const items = trayMenuModel({ unread: 0, phoneAccess: false, updateReady: '0.5.0' })
-    const idx = items.findIndex((i) => i.type === 'normal' && i.action === 'restart-update')
-    expect(items[idx]).toEqual({ type: 'normal', label: 'Restart to update v0.5.0', enabled: true, action: 'restart-update' })
-    expect(items.findIndex((i) => i.type === 'normal' && i.action === 'quit')).toBeGreaterThan(idx)
-  })
-
-  it('changes the rebuild key, so the menu picks it up', () => {
-    expect(trayStateKey({ unread: 0, phoneAccess: false, updateReady: '0.5.0' })).not.toBe(
-      trayStateKey({ unread: 0, phoneAccess: false })
-    )
-  })
-})

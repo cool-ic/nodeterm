@@ -179,23 +179,7 @@ function bookmarkedKey(b: RelayBookmark): string | null {
   return decodeJoinCode(b.code)?.hostPublicKeyB64 ?? null
 }
 
-export async function joinHostedTeam(codeText: string, deps: HostedJoinDeps, ev: HostedJoinEvents): Promise<RelayClientSession> {
-  const code = decodeJoinCode(codeText)
-  if (!code) throw new HostedJoinError('invalid-code')
-  const state = deps.state ?? hostedJoinState
-  // One join per team at a time, from the first line to the moment the relay client exists. A second
-  // one (a boot reconnect racing a manual connect, a double click) would mint a second token, and
-  // its pending request would replace the first at the host. Refused, with a code of its own that
-  // stops a retry loop and says nothing about the team: the attempt already running is the one that
-  // should finish.
-  if (state.inflight.has(code.hostId)) throw new HostedJoinError('busy')
-  state.inflight.add(code.hostId)
-  try {
-    return await joinWithCode(code, deps, ev, state)
-  } finally {
-    state.inflight.delete(code.hostId)
-  }
-}
+export async function joinHostedTeam(codeText: string, deps: HostedJoinDeps, ev: HostedJoinEvents): Promise<RelayClientSession> { throw new Error('Official cloud sessions are not supported in this local build.') }
 
 async function joinWithCode(code: JoinCode, deps: HostedJoinDeps, ev: HostedJoinEvents, state: HostedJoinState): Promise<RelayClientSession> {
   let keys: KeyPair

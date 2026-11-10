@@ -1,6 +1,4 @@
 import { observedBindingPatch, verifyObservedBinding } from '@shared/agent-binding'
-import { PrepareUpdateDialog } from '../components/PrepareUpdateDialog'
-import type { PrepNode } from '../lib/updatePrep'
 import { markLocalOnSshCanvas } from '../lib/localOnSshCanvas'
 import { useDevPortScanner } from './useDevPortScanner'
 import { withCodexNoDaemon } from '@shared/agents/codex-daemon'
@@ -262,8 +260,6 @@ import {
   planDirectionalMove,
   type FocusDirection
 } from '../lib/directionalFocus'
-import { UpdateCard } from '../components/UpdateCard'
-import { AnnouncementBanner } from '../components/AnnouncementBanner'
 import { ResumeCard } from '../components/ResumeCard'
 import { TmuxBanner } from '../components/TmuxBanner'
 import { localSession } from '../session/localSession'
@@ -280,9 +276,6 @@ import { peerApprovalView } from '@shared/remote/approval'
 import { admitPendingPeer } from '../lib/pendingPeerAdmission'
 import { SAS_COMPARE_HINT } from '@shared/remote/sas'
 import { promptDialog } from '../components/promptDialog'
-import { UpgradeDialog } from '../components/UpgradeDialog'
-import { AnnouncementPopup } from '../components/AnnouncementPopup'
-import { ProjectLimitDialog } from '../components/ProjectLimitDialog'
 import {
   checkAgentProjectOpen,
   finishAgentProjectOpen,
@@ -291,7 +284,6 @@ import {
 } from '../lib/projectLimitGate'
 import { countOpenProjects, decideOpen } from '@shared/project-limit'
 import { opensProject, type OpenAction } from '../lib/projectOpens'
-import { LiveLinkDialog } from '../components/LiveLinkDialog'
 import { requireProOr } from '../state/upgradeGate'
 import { startWatchLinkSync, useWatchLinks } from '../state/watchLinks'
 import { liveLinkNoticeEffect } from '../lib/liveLink'
@@ -452,7 +444,6 @@ import {
 } from '../lib/breadcrumbs'
 import { planSessionKill } from '../lib/sessionKill'
 import { sessionPauseOffer, type SessionPauseOffer } from '../lib/sessionPause'
-import { RemoteAccessDialog } from '../components/RemoteAccessDialog'
 import { ShareTeamDialog } from '../components/ShareTeamDialog'
 import { runShare, type ShareConfirmSummary, type ShareOutcome, type SharePhase } from '../lib/shareSshTeam'
 import { followSharedProject, shareCanvas, shareProjectDeps } from '../lib/shareTeamCanvas'
@@ -3820,25 +3811,8 @@ export function Canvas() {
    * need the node on screen (core attaches join-only). Declared before `selectionItems`, which
    * lists it in its deps (a stale closure otherwise).
    */
-  const liveLinkMenuItems = useCallback(
-    (nodeId: string, projectId?: string): MenuItem[] => {
-      const store = useProjects.getState()
-      // The composition (which project, which node, whose facts) is lib/liveLinkEntry's, where it is
-      // behaviour-tested: the facts are the NODE's project's, never the active tab's (D2/M1).
-      return liveLinkMenuItemsFor({
-        nodeId,
-        projectId,
-        activeProjectId: store.activeProjectId,
-        live: nodesRef.current,
-        stored: (pid) => store.getProject(pid)?.nodes,
-        hidden: useSettings.getState().settings.hiddenNodeMenuItems,
-        facts: liveLinkFacts,
-        icon: <IconBroadcast />,
-        open: openLiveLinkFor
-      })
-    },
-    [liveLinkFacts, openLiveLinkFor]
-  )
+  const liveLinkMenuItems = useCallback((_nodeId: string, _projectId?: string): MenuItem[] => [], [])
+
   /**
    * R47: before core looks the node up, publish pending edits of the canvas on screen — a node
    * opened seconds ago is not in the saved project yet and would answer `node-missing`. The same
@@ -18387,47 +18361,6 @@ export function Canvas() {
     [travelToNode]
   )
 
-  // Prepare-for-update (Windows session host, issue #829). Opened from the update card or ⌘K via
-  // `nodeterm:prepare-update`. `prepareUpdateAvailable` gates the ⌘K entry: the main process answers
-  // `unsupported` off Windows, when the session host is not the backend, and in the Server Edition.
-  const [prepareUpdateOpen, setPrepareUpdateOpen] = useState(false)
-  const [prepareUpdateAvailable, setPrepareUpdateAvailable] = useState(false)
-  useEffect(() => {
-    let live = true
-    void window.nodeTerminal.updates
-      .prepareInspect()
-      .then((r) => {
-        if (live) setPrepareUpdateAvailable(r.kind !== 'unsupported')
-      })
-      .catch(() => {})
-    const open = (): void => setPrepareUpdateOpen(true)
-    window.addEventListener('nodeterm:prepare-update', open)
-    return () => {
-      live = false
-      window.removeEventListener('nodeterm:prepare-update', open)
-    }
-  }, [])
-  const collectUpdatePrepNodes = useCallback((): PrepNode[] => {
-    // The active project's live nodes first reach the store, so a node created a moment ago is
-    // matched to its host session like every other.
-    commitActiveToStore()
-    const out: PrepNode[] = []
-    for (const p of useProjects.getState().projects) {
-      for (const n of p.nodes) {
-        if (n.kind !== 'terminal') continue
-        out.push({
-          nodeId: n.id,
-          projectId: p.id,
-          projectName: p.name,
-          projectClosed: !!p.closed,
-          title: n.title,
-          agentId: n.agentId
-        })
-      }
-    }
-    return out
-  }, [commitActiveToStore])
-
   // ── "Open recent": resume a past agent conversation from its CLI's own history ──────────────
   // The list is THIS machine's (window.nodeTerminal: the desktop's core, or the Server Edition's
   // host), read on demand — one read per welcome-screen appearance and per palette open, never a
@@ -19431,16 +19364,6 @@ export function Canvas() {
         ]
       })(),
       { id: 'zoom-100', label: 'Zoom to 100%', icon: <IconFit />, run: zoomTo100 },
-      ...(prepareUpdateAvailable
-        ? [
-            {
-              id: 'prepare-update',
-              label: 'Prepare for update…',
-              hint: 'install update installer stop session host windows quit',
-              run: () => setPrepareUpdateOpen(true)
-            } as Command
-          ]
-        : []),
       // Layouts mirror the Dock's menu, and both are withheld on a relay tab for the same reason:
       // it is a live connection to another machine, never a workspace on this disk. The Dock says
       // so on a disabled button; the palette has no disabled row, so the entries are omitted.
@@ -19466,21 +19389,6 @@ export function Canvas() {
             )
           ]),
       { id: 'save', label: 'Save', icon: <IconSave />, run: () => void persist() },
-      // Live links: Manage (the Settings section), and Stop all — which CONFIRMS (R48).
-      ...liveLinkCommands({
-        activeLinks: useWatchLinks.getState().links.length,
-        entitled: useEntitlement.getState().isPremium,
-        serverEdition: isBrowserRuntime(),
-        icon: <IconBroadcast />,
-        chatIcon: <IconChat />,
-        manage: () => {
-          setSettingsSection('live-links')
-          setSettingsNonce((n) => n + 1)
-          setSettingsOpen(true)
-        },
-        openChat: () => setLiveChat((s) => nextLiveChat(s, { kind: 'open' })),
-        confirmStopAll: confirmStopAllLiveLinks
-      }),
       // Hidden when the canvas has no restartable agent node — the row would have nothing to act
       // on. `hint` is searchable, so "new model" / "update" find it too.
       ...(hasRestartableAgents()
@@ -19611,7 +19519,6 @@ export function Canvas() {
     confirmStopAllLiveLinks,
     shareBlockedReason,
     openShareWithTeam,
-    prepareUpdateAvailable
   ])
 
   // Build the palette's command list only when its inputs change — the inline `buildCommands()`
@@ -19672,7 +19579,7 @@ export function Canvas() {
         onSetDefaultAccount={setProjectDefaultAccount}
         onSetDefaultPermissionMode={setProjectDefaultPermissionMode}
         onOpenProjectSettings={openProjectSettings}
-        onShareWithTeam={openShareWithTeam}
+        onShareWithTeam={undefined}
         shareBlockedReason={shareBlockedReason}
         onPauseProject={(id) => void pauseNodes(projectTerminalIds(id), projectScopeLabel(id))}
         onCancelPendingPauses={cancelPendingPauses}
@@ -19680,7 +19587,7 @@ export function Canvas() {
       />
 
       <div className="top-banners">
-        <AnnouncementBanner />
+
         {/* Agent-integration consent (issue #744): the first-run question, the grandfathered
             install's one-time notice, and the active SSH host's own question. */}
         <IntegrationPromptBanner
@@ -19936,7 +19843,7 @@ export function Canvas() {
           onIssueMoved={dispatchOnUserMove}
         />
       )}
-      <UpdateCard />
+
 
       {/* T235: EVERY canvas-level control lives in one of the two rails now; the top band belongs
           to the tab bar alone. The two former top clusters (`.sessions-icon-cluster`,
@@ -20253,7 +20160,7 @@ export function Canvas() {
         />
       )}
 
-      {remoteDialogOpen && <RemoteAccessDialog onClose={() => setRemoteDialogOpen(false)} />}
+      {null}
       {linkSheet && (
         <OpenLinkSheet
           key={linkSheet.req.id}
@@ -20452,13 +20359,6 @@ export function Canvas() {
           be open — see components/SetupConsentDialog.tsx. */}
       <SetupConsentDialog />
 
-      {prepareUpdateOpen && (
-        <PrepareUpdateDialog
-          collectNodes={collectUpdatePrepNodes}
-          onTravel={travelToNode}
-          onClose={() => setPrepareUpdateOpen(false)}
-        />
-      )}
 
       {confirm && (
         <ConfirmDialog
@@ -20660,51 +20560,16 @@ export function Canvas() {
         />
       )}
 
-      <UpgradeDialog />
+      {null}
       {/* The surfaces below are not on the dialog stack, so the popup is told about them here: it
           must not land on the setup tour, Settings, the palette, a dictation in progress, …. The
           kanban card modal registers on the stack itself; `cardModalOpen` is belt and braces. */}
-      <AnnouncementPopup
-        blocked={
-          onboardingOpen ||
-          mobileLaunchOpen ||
-          settingsOpen ||
-          paletteOpen ||
-          shortcutsOpen ||
-          scOpen ||
-          logPanelOpen ||
-          welcomeOpen ||
-          consentOpen ||
-          cloneDialogOpen ||
-          dictationOpen ||
-          cardModalOpen
-        }
-      />
+
       {/* The free-tier limit moment (docs/project-limit.md). Close is the ordinary non-destructive close — never
           `endSessions`: the limit only ever blocks a NEW open, it never ends anything. */}
-      <ProjectLimitDialog onCloseProject={(id) => performCloseProject(id)} />
+      {null}
       {liveLinkDialog && (
-        <LiveLinkDialog
-          key={`${liveLinkDialog.projectId}:${liveLinkDialog.nodeId}`}
-          nodeId={liveLinkDialog.nodeId}
-          title={liveLinkDialog.title}
-          surface={
-            isBrowserRuntime()
-              ? 'server'
-              : sessionForProject(liveLinkDialog.projectId).source === 'relay'
-                ? 'relay'
-                : 'desktop'
-          }
-          // R63: a node in a HOST's tmux gets a viewer client of its own (the "only while open" note
-          // is about this machine's local terminals); the Control warning names where a
-          // controller's commands run. Both from where the NODE runs, not only its project.
-          {...liveLinkRemoteFor(liveLinkDialog)}
-          readPersistence={readLocalPersistence}
-          prepare={liveLinkPrepareFor(liveLinkDialog)}
-          // No license layer in the Server Edition (R43): never an Upgrade button there.
-          onUpgrade={isBrowserRuntime() ? undefined : () => void useEntitlement.getState().upgrade('pro')}
-          onClose={closeLiveLinkDialog}
-        />
+        null
       )}
 
       {remotePicker && (

@@ -148,10 +148,10 @@ import { createWatchPty, watchRemoteFor, watchRemoteRecords, type WatchRemote } 
 
 // Same env-override + default as src/core/check.ts / license.ts / src/main/telemetry.ts — each
 // shell derives it locally rather than sharing an import (src/server must not import src/main).
-const API_BASE = process.env.NODETERM_API_BASE || 'https://api.nodeterm.dev'
+const API_BASE = ''
 // The hosted team relay's wss endpoint. Same env override + default as the desktop's RELAY_URL
 // (src/main/remote/host-service.ts), derived locally for the same reason as API_BASE.
-const RELAY_URL = process.env.NODETERM_RELAY_URL || 'wss://relay.nodeterm.dev'
+const RELAY_URL = ''
 /** How long close() waits for the live-link service's last write (the desktop races 1.5 s). */
 const WATCH_LINKS_STOP_MS = 2_000
 
@@ -1171,7 +1171,7 @@ export async function startServer(
     relayUrl: RELAY_URL,
     store: new WatchLinkStore({ file: path.join(config.dataDir, 'watch-links.json') }),
     entitlement: () => null,
-    relayAllowed: () => true,
+    relayAllowed: () => false,
     nodeState: (nodeId) => workspaceNodeState(workspaceStore, nodeId),
     clients: {
       attach: (sink) => platform.attach(sink, { quiet: true, selfPaced: true }),

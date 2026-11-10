@@ -7,12 +7,9 @@
 export interface TrayState {
   unread: number
   phoneAccess: boolean
-  /** A downloaded update installable by a restart (its version), fed by the updater. A background-
-   *  mode app is rarely quit, so install-on-quit alone could leave it waiting for days. */
-  updateReady?: string | null
 }
 
-export type TrayAction = 'open' | 'quit' | 'restart-update'
+export type TrayAction = 'open' | 'quit'
 
 export type TrayMenuItem =
   | { type: 'separator' }
@@ -36,9 +33,6 @@ export function trayMenuModel(state: TrayState): TrayMenuItem[] {
   if (unread > 0) items.push({ type: 'normal', label: unreadLabel(unread), enabled: false })
   items.push({ type: 'normal', label: `Phone access: ${state.phoneAccess ? 'on' : 'off'}`, enabled: false })
   items.push({ type: 'separator' })
-  // The same guarded restart the update card's button takes (updater.ts `restartToUpdate`).
-  if (state.updateReady)
-    items.push({ type: 'normal', label: `Restart to update v${state.updateReady}`, enabled: true, action: 'restart-update' })
   // Quit goes through the ordinary app.quit() → before-quit path (confirm dialog included), so a
   // tray quit tears down exactly what the menu Quit (Ctrl+Q on Linux, File → Exit on Windows) does.
   items.push({ type: 'normal', label: 'Quit nodeterm', enabled: true, action: 'quit' })
@@ -52,7 +46,7 @@ export function trayTooltip(state: TrayState): string {
 
 /** Identity of a state for rebuild de-duplication: the menu is rebuilt only when this changes. */
 export function trayStateKey(state: TrayState): string {
-  return `${normalizeUnread(state.unread)}|${state.phoneAccess ? 1 : 0}|${state.updateReady ?? ''}`
+  return `${normalizeUnread(state.unread)}|${state.phoneAccess ? 1 : 0}`
 }
 
 /**

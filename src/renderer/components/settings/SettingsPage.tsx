@@ -24,11 +24,7 @@ import { CustomAgentsSection } from './sections/CustomAgentsSection'
 import { NotificationsSection } from './sections/NotificationsSection'
 import { CommitSection } from './sections/CommitSection'
 import { TmuxSection } from './sections/TmuxSection'
-import { LicenseSection } from './sections/LicenseSection'
 import { PresenceIdentitySection } from './sections/PresenceIdentitySection'
-import { RemoteSection } from './sections/RemoteSection'
-import { TeamAccessSection } from './sections/TeamAccessSection'
-import { LiveLinksSection } from './sections/LiveLinksSection'
 import { SshSection } from './sections/SshSection'
 import { UpdatesSection } from './sections/UpdatesSection'
 import { PrivacySection } from './sections/PrivacySection'
@@ -156,31 +152,17 @@ export function SettingsPage({
             <SettingsSectionBoundary title="GitHub Issues" visible={active === 'github-issues'}>
               <GitHubIssuesSection isActive={active === 'github-issues'} />
             </SettingsSectionBoundary>
-            <SettingsSectionBoundary title="License" visible={active === 'license'}>
-              <LicenseSection
-                isActive={active === 'license'}
-                onNavigate={(id) => {
-                  setQuery('')
-                  setActive(id)
-                }}
-              />
-            </SettingsSectionBoundary>
+            {null}
             <SettingsSectionBoundary title="Your name" visible={active === 'presence'}>
               <PresenceIdentitySection isActive={active === 'presence'} />
             </SettingsSectionBoundary>
-            <SettingsSectionBoundary title="Remote access" visible={active === 'remote'}>
-              <RemoteSection isActive={active === 'remote'} onClose={onClose} />
-            </SettingsSectionBoundary>
-            <SettingsSectionBoundary title="Team seats" visible={active === 'team-access'}>
-              <TeamAccessSection isActive={active === 'team-access'} onClose={onClose} />
-            </SettingsSectionBoundary>
-            <SettingsSectionBoundary title="Live links" visible={active === 'live-links'}>
-              <LiveLinksSection isActive={active === 'live-links'} />
-            </SettingsSectionBoundary>
+            {null}
+            {null}
+            {null}
             <SettingsSectionBoundary title="Remote (SSH)" visible={active === 'ssh'}>
               <SshSection isActive={active === 'ssh'} />
             </SettingsSectionBoundary>
-            <SettingsSectionBoundary title="Updates" visible={active === 'updates'}>
+            <SettingsSectionBoundary title="Version" visible={active === 'updates'}>
               <UpdatesSection isActive={active === 'updates'} />
             </SettingsSectionBoundary>
             <SettingsSectionBoundary title="Privacy" visible={active === 'privacy'}>

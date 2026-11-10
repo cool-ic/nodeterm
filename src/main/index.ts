@@ -5,7 +5,6 @@ import { ImOwnerProofs } from '../core/agent-im-owner'
 import { ImWakeScheduler } from '../core/agent-im-scheduler'
 import { IM_CLIENT_SOURCE } from '../core/agent-im-client'
 import { ImRuntime, type ImIdentity } from '../../scripts/agent-mail/runtime.mjs'
-import { registerUpdatePrepIpc } from './update-prep'
 import { startMailWake } from '../../scripts/agent-mail/wake.mjs'
 import { installOpenLinks } from './open-link-wiring'
 import { nodetermUrlFromArgv } from '../shared/open-link'
@@ -189,9 +188,8 @@ import {
   generateGroupName,
   generateTerminalName
 } from '../core/commit-message'
-import { initUpdater, type UpdaterHandle } from './updater'
 import { requestRendererFlush } from './renderer-flush'
-import { configureCheck, fetchCheck, fetchPopupImage } from '../core/check'
+import { fetchCheck, fetchPopupImage } from '../core/check'
 import {
   hookServer,
   OPEN_PROJECT_CONTROL_REFUSAL,
@@ -387,7 +385,6 @@ import { CONTROL_REQUEST_TIMEOUT_MS } from '../shared/control-confirm'
 import { createControlForwarder, type ControlForwardReply } from './control-forward'
 import { claimOpenedBrowser } from './browser-open-claim'
 import { initTranscriptIndex, searchTranscripts } from '../core/transcript-index'
-import { initTelemetry } from './telemetry'
 import { initClaudeUsage } from './claude-usage'
 import {
   readWindowState,
@@ -899,9 +896,9 @@ function confirmQuit(parentWin: BrowserWindow | null): Promise<boolean> {
 // down in before-quit. Its state is fed from facts main already holds — the unread count the
 // renderer sends for the badge, and the phone-access setting — never from the hook-event stream.
 let backgroundTray: BackgroundTray | undefined
-const trayState: TrayState = { unread: 0, phoneAccess: false, updateReady: null }
+const trayState: TrayState = { unread: 0, phoneAccess: false }
 // The updater's guarded restart path, for the tray's "Restart to update" item (set in whenReady).
-let updater: UpdaterHandle | undefined
+
 
 /** Hide-on-close is in force off macOS only while the tray actually exists: a tray that failed to
  *  construct must not turn the window's × into a hide with no way back. */
@@ -947,9 +944,7 @@ function syncBackgroundTray(): void {
       onAction: (action) =>
         action === 'open'
           ? showMainWindowFromBackground()
-          : action === 'restart-update'
-            ? updater?.restartToUpdate()
-            : app.quit()
+          : app.quit()
     })
   } catch (e) {
     console.warn('[tray] could not create the notification-area icon; window close will quit', e)
@@ -2114,10 +2109,6 @@ app.whenReady().then(async () => {
 
   // The open-project count rides /v1/check only while the Settings → Privacy telemetry toggle is
   // on, and only once the workspace index is known (core/check.ts). Both read per call.
-  configureCheck({
-    openProjects: () => workspaceStore.openProjectCount(),
-    telemetryEnabled: () => settingsStore.get().telemetryEnabled
-  })
   ipcMain.handle(IPC.announcementsFetch, async () => (await fetchCheck()).messages)
   ipcMain.handle(IPC.announcementsPopups, async () => (await fetchCheck()).popups)
   ipcMain.handle(IPC.announcementsPopupImage, (_e, sha256: string) => fetchPopupImage(String(sha256)))
@@ -2699,38 +2690,8 @@ app.whenReady().then(async () => {
   // dev dock icon/name are Electron's own), so a test instance can never be mistaken for the
   // real app.
   if (NT_MULTI && process.platform === 'darwin') app.dock?.setBadge('TEST')
-  // Flip `quitting` before quitAndInstall so the window's close-event actually closes (not hides);
-  // quitAndInstall closes all windows then calls app.quit(), which our hide-on-close would block.
-  // Also skip the confirm dialog — this is a restart-to-update the user already asked for via the
-  // "Restart to update" card, not an exit, and a modal here would just block the install.
-  // Both flags flip only when the install REALLY starts (on macOS: after Squirrel.Mac staged the
-  // update — updater.ts `restartToUpdate`), and are put back if it then fails.
-  updater = initUpdater({
-    onBeforeRestart: () => {
-      quitting = true
-      skipQuitConfirmation = true
-    },
-    onRestartAborted: () => {
-      quitting = false
-      skipQuitConfirmation = false
-    },
-    onUpdateReady: (version) => {
-      trayState.updateReady = version
-      backgroundTray?.update({ ...trayState })
-    }
-  })
-  // Prepare-for-update (Windows session host, issue #829). The user confirmed the whole flow in
-  // its own dialog, so the quit at its end skips the ordinary quit confirmation, like the
-  // restart-to-update above.
-  registerUpdatePrepIpc({
-    mainWebContents: () => getMainWindow()?.webContents,
-    persistentSessions: () => settingsStore.get().tmuxEnabled !== false,
-    quit: () => {
-      quitting = true
-      skipQuitConfirmation = true
-      app.quit()
-    }
-  })
+  ipcMain.handle(IPC.appGetVersion, () => app.getVersion())
+  ipcMain.handle(IPC.appGetStagedUpdate, () => null)
   // Mirror live agent status to <userData>/agent-status.json for the external mobile host agent.
   initAgentStatusMirror()
   // The orchestration facts an earlier run left on disk, in THIS order: station reports first
@@ -5200,7 +5161,6 @@ app.whenReady().then(async () => {
   setMirrorUsageProvider(() =>
     buildMirrorUsage(usageService.snapshot(), settingsStore.get().claudeAccounts ?? [], Date.now())
   )
-  initTelemetry(() => settingsStore.get())
   // The free-tier open-project limit (core/project-limit.ts). Its state goes to THIS machine's
   // window only: sendToMain, never platform().broadcast, which also fans out to every relay peer
   // (the state carries this host's Pro and DO_NOT_TRACK facts). The Server Edition does not run it.

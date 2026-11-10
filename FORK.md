@@ -165,3 +165,11 @@ App 重启后节点被接回来时，画布拿这行记录核对一遍：对得�
 
 ### 内置中文终端字体（2026-11-02）
 Maple Mono NF CN7.900常规/粗体以WOFF2随包分发，附OFL；独立CSS名称避免被系统同名字体覆盖。纸面预设改用这套字体，已有用户可在Settings→Terminal→Font点击“Use bundled Chinese font”。实测15/30/60px中文与西文宽度2:1，Nerd图标一格；修正大字号落墨模糊/偏移未同比缩放的问题。尚不能将字体统一说成全部中文落墨定位问题已修复。
+
+## Local-only desktop (2026-11-10)
+
+Official donation/announcement feeds, update checks/download/install, telemetry, account/license checkout and refresh, cloud allowance fingerprinting, mobile push/webhooks, standing cloud relay and live-link service clients are removed. Desktop menus/settings no longer expose those official-cloud actions; the build has no official update publish feed or electron-updater dependency. Shared IPC/type contracts return explicit unavailable or empty local responses for compatibility, without network calls or stored entitlement reads. Generic relay/crypto structures shared with local tooling remain; this does not provide an official cloud client.
+
+User-configured SSH, LAN pairing, local notifications and product IM remain separate. Historical cloud credentials/bookmarks are not read for authentication or silently erased. Applications already installed must be rebuilt/replaced to pick up these source changes.
+
+Merged upstream origin/main at 6ec35cb4 (v0.5.1 plus kanban multi-selection and phone session identity fix). Retained fork Qoder/IM input paths while merging upstream chat interruption/suggestion imports. Markdown external refresh is included (35dc91fd).

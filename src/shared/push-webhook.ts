@@ -6,7 +6,7 @@
  */
 
 export const PUSH_WEBHOOK_PATH = '/v1/push/webhook'
-export const PUSH_WEBHOOK_DEFAULT_API_BASE = 'https://api.nodeterm.dev'
+export const PUSH_WEBHOOK_DEFAULT_API_BASE = ''
 /** The environment variable every example reads the token from — a CI secret, never a literal. */
 export const PUSH_WEBHOOK_TOKEN_ENV = 'NODETERM_WEBHOOK_TOKEN'
 /** Display caps the backend applies after stripping control characters (code points). */

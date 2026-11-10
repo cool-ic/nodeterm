@@ -13,11 +13,4 @@ import { joinedHostPins } from './approved-devices'
 export type { RelayClientSession }
 export type ConnectRelayClientOptions = Omit<CoreOptions, 'pins'>
 
-export function connectRelayClient(opts: ConnectRelayClientOptions): RelayClientSession {
-  return connectCoreRelayClient({
-    ...opts,
-    // recordApproval refuses unless BOTH confirmed and pins only the key carried by the state; the
-    // serialized update queue keeps concurrent approvals and a racing revoke intact.
-    pins: { record: (pinned) => joinedHostPins.update((store) => recordApproval(store, pinned)) }
-  })
-}
+export function connectRelayClient(opts: ConnectRelayClientOptions): RelayClientSession { throw new Error('Official cloud sessions are not supported in this local build.') }

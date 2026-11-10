@@ -260,70 +260,7 @@ export function NotificationsSection({ isActive }: { isActive: boolean }): React
           <CustomSoundRow kind="needsYou" volume={soundVolume} />
         </div>
       </SearchableRow>
-      <SearchableRow {...ROWS.mobilePush}>
-        <FieldRow
-          label="Send push notifications to your paired phone"
-          description="Fires when an agent needs approval, asks a question, or finishes — only if you've paired a phone."
-          control={
-            <Switch
-              checked={mobilePushEnabled}
-              ariaLabel="Mobile push notifications"
-              onChange={(on) => update({ mobilePushEnabled: on })}
-            />
-          }
-        />
-        {/* Per-kind sub-gates. Inert (dimmed, non-interactive) while the master toggle is off. */}
-        <div
-          className={
-            'mt-3 space-y-3 border-l border-border pl-4' +
-            (mobilePushEnabled ? '' : ' pointer-events-none opacity-40')
-          }
-          aria-disabled={!mobilePushEnabled}
-        >
-          <FieldRow
-            label="Needs you (approvals & questions)"
-            control={
-              <Switch
-                checked={mobilePushNeedsYou}
-                ariaLabel="Push when an agent needs you"
-                onChange={(on) => update({ mobilePushNeedsYou: on })}
-              />
-            }
-          />
-          <FieldRow
-            label="Task completed"
-            control={
-              <Switch
-                checked={mobilePushDone}
-                ariaLabel="Push when a task completes"
-                onChange={(on) => update({ mobilePushDone: on })}
-              />
-            }
-          />
-          <FieldRow
-            label="Live updates on phone"
-            description="Keep a live status on your phone's lock screen updated as a session works, needs you, or finishes."
-            control={
-              <Switch
-                checked={mobileLiveActivities}
-                ariaLabel="Live updates on your phone"
-                onChange={(on) => update({ mobileLiveActivities: on })}
-              />
-            }
-          />
-          <FieldRow
-            label="Hold phone alerts while you're at this computer"
-            description="Defer approval, question, and completed alerts while you're active here, then send them the moment you go idle or lock the screen. Live updates are never held."
-            control={
-              <Switch
-                checked={mobilePushPresenceAware}
-                ariaLabel="Hold phone alerts while you're at this computer"
-                onChange={(on) => update({ mobilePushPresenceAware: on })}
-              />
-            }
-          />
-        </div>
-      </SearchableRow>
+      {null}
     </SettingsSection>
   )
 }
