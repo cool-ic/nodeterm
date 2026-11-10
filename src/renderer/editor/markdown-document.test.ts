@@ -56,3 +56,24 @@ describe('Markdown file lifecycle', () => {
     await doc.load(); expect(doc.error).toBe('offline'); expect(doc.loaded).toBe(false)
   })
 })
+
+it('refreshes external changes while keeping unsaved edits safe', async () => {
+  const { doc, external } = make('old')
+  await doc.load(); external('new')
+  expect(await doc.refresh()).toBe(true)
+  expect(doc.text).toBe('new'); expect(doc.dirty).toBe(false)
+  doc.text = 'draft'; external('newer')
+  expect(await doc.refresh()).toBe(false)
+  expect(doc.text).toBe('draft'); expect(doc.saved).toBe('new')
+  expect(doc.error).toContain('changed on disk')
+})
+it('does not replace typing or composition that starts during the external read', async () => {
+  const { doc, fs } = make('old'); await doc.load()
+  let finish!: (value: string) => void
+  fs.read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const pending = doc.refresh(); await vi.waitFor(() => expect(finish).toBeDefined())
+  doc.text = 'draft'; finish('external'); expect(await pending).toBe(false)
+  expect(doc.text).toBe('draft')
+  doc.text = doc.saved; fs.read.mockResolvedValue('external')
+  expect(await doc.refresh(() => false)).toBe(false); expect(doc.text).toBe('old')
+})

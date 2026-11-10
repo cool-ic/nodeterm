@@ -20,6 +20,29 @@ export class MarkdownDocument {
       this.loaded = true
     } catch (e) { this.error = e instanceof Error ? e.message : 'Couldn’t read this file.' }
   }
+  /** Reload clean documents only; recheck after IO so typing/saving wins the race. */
+  async refresh(canApply: () => boolean = () => true): Promise<boolean> {
+    if (!this.loaded || this.saving) return false
+    const baseline = this.saved
+    try {
+      if (!await this.fs.exists(this.path)) throw Error('File removed. Your text is kept here.')
+      const text = await this.fs.read(this.path)
+      if (this.saving || this.saved !== baseline || !canApply()) return false
+      const size = tooLargeSize(text)
+      if (size !== null) throw Error(`File too large to edit (${formatBytes(size)}).`)
+      if (text === this.saved) return false
+      if (this.dirty) {
+        this.error = 'File changed on disk. Your unsaved edits are kept; copy them before reopening to compare.'
+        return false
+      }
+      this.text = this.saved = text
+      this.error = ''
+      return true
+    } catch (e) {
+      if (!this.saving && this.saved === baseline && canApply()) this.error = e instanceof Error ? e.message : 'Couldn’t refresh this file.'
+      return false
+    }
+  }
   async save(): Promise<void> {
     if (!this.loaded || this.saving || !this.dirty) return
     this.saving = true

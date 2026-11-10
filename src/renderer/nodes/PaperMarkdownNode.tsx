@@ -56,6 +56,36 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
     if (!data.fileMissing) void doc.load().then(() => { if (!disposed) { initialText.current = doc.text; paint() } })
     return () => { disposed = true; alive.current = false }
   }, [doc])
+  useEffect(() => {
+    let disposed = false
+    let checking = false
+    const check = async () => {
+      if (checking || disposed || data.fileMissing || document.hidden || editor.current?.compositionStarted) return
+      checking = true
+      try {
+        const previousError = doc.error
+        const changed = await doc.refresh(() => !disposed && !editor.current?.compositionStarted)
+        if (disposed) return
+        if (changed) {
+          initialText.current = doc.text
+          const view = editor.current
+          if (view) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc.text } })
+        }
+        if (changed || previousError !== doc.error) paint()
+      } finally { checking = false }
+    }
+    // FsApi is shared by local and SSH files and exposes no watch subscription.
+    // One in-flight read per open document; hidden windows do no background IO.
+    const timer = window.setInterval(() => void check(), 2500)
+    window.addEventListener('focus', check)
+    document.addEventListener('visibilitychange', check)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+      window.removeEventListener('focus', check)
+      document.removeEventListener('visibilitychange', check)
+    }
+  }, [doc, data.fileMissing])
   useEffect(() => { if (!reading) editor.current?.requestMeasure() }, [reading, paperMargins, fontSize, lineHeight])
   const save = async () => {
     if (data.fileMissing || editor.current?.compositionStarted) return
@@ -135,8 +165,8 @@ export function PaperMarkdownNode({ id, data, selected }: NodeProps<CanvasNode>)
       <div className={`editor-node__body paper-markdown__paper${paperThemeClass(paperTheme)}`}>
         {!doc.loaded ? <div className="paper-markdown__message" role="status">{data.fileMissing ? 'This file’s worktree was removed.' : doc.error || 'Loading…'}</div> : <>
             <div className="paper-markdown__write" hidden={reading}>
-              <PaperMarkdownEditor initialText={initialText.current} fileName={name}
-                onChange={text => { const wasDirty = doc.dirty; doc.text = text; if (wasDirty !== doc.dirty) paint() }} onSave={() => void save()} onReady={view => { editor.current = view }} />
+              <PaperMarkdownEditor key={`${filePath}:${data.sshFs ? activeProjectId : "local"}`} initialText={initialText.current} fileName={name}
+                onChange={text => { const wasDirty = doc.dirty; doc.text = text; if (wasDirty !== doc.dirty) paint() }} onSave={() => void save()} onReady={view => { editor.current = view; if (view && view.state.sliceDoc() !== doc.text) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: doc.text } }) }} />
             </div>
             {reading && <article className="paper-markdown__read nodrag nowheel nokey" tabIndex={0} aria-label={`Read ${name}`}>
               <PaperMarkdownRead text={doc.text} filePath={filePath} fs={fs} openImage={path => {

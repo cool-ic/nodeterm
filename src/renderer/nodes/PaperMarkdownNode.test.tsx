@@ -42,7 +42,7 @@ async function mount() {
   await act(async () => root.render(<PaperMarkdownNode {...props} />))
   cleanup = async () => { await act(async () => root.unmount()); host.remove(); useSettings.setState(settings); window.nodeTerminal = bridge }
   const click = async (name: string) => { await act(async () => host.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!.click()) }
-  return { host, click, update: async (data: object) => { props = { ...props, data: { ...props.data, ...data } }; await act(async () => root.render(<PaperMarkdownNode {...props} />)) } }
+  return { host, click, external: (text: string) => { disk = text }, update: async (data: object) => { props = { ...props, data: { ...props.data, ...data } }; await act(async () => root.render(<PaperMarkdownNode {...props} />)) } }
 }
 it('reads current edits safely, retains the source, and saves exact source from reading mode', async () => {
   const { host, click } = await mount()
@@ -135,4 +135,20 @@ it('leaves ordinary typing, alternate modifiers and IME composition alone', asyn
     expect(e.defaultPrevented).toBe(false)
   }
   expect(fake.updateData).not.toHaveBeenCalled()
+})
+
+it('refreshes an external edit on focus in Read mode and preserves a conflicting draft', async () => {
+  const { host, click, external } = await mount()
+  await click('Read Markdown')
+  external('# External update')
+  await act(async () => { window.dispatchEvent(new Event('focus')) })
+  expect(host.querySelector('h1')?.textContent).toBe('External update')
+  await act(async () => fake.change('# Unsaved draft'))
+  external('# Another external edit')
+  await act(async () => { window.dispatchEvent(new Event('focus')) })
+  expect(host.querySelector('h1')?.textContent).toBe('Unsaved draft')
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('unsaved edits')
+  await click('Edit Markdown'); await click('Read Markdown')
+  expect(host.querySelector('h1')?.textContent).toBe('Unsaved draft')
+  expect(fake.fs.write).not.toHaveBeenCalled()
 })
