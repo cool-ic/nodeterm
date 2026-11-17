@@ -21,7 +21,7 @@ import {
 import { assembleLaunchCommand, assembleResumeCommand } from '@shared/agents/launch'
 import { heldLaunchIntentFor } from '@shared/agents/launch-intent'
 import { agentAccountColor } from '@shared/agents/account-color'
-import { boundAccountId } from '@shared/agents/account-binding'
+import { ownedAccountId } from '@shared/agents/account-binding'
 import { agentEnvSnapshot } from '../lib/agentEnv'
 import { uuid } from '@renderer/lib/uuid'
 import { COLLAPSED_HEIGHT, expandRectToGrid, NODE_MIN_SIZES, snapNodeToGrid, type Rect } from '../lib/nodeSizing'
@@ -838,11 +838,16 @@ export function createAgentNode(
   qoderYolo = false
 ): CanvasNode {
   const { label, color: agentColor } = resolveAgent(agentId)
+  const settings = useSettings.getState().settings
   // ONE binding decision, shared with the phone-registration path (core/project-node-append) so
   // "which agents bind a managed account" has a single definition instead of a ternary the canvas
   // enforces and the registrar does not. It feeds both `data.accountId` below and the color here,
-  // which is what keeps the two from drifting apart.
-  const bound = boundAccountId(accountId, agentId)
+  // which is what keeps the two from drifting apart. `ownedAccountId` adds the provider check on
+  // top: a Claude account id inherited from the opener or the project default must never bind a
+  // Codex node — the Codex scope gate refuses it at spawn and the node sits QUEUED (issue #1423).
+  const bound = ownedAccountId(accountId, agentId, (id) =>
+    (settings.codexAccounts ?? []).some((a) => a.id === id)
+  )
   // A managed account's default node color (Settings → Accounts) replaces the agent's brand color,
   // so a second login of either builtin is recognizable on the canvas at a glance.
   // `agentAccountColor` asks the list that OWNS this agent's accounts — the two are keyed
@@ -850,7 +855,6 @@ export function createAgentNode(
   // `?? []` on both lists, matching the phone path in `src/main`: `mergeSettings` merges without
   // checking, so a hand-edited `"claudeAccounts": null` survives load and would throw on `.find`
   // one level ABOVE the `typeof color` guard — i.e. the very failure that guard exists to prevent.
-  const settings = useSettings.getState().settings
   const color =
     agentAccountColor(agentId, bound, {
       claude: settings.claudeAccounts ?? [],
@@ -1035,6 +1039,23 @@ export function accountChipLabel(
  */
 export function systemAccountDisplay(label: string | undefined, email?: string | null): string {
   return (label ?? '').trim() || email || 'System account'
+}
+
+/**
+ * The system-account name for the machine a PROJECT runs on. A local project's is this machine's
+ * (`systemAccountDisplay`). An SSH project's is the HOST's own `~/.claude` / `~/.codex` login —
+ * a "New Claude" there launches under that identity, so naming the row after this machine's
+ * custom label or email mislabels the account the session will actually run as. The host's
+ * detected email when one is known, else the generic name tagged with the host; never anything
+ * borrowed from this machine.
+ */
+export function systemAccountDisplayOn(
+  hostKey: string | undefined,
+  local: { label?: string; email?: string | null },
+  remoteEmail?: string | null
+): string {
+  if (!hostKey) return systemAccountDisplay(local.label, local.email)
+  return remoteEmail || `System account (${hostKey})`
 }
 
 /**

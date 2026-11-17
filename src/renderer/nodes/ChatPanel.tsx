@@ -1,8 +1,9 @@
 import { TEXT_NOT_SUBMITTED, isChatPromptBlocked } from '@shared/text-delivery'
 import { claudeScreenBlocksInput, type ChatScreenRead } from '@shared/agents/claude-screen'
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type SetStateAction } from 'react'
 import { renderMarkdown } from '../lib/markdown'
 import { inferInterruptAfterSettle, useAgentStatus } from '../state/agentStatus'
+import { useChatDraft } from '../state/chatDraft'
 import { useSession } from '../session/session'
 import { chipFor } from '../lib/keybindingOverrides'
 import {
@@ -15,6 +16,8 @@ import {
   type ScreenBlock
 } from '../lib/chatSendGate'
 import type { ChatMessage, ChatPart } from '@shared/types'
+import { forgetQueuedSend, queuedSendsFor, rememberQueuedSend } from '../state/chatQueued'
+import { uuid } from '../lib/uuid'
 import { chatPaneRefusal, chatPaneRefusalToast } from '../lib/chatPaneGate'
 import { chatAgentLabel, isNearBottom, shouldFollowOnLoad, toolCardTitle, unseenAfter } from '../lib/chatPanel'
 import { useSettings } from '../state/settings'
@@ -25,6 +28,7 @@ import {
   applyOlder,
   applyTail,
   tailConfirmsSends,
+  unconfirmedQueuedSends,
   emptyThread,
   shouldFetchOlder,
   type ChatThread
@@ -32,7 +36,7 @@ import {
 import { E_UNSUPPORTED } from '@shared/rpc'
 import { GROK_AMBIGUOUS_SESSION_MESSAGE, isGrokAmbiguousSessionError } from '@shared/chat-page'
 import { Spinner } from '../components/Spinner'
-import { newMessagesLabel } from '../lib/liveChatLook'
+import { newMessagesLabel } from '../lib/chatLabels'
 import {
   CHAT_LIVE_RELOAD_MIN_MS,
   CHAT_OPTIMISTIC_WORKING_MS,
@@ -49,7 +53,8 @@ import {
   turnEndReloadCarries,
   windowFocusHint
 } from '../lib/chatLive'
-import { sentCommand } from '@shared/chat-command'
+import { BASH_COMMAND_TOOL, sentCommand } from '@shared/chat-command'
+import { ChatShellCommand } from './ChatShellCommand'
 import { isInteractiveBuiltin } from '@shared/chat-catalog'
 import { capabilityAgentId, chatReadsLocalOnly, readsScreenDialogs } from '@shared/agents/config'
 import { ChatLoadingStatus } from './ChatPanelFallback'
@@ -252,6 +257,24 @@ export function ChatPanel({
   // when the read was issued.
   const threadRef = useRef(thread)
   threadRef.current = thread
+  // The optimistic bubbles sent into the CLI's queue mid-turn, drawn as "Queued" until the transcript
+  // has them, each with its id in `state/chatQueued.ts`. Object identity is enough: `applyTail`
+  // carries an unconfirmed send as the same object.
+  const queuedRef = useRef(new WeakMap<ChatMessage, string>())
+  // The identity whose remembered queued sends this mount has already drawn again (see `load`).
+  const queuedRestoredForRef = useRef<string | null>(null)
+  // The queued ids the thread showed at its last change: one that leaves the thread was confirmed
+  // by the transcript (or its session ended) and is forgotten.
+  const shownQueuedRef = useRef(new Set<string>())
+  useEffect(() => {
+    const now = new Set<string>()
+    for (const m of thread.messages) {
+      const id = queuedRef.current.get(m)
+      if (id !== undefined) now.add(id)
+    }
+    for (const id of shownQueuedRef.current) if (!now.has(id)) forgetQueuedSend(nodeId, id)
+    shownQueuedRef.current = now
+  }, [thread, nodeId])
   const [loadState, setLoadState] = useState<LoadState>('loading')
   // Mirror for `attemptLive`, which runs from timers and settles, outside any render.
   const loadStateRef = useRef(loadState)
@@ -266,7 +289,13 @@ export function ChatPanel({
   // Mirror for `load`, which must not depend on it (its identity drives the initial-load effect).
   const olderStateRef = useRef(olderState)
   olderStateRef.current = olderState
-  const [input, setInput] = useState('')
+  // The draft lives in a store keyed by node (state/chatDraft.ts): this panel unmounts on every
+  // project switch, and a draft in component state was lost with it.
+  const input = useChatDraft((s) => s.drafts[nodeId] ?? '')
+  const setInput = useCallback(
+    (next: SetStateAction<string>) => useChatDraft.getState().setDraft(nodeId, next),
+    [nodeId]
+  )
   const [readonly, setReadonly] = useState(false)
   // The last prompt this panel sent, for taking it back out of the agent's input box after an Esc.
   const lastSentRef = useRef<string | null>(null)
@@ -507,7 +536,30 @@ export function ChatPanel({
         // command it is the ONLY signal (no hook fires). A command that starts a real turn is
         // still covered — its `working` state keeps the row (and the send refusal) on its own.
         if (tailConfirmsSends(threadRef.current, identity, res)) setOptimistic(false)
-        setThread((t) => applyTail(t, identity, res, { carryUnconfirmed: carry }))
+        // A remounted panel (a project switch, the card modal) draws its queued sends again: the
+        // transcript does not hold a prompt the CLI has not delivered yet. Once per identity, and
+        // only mid-turn: a CLI queue exists only while a turn runs, so once the agent is not working
+        // the queue was delivered, or pulled back into the input box (Esc), and is forgotten.
+        const restored: ChatMessage[] = []
+        if (queuedRestoredForRef.current !== identity) {
+          queuedRestoredForRef.current = identity
+          const remembered = queuedSendsFor(nodeId, identity)
+          const working = useAgentStatus.getState().byId[nodeId]?.state === 'working'
+          const waiting = working ? unconfirmedQueuedSends(res, remembered) : []
+          for (const r of remembered) if (!waiting.includes(r)) forgetQueuedSend(nodeId, r.id)
+          for (const r of waiting) {
+            const m: ChatMessage = { role: 'user', parts: [{ kind: 'text', text: r.text }] }
+            queuedRef.current.set(m, r.id)
+            restored.push(m)
+          }
+        }
+        setThread((t) => {
+          const next = applyTail(t, identity, res, { carryUnconfirmed: carry })
+          if (restored.length === 0) return next
+          const shown = new Set(next.messages.map((m) => queuedRef.current.get(m)))
+          const missing = restored.filter((m) => !shown.has(queuedRef.current.get(m)))
+          return missing.length === 0 ? next : { ...next, messages: [...next.messages, ...missing] }
+        })
         setLoadState('ok')
         setHeldRead({ identity, pendingId: heldAtStart })
         settleHeldReload(heldAtStart)
@@ -885,20 +937,21 @@ export function ChatPanel({
   }, [maybeLoadOlder])
 
   // The panel's box changing size — above all a collapsed node being EXPANDED (display:none → a
-  // real box). Nothing else re-runs the checks then: while hidden, follow and anchor had zero
-  // geometry to work with and paging was refused. So: a user who was following lands at the
-  // bottom, and paging resumes (a short thread fetches older right away). Guarded: jsdom and old
-  // engines have no ResizeObserver, and the panel works without it.
+  // real box), and the composer growing or being resized under it. Nothing else re-runs the checks
+  // then: while hidden, follow and anchor had zero geometry to work with and paging was refused. So:
+  // a user who was following stays at the bottom, and paging resumes (a short thread fetches older
+  // right away). Guarded: jsdom and old engines have no ResizeObserver, and the panel works without
+  // it.
   const maybeLoadOlderRef = useRef(maybeLoadOlder)
   maybeLoadOlderRef.current = maybeLoadOlder
   useEffect(() => {
     const el = msgsRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
-    let hadBox = el.clientHeight > 0
+    let lastHeight = el.clientHeight
     const ro = new ResizeObserver(() => {
-      const hasBox = el.clientHeight > 0
-      if (hasBox && !hadBox && nearBottomRef.current) el.scrollTop = el.scrollHeight
-      hadBox = hasBox
+      const height = el.clientHeight
+      if (height > 0 && height !== lastHeight && nearBottomRef.current) el.scrollTop = el.scrollHeight
+      lastHeight = height
       maybeLoadOlderRef.current()
       attemptLiveRef.current() // a hook event held while the panel was hidden
     })
@@ -968,10 +1021,6 @@ export function ChatPanel({
     markFollowing(true)
   }
 
-  // The optimistic bubbles sent into the CLI's queue mid-turn, drawn as "Queued" until the transcript
-  // has them. Object identity is enough: `applyTail` carries an unconfirmed send as the same object.
-  const queuedRef = useRef(new WeakSet<ChatMessage>())
-
   const sendOnce = useCallback(async () => {
     const text = input.trim()
     if (!text) return
@@ -1019,7 +1068,15 @@ export function ChatPanel({
     justSentRef.current = true
     lastSentRef.current = text
     const sent: ChatMessage = { role: 'user', parts: [{ kind: 'text', text }] }
-    if (mode === 'queue') queuedRef.current.add(sent)
+    if (mode === 'queue') {
+      let afterKey: number | null = null
+      for (const m of threadRef.current.messages) {
+        if (m.key !== undefined && (afterKey === null || m.key > afterKey)) afterKey = m.key
+      }
+      const id = uuid()
+      queuedRef.current.set(sent, id)
+      rememberQueuedSend(nodeId, { id, identity, text, afterKey })
+    }
     setThread((t) => ({ ...t, messages: [...t.messages, sent] }))
     setOptimistic(true)
     setInput('')
@@ -1046,7 +1103,7 @@ export function ChatPanel({
       }
       commandReadTimerRef.current = setTimeout(fire, CHAT_LIVE_RELOAD_MIN_MS)
     }
-  }, [api, input, nodeId, agentId, onShowTerminal, pollScreen])
+  }, [api, input, nodeId, agentId, identity, onShowTerminal, pollScreen])
   // A send in flight. A typed send (core/typed-input.ts, claude) takes a moment — core waits for the
   // pane to show the text before it presses Enter — and the draft is only cleared once it lands, so
   // a second Enter in that window would send the same prompt twice. Ignore it instead.
@@ -1152,6 +1209,9 @@ export function ChatPanel({
         <span className="term-chat__interrupt-hook" aria-hidden="true">⎿</span>
         {CLAUDE_INTERRUPT_LINE}
       </div>
+    ) : p.kind === 'tool' && p.name === BASH_COMMAND_TOOL ? (
+      // A `!` command the user ran: the TUI's `! cmd` with its output's first line under a `⎿`.
+      <ChatShellCommand key={key} arg={p.arg} result={p.result} />
     ) : p.body && !staleTodo(p, i, latestTodo) ? (
       // A plan / question / the latest todo list is the content itself, not plumbing: shown
       // expanded, in full, flowing with the thread (no inner scroll box). The answer stays under it.
@@ -1362,8 +1422,8 @@ export function ChatPanel({
           )}
         </div>
         {!following && messages.length > 0 && (
-          // The Live chat drawer's "N new messages ↓" pill (LiveChatDrawer.tsx), plus a bare "↓" while
-          // nothing new has come in: here the thread is also read back from deep in its history.
+          // An "N new messages ↓" pill, plus a bare "↓" while nothing new has come in: the thread is
+          // also read back from deep in its history.
           <button
             type="button"
             className="confirm__btn primary term-chat__to-latest"

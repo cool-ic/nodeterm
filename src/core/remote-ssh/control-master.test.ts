@@ -1,6 +1,8 @@
 import os from 'os'
 import { describe, expect, it } from 'vitest'
 import {
+  SESSION_SOCKET_REF,
+  sessionSocketProbe,
   controlPathFor,
   masterArgs,
   childArgs,
@@ -9,8 +11,6 @@ import {
   probeSaysAbsent,
   remoteCapturePaneArgs,
   remoteCaptureVisibleArgs,
-  remoteTmuxWatcherArgs,
-  remoteWindowSizeArgs,
   remotePaneCommandArgs,
   remotePaneCwdArgs,
   remotePaneProcessArgs,
@@ -38,10 +38,12 @@ import {
   remoteScpPath
 } from './control-master'
 import { remoteTmuxPathPrologue } from '../../shared/ssh'
-import { VISIBLE_CAPTURE_FORMAT } from '../watch-link/capture-route'
+import { VISIBLE_CAPTURE_FORMAT } from '../capture-route'
 
 /** The PATH-append prologue every remote tmux line now starts with (issue #449). */
 const TP = remoteTmuxPathPrologue()
+// Every command about ONE session probes which socket holds it first (`sessionSocketProbe`).
+const SX = `${TP}${sessionSocketProbe('nt-x')}`
 
 const conn = { host: 'h.example.com', user: 'deploy', port: 2222, identityFile: '/k/id' }
 
@@ -180,7 +182,7 @@ describe('childArgs', () => {
 })
 
 describe('remoteTmuxPasteArgs', () => {
-  const TMUX = `tmux -L ${RMT_TMUX_SOCKET}`
+  const TMUX = `tmux -L ${SESSION_SOCKET_REF}`
   const BUF = 'nt-paste-deadbeef'
   const cmd = (session: string, enter: boolean): string =>
     remoteTmuxPasteArgs(conn, '/s.sock', session, BUF, enter).slice(-1)[0]
@@ -189,7 +191,7 @@ describe('remoteTmuxPasteArgs', () => {
     expect(remoteTmuxPasteArgs(conn, '/s.sock', 'nt-x', BUF, true)).toEqual([
       ...childPrefix,
       'deploy@h.example.com',
-      `${TP}${TMUX} load-buffer -b ${BUF} - ';' ` +
+      `${SX}${TMUX} load-buffer -b ${BUF} - ';' ` +
         `if-shell -F -t '=nt-x:' '#{pane_in_mode}' 'send-keys -t =nt-x: -X cancel' ';' ` +
         `paste-buffer -d -p -r -b ${BUF} -t '=nt-x:' ';' send-keys -t '=nt-x:' Enter`
     ])
@@ -250,19 +252,25 @@ describe('remoteTmuxEnterArgs', () => {
     expect(remoteTmuxEnterArgs(conn, '/s.sock', 'nt-x')).toEqual([
       ...childPrefix,
       'deploy@h.example.com',
-      `${TP}tmux -L ${RMT_TMUX_SOCKET} send-keys -t '=nt-x:' Enter`
+      `${SX}tmux -L ${SESSION_SOCKET_REF} send-keys -t '=nt-x:' Enter`
     ])
+  })
+
+  it('steps the cursor left first for a typed message ending in a backslash', () => {
+    const args = remoteTmuxEnterArgs(conn, '/s.sock', 'nt-x', { cursorLeftFirst: true })
+
+    expect(args[args.length - 1]).toBe(`${SX}tmux -L ${SESSION_SOCKET_REF} send-keys -t '=nt-x:' Left Enter`)
   })
 })
 
 describe('remoteCapturePaneArgs', () => {
   it('captures the whole scrollback (-S -) when full', () => {
     const args = remoteCapturePaneArgs(conn, '/s.sock', 'nt-x', true)
-    expect(args[args.length - 1]).toBe(`${TP}tmux -L ${RMT_TMUX_SOCKET} capture-pane -p -e -t '=nt-x:' -S -`)
+    expect(args[args.length - 1]).toBe(`${SX}tmux -L ${SESSION_SOCKET_REF} capture-pane -p -e -t '=nt-x:' -S -`)
   })
   it('captures the recent ~200 lines (-S -200) when not full', () => {
     const args = remoteCapturePaneArgs(conn, '/s.sock', 'nt-x', false)
-    expect(args[args.length - 1]).toBe(`${TP}tmux -L ${RMT_TMUX_SOCKET} capture-pane -p -e -t '=nt-x:' -S -200`)
+    expect(args[args.length - 1]).toBe(`${SX}tmux -L ${SESSION_SOCKET_REF} capture-pane -p -e -t '=nt-x:' -S -200`)
   })
 })
 
@@ -278,36 +286,8 @@ describe('remoteCaptureVisibleArgs', () => {
     const args = remoteCaptureVisibleArgs(conn, '/s.sock', 'nt-x')
     expect(args.slice(0, childPrefix.length)).toEqual(childPrefix)
     expect(args[args.length - 1]).toBe(
-      `${TP}tmux -L ${RMT_TMUX_SOCKET} capture-pane -p -e -t '=nt-x:' ';' ` +
+      `${SX}tmux -L ${SESSION_SOCKET_REF} capture-pane -p -e -t '=nt-x:' ';' ` +
         `display-message -p -t '=nt-x:' '${VISIBLE_CAPTURE_FORMAT}'`
-    )
-  })
-})
-
-describe('remoteTmuxWatcherArgs', () => {
-  it('a tty-allocating child that ATTACHES read-only and ignore-size, never creates', () => {
-    const args = remoteTmuxWatcherArgs(conn, '/s.sock', 'nt-x')
-    expect(args[0]).toBe('-t')
-    expect(args.slice(1, 1 + childPrefix.length)).toEqual(childPrefix)
-    expect(args[args.length - 1]).toBe(
-      `${TP}tmux -L ${RMT_TMUX_SOCKET} attach-session -E -f 'ignore-size,read-only' -t '=nt-x:'`
-    )
-  })
-
-  it('has no create path and no plain-shell fallback — a watcher never gets a shell', () => {
-    const cmd = remoteTmuxWatcherArgs(conn, '/s.sock', 'nt-x').at(-1)!
-    expect(cmd).not.toContain('new-session')
-    expect(cmd).not.toContain('SHELL')
-    expect(cmd).not.toContain('exec')
-  })
-})
-
-describe('remoteWindowSizeArgs', () => {
-  it('reads the window size of exactly this session on the host', () => {
-    const args = remoteWindowSizeArgs(conn, '/s.sock', 'nt-x')
-    expect(args.slice(0, childPrefix.length)).toEqual(childPrefix)
-    expect(args[args.length - 1]).toBe(
-      `${TP}tmux -L ${RMT_TMUX_SOCKET} display-message -p -t '=nt-x:' '#{window_width} #{window_height} #{status}'`
     )
   })
 })
@@ -316,7 +296,7 @@ describe('remotePaneCommandArgs', () => {
   it('asks the remote tmux for the pane_current_command of the session', () => {
     const args = remotePaneCommandArgs(conn, '/s.sock', 'nt-x')
     expect(args[args.length - 1]).toBe(
-      `${TP}tmux -L ${RMT_TMUX_SOCKET} display-message -p -t '=nt-x:' '#{pane_current_command}'`
+      `${SX}tmux -L ${SESSION_SOCKET_REF} display-message -p -t '=nt-x:' '#{pane_current_command}'`
     )
   })
 })
@@ -325,7 +305,7 @@ describe('remotePaneCwdArgs', () => {
   it('asks the remote tmux for the pane_current_path of the session', () => {
     const args = remotePaneCwdArgs(conn, '/s.sock', 'nt-x')
     expect(args[args.length - 1]).toBe(
-      `${TP}tmux -L ${RMT_TMUX_SOCKET} display-message -p -t '=nt-x:' '#{pane_current_path}'`
+      `${SX}tmux -L ${SESSION_SOCKET_REF} display-message -p -t '=nt-x:' '#{pane_current_path}'`
     )
   })
 })
@@ -334,7 +314,7 @@ describe('remote foreground process termination', () => {
   it('reads pane pid + command through the existing ControlMaster', () => {
     const args = remotePaneProcessArgs(conn, '/s.sock', 'nt-x')
     expect(args[args.length - 1]).toBe(
-      `${TP}tmux -L ${RMT_TMUX_SOCKET} display-message -p -t '=nt-x:' '#{pane_pid}|#{pane_current_command}'`
+      `${SX}tmux -L ${SESSION_SOCKET_REF} display-message -p -t '=nt-x:' '#{pane_pid}|#{pane_current_command}'`
     )
   })
 
@@ -355,7 +335,7 @@ describe('remoteListSessionsArgs', () => {
   it('asks the remote nodeterm tmux socket for session names only', () => {
     const args = remoteListSessionsArgs(conn, '/cm/p1')
     const cmd = args[args.length - 1]
-    expect(cmd).toContain('tmux -L nodeterm-rmt list-sessions')
+    expect(cmd).toContain('tmux -L node-terminal list-sessions')
     expect(cmd).toContain('#{session_name}')
   })
 
@@ -604,10 +584,11 @@ describe('probeSaysAbsent (has-session probe discrimination)', () => {
 })
 
 describe('killing a session by name (both sockets, exact target)', () => {
-  // Two nodeterm tmux sockets live on every host at once: `node-terminal` for a nodeterm running ON
-  // the machine, `nodeterm-rmt` for one SSH-ing INTO it. The session-memory sweep lists BOTH, so a
-  // kill routed to one of them promised something it could not do for every row off the other — a
-  // host running its own nodeterm-server is exactly that shape.
+  // Two nodeterm tmux sockets can live on a host: `node-terminal` for every nodeterm (running ON
+  // the machine or SSH-ing INTO it — one socket since the 2026-11 unification), `nodeterm-rmt` for
+  // sessions a pre-unification build's SSH projects left behind. The session-memory sweep lists
+  // BOTH, so a kill routed to one of them promised something it could not do for every row off
+  // the other.
   it('covers both sockets a nodeterm session can live on', () => {
     expect([...KILL_TMUX_SOCKETS].sort()).toEqual(['node-terminal', 'nodeterm-rmt'])
   })
@@ -637,12 +618,12 @@ describe('killing a session by name (both sockets, exact target)', () => {
     expect([...localKillSockets(null, true)].sort()).toEqual(['node-terminal', 'nodeterm-rmt'])
   })
 
-  it('keeps the remote default on the ssh socket, and overrides it explicitly', () => {
+  it('kills on the socket that HOLDS the session by default, and on a named one explicitly', () => {
     expect(remoteTmuxKillArgs(conn, '/s.sock', 'nt-x').at(-1)).toBe(
-      `${TP}tmux -L ${RMT_TMUX_SOCKET} kill-session -t '=nt-x'`
+      `${SX}tmux -L ${SESSION_SOCKET_REF} kill-session -t '=nt-x'`
     )
-    expect(remoteTmuxKillArgs(conn, '/s.sock', 'nt-x', 'node-terminal').at(-1)).toBe(
-      `${TP}tmux -L node-terminal kill-session -t '=nt-x'`
+    expect(remoteTmuxKillArgs(conn, '/s.sock', 'nt-x', 'nodeterm-rmt').at(-1)).toBe(
+      `${TP}tmux -L nodeterm-rmt kill-session -t '=nt-x'`
     )
   })
 
@@ -651,7 +632,7 @@ describe('killing a session by name (both sockets, exact target)', () => {
     expect(runs).toHaveLength(2)
     expect(runs.map((r) => r.at(-1)).sort()).toEqual([
       `${TP}tmux -L node-terminal kill-session -t '=nt-x'`,
-      `${TP}tmux -L ${RMT_TMUX_SOCKET} kill-session -t '=nt-x'`
+      `${TP}tmux -L nodeterm-rmt kill-session -t '=nt-x'`
     ])
     // Each is a complete child-ssh argv, not a bare command.
     for (const r of runs) expect(r.slice(0, childPrefix.length)).toEqual(childPrefix)
@@ -661,3 +642,27 @@ describe('killing a session by name (both sockets, exact target)', () => {
 // The `remoteFramedDelivery` suite that lived here is gone with the plan itself (issue #453) —
 // the envelope now rides `remotePasteDelivery` (enter=true); see the tombstones in
 // control-master.ts and tmux-naming.ts.
+
+describe('sessionSocketProbe — adopting a session the pre-unification build left on the legacy socket', () => {
+  it('is pinned text: unified socket first, legacy only on a miss, stdin never read', () => {
+    expect(sessionSocketProbe('nt-x')).toBe(
+      '_nts=node-terminal; ' +
+        'tmux -L node-terminal has-session -t "=nt-x" </dev/null >/dev/null 2>&1 || ' +
+        '{ tmux -L nodeterm-rmt has-session -t "=nt-x" </dev/null >/dev/null 2>&1 && _nts=nodeterm-rmt; }; '
+    )
+    expect(SESSION_SOCKET_REF).toBe('"$_nts"')
+  })
+
+  it('never splices an id it did not expect: no probe, unified socket', () => {
+    for (const hostile of ['nt-x;id', 'nt-$(id)', 'nt-"x', "nt-'x", 'nt x', '']) {
+      expect(sessionSocketProbe(hostile)).toBe('_nts=node-terminal; ')
+    }
+  })
+
+  it('lists BOTH sockets for the warm/cold decision, keeping the unified exit code', () => {
+    const cmd = remoteListSessionsArgs(conn, '/cm/p1').at(-1)!
+    expect(cmd).toContain("tmux -L node-terminal list-sessions -F '#{session_name}'")
+    expect(cmd).toContain("tmux -L nodeterm-rmt list-sessions -F '#{session_name}' 2>/dev/null")
+    expect(cmd.endsWith('exit $r')).toBe(true)
+  })
+})

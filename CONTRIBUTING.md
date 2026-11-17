@@ -671,7 +671,7 @@ anything else. Board-level fields survive every transform — `pullLinks` is one
   pty produces no next chunk, so a resume that waits for one never comes: that froze the phone's
   terminal for good after a single >8 MB burst. `host-service.ts` arms a 250 ms sweep while a stream
   is paused, then repaints with a snapshot before it resumes — the same drain-sweep pattern as
-  `core/ui-sink-registry.ts` (whose self-paced sinks never drop). A new paused path needs the same
+  `core/ui-sink-registry.ts`. A new paused path needs the same
   trigger. CLAUDE.md, "Remote access".
 
 - **An SSH project's node runs on the project's host — ask the project, not the node.** Node
@@ -754,18 +754,6 @@ anything else. Board-level fields survive every transform — `pullLinks` is one
   to the shared project (`filterScopedEvent`). Anything that touches the host's settings,
   credentials, license or pairing belongs in `src/shared/host-control.ts` instead — refused to every
   relay peer.
-
-- **Live links: a new broadcast channel needs nothing, a new per-session pty channel needs a
-  decision.** Live-link viewers are quiet clients, so no broadcast ever reaches them. A per-session pty
-  event reaches a viewer only once it is added to `watcherEventAllowed`
-  (`src/core/watch-link/watcher-policy.ts`) on purpose — and only if its payload is the visible screen,
-  never history (why `pty:resync` is refused). Never add link state to a node, a board or a canvas op:
-  canvas sync and the canvas authority would publish it. `src/shared/watch-link/` is copied byte for
-  byte into the viewer page's repo: import only siblings and `tweetnacl`, write type imports as
-  `import type` (`isomorphism.guard.test.ts` fails otherwise), and expect a change there to need a
-  re-vendor. A new viewer CAST is refused until `watcherAccess` admits it on purpose, and a Control
-  link's typed bytes reach only the node's pane through `PtyManager.controlInput` — never written into a
-  tmux client's pty (the prefix would reach tmux) and never on a command line. `docs/live-links.md`.
 
 - **A change to canvas content that does not travel as a `canvas:mut` op is lost on a hosted core —
   route new content edits through the op vocabulary (`src/shared/canvas-content.ts`).** On a Server
@@ -977,10 +965,10 @@ empty line because `#` starts a comment.
 **Share with team's remote commands are generated shell, and so is their test.** The probe, the
 installer wrapper, the `team` invocations and the kill-verify are built in
 `src/core/remote-ssh/share-team-remote.ts` and run under a real `/bin/sh` against a fake host in its
-test; a change to one of them lands with a run there. The handover kill stays on the `nodeterm-rmt`
-socket only, with exact `=nt-<id>` targets: the every-socket kill used elsewhere would also stop the
-server core's `node-terminal` sessions, which are the ones the handover is starting. See CLAUDE.md
-"Share with team".
+test; a change to one of them lands with a run there. The handover kill targets exact `=nt-<id>`
+names on the host's `node-terminal` socket only — never the every-socket fan-out used elsewhere —
+and it runs BEFORE the server core resumes on that same socket, so one conversation never has two
+processes. See CLAUDE.md "Share with team".
 
 **Remote context polling must bound bytes before SSH transports them.** Bootstrap from the
 file's measured end, keep offsets in raw bytes, and distinguish an idle read from failure so
@@ -1613,8 +1601,17 @@ tokens missing that were all present. Normalize at the read
 (`readFileSync(f, 'utf8').replace(/\r\n/g, '\n')`); `src/shared/line-endings.guard.test.ts` fails on
 a read that slices a `\n`-bearing literal without it.
 
+**An SSH project spawns on the host's `node-terminal` socket — the same one a nodeterm running on
+that host uses.** That is what lets the same folder, opened locally on the server and over SSH from a
+laptop, attach the same `nt-<id>` sessions. `nodeterm-rmt` is the legacy socket: never spawn on it,
+but a session an older build left there is **adopted in place** — so a remote tmux command about ONE
+session must go through `sessionTmuxCmd` and name the socket as `SESSION_SOCKET_REF`
+(`control-master.ts`), not `RMT_TMUX_SOCKET`; a bare constant silently misses every adopted session
+and the node respawns beside its own live agent. Never give the SSH path a socket of its own again
+(`src/core/remote-ssh/unified-socket.test.ts` pins the equality; CLAUDE.md "One tmux socket per host").
+
 **A test never touches a live tmux server.** You will most likely run `npm test` from inside a
-nodeterm terminal, where `-L node-terminal` and `-L nodeterm-rmt` are the servers holding every
+nodeterm terminal, where `-L node-terminal` (and a legacy `-L nodeterm-rmt`) are the servers holding every
 node you have open — one stray `kill-server` there ends your whole canvas, not your test. Every run
 therefore gets a private `TMUX_TMPDIR` (`test/setup/tmux-sandbox.ts`), which re-points every socket
 name at once. Write real-tmux suites the normal way — pick your own socket name, and use
@@ -1672,6 +1669,22 @@ carrying information the user needs at a glance. A dependency's stylesheet count
 `dashdraw` on animated edges is gated by a rule in `styles.css` that repeats xyflow's selectors, and
 the same test scans `@xyflow/react/dist/style.css` so an upgrade that adds an infinite animation
 fails there. The full measurement table and the reasoning are in CLAUDE.md § Idle energy.
+
+The gate only helps a window nobody is looking at; a FOCUSED window pays for every loop the whole
+time it runs (issue #1454: four working-subagent edges and a few dots held one at 120 frames/s). So a
+status indicator pulses a few times and settles (`ease-in-out 4`), and keeps looping only if it must
+keep pulling the eye (needs-you). And every repeating animation must stop under
+`@media (prefers-reduced-motion: reduce)`: `src/renderer/styles.reduced-motion.test.ts` fails on
+one that is neither stopped there nor listed in its `EXEMPT` map with a reason.
+
+**The kanban board hides things it does not unmount.** The canvas and a pinned sessions sidebar
+stay mounted under the opaque board, and so do their terminals. An animation on something under
+the board needs the covered override (`:root[data-nt-canvas='covered'] …`, pinned in
+`src/renderer/lib/canvasCovered.test.ts`), and a status animation ON a board card must be bounded
+to a few cycles, because no gate pauses what is on screen while an agent works for an hour. A
+terminal under the board keeps parsing; `terminal/board-render-pause.ts` stops it drawing and also
+holds xterm's textarea, scroll-area and selection paths, which ignore the render pause. If you add
+another per-output xterm call that touches the DOM, hold it there too.
 
 ## Pull requests
 

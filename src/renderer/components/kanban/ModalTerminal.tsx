@@ -63,7 +63,7 @@ import { fileLinkDialect } from '../../terminal/file-link-dialect'
 import { hostPlatformFor } from '../../terminal/host-platform'
 import { sshFs } from '../../terminal/ssh-fs'
 import { cardFileLinkRoute } from '../../lib/cardFileLinks'
-import { projectSessionSource } from '../LiveLinkChip'
+import { projectSessionSource } from '../../lib/projectSessionSource'
 import type { LocalFileTarget } from './LocalFilePreviewModal'
 import type { FsApi } from '@shared/types'
 import { urlLinkMenuItems } from '../../terminal/link-menu'
@@ -580,6 +580,7 @@ export function ModalTerminal({
         accountId: spawn.accountId,
         sshRemote,
         requireRemote: spawn.sshRemoteTmux,
+        restoreScrollback: true,
         // Same local-login exemption as the canvas node (issue #1186).
         ...(isLocalOnSshCanvas(nodeId) ? { localOnSshCanvas: true } : {})
       }).catch((err: unknown): Error => (err instanceof Error ? err : new Error(String(err))))
@@ -650,7 +651,8 @@ export function ModalTerminal({
         replay: attachReplay({ parked: false, fresh: res.fresh, hasInitialCommand: false }),
         superseded: false,
         snapshot,
-        screen: res.screen
+        screen: res.screen,
+        coreSeeded: res.scrollbackSeeded
       })
       if (paint === 'snapshot') {
         if (snapshot) term.write(toXtermText(snapshot))

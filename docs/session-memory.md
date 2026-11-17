@@ -177,14 +177,35 @@ assumption — a hard-coded 4096 under-reports **4×** on a 16 KiB-page arm64 ke
 64 KiB-page enterprise arm64 builds (it would print 40 MB for a 640 MB session). Do not "optimise"
 this back to `statm`.
 
-Non-Linux (and an unreadable `/proc`) falls through to one `ps -eo pid,ppid,rss` call, through the
-same injectable seam as tmux — nothing in `session-memory.ts` reaches a subprocess around it.
+Non-Linux (and an unreadable `/proc`) falls through to one `ps -eo pid,ppid,rss,comm` call, through
+the same injectable seam as tmux — nothing in `session-memory.ts` reaches a subprocess around it.
 
 `rollupTree` walks each pane pid's descendants with a `seen` guard (a table captured while pids are
 recycling can present a cyclic ppid chain, and a sweep that hangs is worse than one that
 under-reports). **`childCount` counts EVERY descendant**, the agent CLI included: `pane_pid` is the
-pane's *shell*, so a claude session with two MCP servers reports **3**. The panel therefore says
-"child processes", never "MCP" — a plain `npm run dev` has children too.
+pane's *shell*, so a claude session with two MCP servers reports **3**.
+
+A row's number is that whole tree. The line under it is how the tree splits: `claude 538 MB · 14
+other processes 1.2 GB`, two parts that add up to the row. It names the LARGEST process in the tree,
+which is usually the agent CLI and is what a reader wants either way when a total looks high. It says
+"processes", never "MCP": a plain `npm run dev` has them too.
+
+### Comparing the panel with other tools
+
+The panel reports its measure (`metric`) and the time of the reading. A row is a tree SUM, so compare
+it with a sum in the same measure, on the same processes:
+
+| Session of 7 processes, measured on a Mac | |
+|---|---|
+| The panel | 751 MB |
+| `footprint -p <pid> -p <pid> …` for all seven, "Summary Footprint" | 751 MB, 620 MB of it compressed or swapped |
+| `footprint <claude pid>` alone | 232 MB |
+| `ps` rss, summed | 148 MB |
+
+`rss` leaves compressed pages out, and an idle process is mostly compressed: one idle MCP `node`
+measured 242 MB of footprint and 4 MB of rss. A panel figure far above `ps` is therefore normal on
+macOS. An SSH host is the exception: it is read with `ps`, so its rows are rss on a macOS host too,
+and the panel says so.
 
 `list-panes -a` emits one line per **pane**, so the first pane of a session wins in both legs (same
 key, same order) — one session is one row.
@@ -424,9 +445,10 @@ That is safe because it is a **round trip, not a lookup**: the panel's `nodeId` 
 observed it on**. It does not rest on node ids being globally unique (they are only per-launch
 unique).
 
-**The name and the host were never the hard part — the SOCKET was.** Two nodeterm tmux sockets exist
-on one machine at the same time: `node-terminal` for a nodeterm running ON it (desktop or Server
-Edition) and `nodeterm-rmt` for one SSH-ing INTO it. The sweep lists **both**
+**The name and the host were never the hard part — the SOCKET was.** Two nodeterm tmux sockets can
+exist on one machine: `node-terminal` for every nodeterm (running ON it — desktop or Server Edition —
+or, since the 2026-11 unification, SSH-ing INTO it) and the legacy `nodeterm-rmt`, where a
+pre-unification build's SSH projects left their sessions. The sweep lists **both**
 (`session-memory.ts`, `session-memory-remote.ts`) while the kill targeted **one** — so every row that
 came off the other socket got the confirm "this stops its tmux session" and a kill that landed
 nowhere. That is not an exotic host: one running its own `nodeterm-server` *and* being SSH'd into is
@@ -450,9 +472,8 @@ name could be on**: `KILL_TMUX_SOCKETS`, via `remoteTmuxKillEverySocketArgs` (re
   not rare — an ordinary node-`×` on a node that was never mounted in this process takes it every
   time, which is the common case right after an app restart and for every non-active project's node
   — and project deletion is the same shape remotely. Those callers know their own nodes, so they
-  stay narrow: speculating at `nodeterm-rmt` aims at sessions ANOTHER machine's nodeterm SSHed in to
-  spawn here, and speculating at a host's `node-terminal` aims at sessions a nodeterm running ON it
-  owns. Both defaults and both opt-ins are pinned (`pty-single-user.test.ts`,
+  stay narrow: speculating at the legacy `nodeterm-rmt` aims at sessions an older build on ANOTHER
+  machine SSHed in to spawn here, which their own node-× has already failed to reach once. Both defaults and both opt-ins are pinned (`pty-single-user.test.ts`,
   `control-master.test.ts`, `ssh-project.killSessions.test.ts`), including that the wire flag must
   be a literal `true`.
 
@@ -524,13 +545,15 @@ The kill actually reaching the host (the bug most recently fixed, and the one no
     wherever it was, not merely absent from the panel.
  2. Same, for a row owned by a CLOSED ssh project (it resolves to a title, so it takes the
     closeSession path plus the remote kill — both legs must land).
- 2b. THE CROSS-SOCKET CASE, and the reason both sockets are now killed. On a host that also runs its
-    own `nodeterm-server`, open an SSH project pointed at it: the panel lists that server's own
-    sessions (they live on `node-terminal`, not `nodeterm-rmt`). Kill one and confirm with
-    `tmux -L node-terminal ls` on the host. Before the fix this row's confirm was a no-op.
- 2c. The LOCAL mirror of 2b: from another machine, SSH into this one with nodeterm and open a
-    terminal (it lands on this machine's `nodeterm-rmt`). On THIS machine the panel shows it as an
-    orphan; kill it and confirm with `tmux -L nodeterm-rmt ls` locally.
+ 2b. THE CROSS-SOCKET CASE (legacy). On a host that also runs its own `nodeterm-server`, with
+    sessions a pre-2026-11 build left on `nodeterm-rmt`: open an SSH project pointed at it; the
+    panel lists the rows off both sockets. Kill one of each and confirm with `tmux -L node-terminal
+    ls` and `tmux -L nodeterm-rmt ls` on the host. Before the fix the `nodeterm-rmt` row's confirm
+    was a no-op.
+ 2c. THE SHARED-SOCKET CASE (current). From another machine, SSH into this one with nodeterm and
+    open a terminal: it lands on THIS machine's `node-terminal`, and opening the same folder
+    locally here attaches the SAME `nt-<id>` session (the whole point of the unification). The
+    panel shows it as owned, not an orphan; its node-× ends it for both machines.
  3. Kill a node created less than a sweep ago (<1 s): the confirm wording may say "no node" from the
     stale snapshot, and the CANVAS node is currently left behind (§4's known hole) — confirm which
     of the two actually happens on a real machine.
@@ -598,9 +621,10 @@ Layout and theming (argued from CSS only)
 18. fitView / goToNode must no longer tuck nodes under the pill.
 
 Rows, travel and the panel itself
-19. A `claude` node with 2 MCP servers must read `+3 child processes`, not +2: `pane_pid` is the
-    pane's SHELL, so the count includes the agent CLI itself. This is the ONLY item that can
-    falsify the "reports 3" claim made twice above; everything else about the sub-line is arithmetic.
+19. A `claude` node with 2 MCP servers must read `claude … · 3 other processes …`: `pane_pid` is the
+    pane's SHELL, so the tree is 4 processes and the 3 others are the shell and both servers. This is
+    the ONLY item that can falsify the "reports 3" claim above; the rest of the sub-line is arithmetic.
+    The two sizes on it must add up to the row's number, give or take rounding.
 20. Travel to a row whose node lives in a CLOSED project: the tab must REOPEN and the camera land on
     the node. This is the likeliest thing on the list to be wrong — the load and the focus happen in
     the same tick, and `travelToNode` (not `focusNodeById`) is what handles it.

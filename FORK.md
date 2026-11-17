@@ -173,3 +173,11 @@ Official donation/announcement feeds, update checks/download/install, telemetry,
 User-configured SSH, LAN pairing, local notifications and product IM remain separate. Historical cloud credentials/bookmarks are not read for authentication or silently erased. Applications already installed must be rebuilt/replaced to pick up these source changes.
 
 Merged upstream origin/main at 6ec35cb4 (v0.5.1 plus kanban multi-selection and phone session identity fix). Retained fork Qoder/IM input paths while merging upstream chat interruption/suggestion imports. Markdown external refresh is included (35dc91fd).
+
+## Upstream sync — 2026-11-18 (source only)
+
+Merged `origin/main` at `fef36ad9` (76 upstream commits after `6ec35cb4`). The main user-visible changes are bounded/focus-aware activity animation and covered-terminal work, cold scrollback restored into the actual tmux pane plus adoption of legacy SSH tmux sessions, and clearer RAM-panel process attribution/measurement age. Ctrl+Tab project cycling, chat draft carry/queue persistence and reopened-terminal font sizing are included too. “Session memory” here means process RAM, not the fork's agent memory documents.
+
+Live Links retirement now removes its engine, UI and shared wire modules. The fork keeps historical user stores instead of invoking the new destructive cleanup on boot, and keeps official-cloud defaults empty. Paper/ink, Markdown external refresh, product IM/Qoder, unlimited font enlargement and previously cropped controls remain. Conflict checks keep the source free of conflict markers; compatibility assertions were updated for these deliberate fork behaviors.
+
+Validation: typecheck and production build pass; the 225-file targeted run plus corrected-assertion recheck covers 3,621 passing tests and 5 skips, including real private-tmux cold restore and legacy socket adoption. Product IM's separate Node suite passes 25 tests. macOS tests use a short `TMPDIR=/tmp` to stay below Unix socket pathname limits while retaining the test HOME/tmux/tmp sandboxes. This is not a full-repository or live-GUI acceptance claim. Production bundle scan found no official API/relay/update endpoint. No application installation, restart, remote push or release is part of this source merge.

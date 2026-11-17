@@ -248,6 +248,7 @@ import {
   useMdModeFocus
 } from '../terminal/useMdModeFocus'
 import { canvasOwnsMarkdownChord } from '../lib/markdownChord'
+import { carryDraftToChat, carryDraftToTerminal } from '../lib/chatDraftCarry'
 import { IconChevronDown, IconChevronRight, IconClose, IconGrid, IconMoveTo, IconPlay, IconReload, IconSearch, IconSparkle } from '../components/icons'
 import { NodeLabels } from '../components/kanban/NodeLabels'
 import { MdViewHintButton } from '../components/MdViewHintButton'
@@ -260,6 +261,7 @@ import { pasteWithImageReceipt } from '../terminal/image-paste-confirm'
 import { usePasteReceipt } from '../terminal/usePasteReceipt'
 import { createBoardPauseSlot } from '../terminal/board-render-pause'
 import { ContextMeter } from '../components/ContextMeter'
+import { RemoteControlButton } from '../components/RemoteControlButton'
 import { isZoomModifierHeld } from '../lib/zoomModifier'
 import { HoverGuard } from './HoverGuard'
 import {
@@ -294,7 +296,6 @@ import { pullBoardFor, useGitHubIssues } from '../state/githubIssues'
 import type { AgentState } from '@shared/agents/normalize'
 import type { ClientId } from '@shared/presence'
 import { PresenceChips } from '../components/PresenceChips'
-import { LiveLinkChip } from '../components/LiveLinkChip'
 import { useAgentNodes } from '../state/agentNodes'
 import { useTerminalFocus } from '../state/terminalFocus'
 import { useProjects } from '../state/projects'
@@ -326,6 +327,7 @@ import {
   canChat,
   canResume,
   canRename,
+  canRemoteControl,
   canReadTitle,
   createdAgentId,
   reportsOwnCopy,
@@ -1848,11 +1850,15 @@ export function TerminalNode({
   const contextLinkCapable = !!agentId && canContextLink(agentId) // context-link tip wording only; handles render on all terminals
   const showUsage = !!agentId && hasUsage(agentId) // per-node context-window meter
   const showChat = !!agentId && canChat(agentId) // Cmd+M opens a chat panel instead of markdown
+  // Claude Remote Control toggle (header, right of the context meter). Not on a relay tab: the
+  // on/off signal is this machine's transcript tail, which never sees a guest core's session.
+  const showRemoteControl = !!agentId && canRemoteControl(agentId) && session.source !== 'relay'
   // Everything that reads the conversation through CLAUDE's transcript readers (`context.ensure`'s
   // mount-time meter rehydration, the find bar's transcript index) — deliberately NOT `showUsage`,
   // which now spans three agents. See lib/transcriptGates.ts for what sharing that gate broke.
   const claudeTranscript = readsClaudeTranscript(agentId)
   // The header 💬 now opens the board-log comments flyout (right side); ⌘M keeps the markdown/chat view.
+  const rawWriteRef = useRef<((data: string) => void) | null>(null)
   const canRenameNode = !!agentId && canRename(agentId) // WRITE leg: push `/rename <name>` back
   // READ leg: adopt the agent's own session name into the title. A superset of canRenameNode —
   // gemini names its own sessions but has no rename command, so it polls and never pushes.
@@ -1972,7 +1978,12 @@ export function TerminalNode({
    * stays creation-time (`transport.create` keeps passing `data.accountId`).
    */
   const observedAccount = status?.account
-  const accountChip = useAccountChip(data.accountId, observedAccount, agentStatusStore)
+  const accountChip = useAccountChip(
+    data.accountId,
+    observedAccount,
+    agentStatusStore,
+    data.ssh ? sshHostKey(data.ssh as SshConnection) : undefined
+  )
   // This node's team (the stations it opened), published by Canvas from the live ropes. The store
   // keeps each unchanged team's array identity, so this re-renders only when THIS team changes.
   const team = useTeamStations((s) => s.byNode.get(id))
@@ -3739,6 +3750,9 @@ export function TerminalNode({
           // Belt AND braces: the guard above cannot see a `ssh` executable that has gone missing,
           // which is core's other route into the local branch.
           requireRemote: sshRemoteTmux,
+          // Same rule `attachReplay` applies below: a node with a one-shot launch command is being
+          // opened for the first time and has no history to restore.
+          restoreScrollback: !data.initialCommand,
           // The one local terminal an SSH project's canvas may hold (issue #1186): core refuses
           // every other local spawn owned by an SSH project. In-memory mark, never node data.
           ...(isLocalOnSshCanvas(id) ? { localOnSshCanvas: true } : {})
@@ -3758,7 +3772,8 @@ export function TerminalNode({
           tmuxClient,
           persistent,
           sessionHost,
-          unavailable
+          unavailable,
+          scrollbackSeeded
         }) => {
         // The spawn answered: whatever it says, we are no longer waiting on the host.
         clearTimeout(slowSpawn)
@@ -4014,7 +4029,10 @@ export function TerminalNode({
           if (replay === 'cold-snapshot') {
             const snapshot = await scrollbackPromise
             if ((toreDown = onDisposed())) return
-            if (seedPaint({ replay, superseded, snapshot }) === 'snapshot') {
+            if (
+              seedPaint({ replay, superseded, snapshot, coreSeeded: scrollbackSeeded }) ===
+              'snapshot'
+            ) {
               // The snapshot comes from `capture-pane -p`: LF-separated, no CR bytes. xterm runs
               // with convertEol:false, so writing it raw would render as a staircase.
               term.write(toXtermText(snapshot))
@@ -4516,6 +4534,9 @@ export function TerminalNode({
       },
       onData: (cb) => (sessionId && !life.dead ? transport.onData(sessionId, cb) : () => {})
     }
+    // Published for the header's Remote Control toggle (its one gated Enter). Never cleared: the
+    // write is already a no-op once this session is dead, and the next lifecycle run replaces it.
+    rawWriteRef.current = restartIo.write
     // The wake buffer flushes held keystrokes through the SAME session-scoped, lifetime-gated write
     // as the resume line — so a flush into a torn-down session no-ops instead of throwing. Published
     // to the ref the wake `.then` (component body) reads; re-set on every mount, which is when a new
@@ -6114,14 +6135,40 @@ export function TerminalNode({
     }
   }, [id, gates.titleSync, canReadTitleNode, status?.sessionId, data.titleAuto, updateNodeData])
 
+  // The user's own ⌘M flip (the chord, the header toggle) carries a half-typed draft across
+  // (lib/chatDraftCarry.ts): into the agent's input box before leaving the chat view, out of it
+  // after opening it. A flip the composer makes itself (`onShowTerminal`) carries nothing. While a
+  // draft is being typed into the terminal, further presses are ignored: a second carry would type
+  // it again.
+  const chatAvailableRef = useRef(chatAvailable)
+  chatAvailableRef.current = chatAvailable
+  const carryingRef = useRef(false)
+  const toggleMdView = useCallback(() => {
+    if (carryingRef.current) return
+    if (!mdModeRef.current) {
+      updateNodeData(id, () => ({ mdMode: true }))
+      if (chatAvailableRef.current) void carryDraftToChat(session.api.pty, id, agentId)
+      return
+    }
+    if (!chatAvailableRef.current) {
+      updateNodeData(id, () => ({ mdMode: false }))
+      return
+    }
+    carryingRef.current = true
+    void carryDraftToTerminal(session.api.pty, id, agentId).finally(() => {
+      carryingRef.current = false
+      updateNodeData(id, () => ({ mdMode: false }))
+    })
+  }, [id, agentId, session.api.pty, updateNodeData])
+
   // Cmd/Ctrl+M toggles markdown view of this terminal's output — only when hovered, and never while
   // a board is up (the card modal owns the chord there; see `canvasOwnsMarkdownChord`).
   useEffect(() => {
     return window.nodeTerminal.onMarkdownToggle(() => {
       if (!canvasOwnsMarkdownChord(hoveredRef.current, isGlobalKanbanOpen() || isKanbanOpen(useProjects.getState().activeProjectId ?? ''))) return
-      updateNodeData(id, (n) => ({ mdMode: !n.data.mdMode }))
+      toggleMdView()
     })
-  }, [id, updateNodeData])
+  }, [toggleMdView])
 
   // Best-effort: highlight matches that are in the live xterm buffer (on-screen scrollback).
   useEffect(() => {
@@ -6376,11 +6423,18 @@ export function TerminalNode({
           </span>
         ) : null}
         {showUsage && <ContextMeter sessionId={transcript.sessionId ?? null} fromLaunchId={transcript.fallback} nodeId={id} remote={!!remoteSession} agentId={agentId} />}
+        {showRemoteControl && (
+          <RemoteControlButton
+            className="term-node__remote-control"
+            nodeId={id}
+            sessionId={transcript.sessionId}
+            readState={() => agentStatusStore.getState().byId[id]?.state}
+            pty={session.api.pty}
+            write={(d) => rawWriteRef.current?.(d)}
+          />
+        )}
         {/* Who else is in this node. Subscribes to presence itself — see PresenceChips. */}
         <PresenceChips nodeId={id} />
-        {/* This terminal is broadcast by a live link — never hideable (live-link.guard.test.ts).
-            Only through the LOCAL session: a relay tab's node with the same id is not ours (R57). */}
-        <LiveLinkChip nodeId={id} source={session.source} />
         {status?.state === 'working' && (
           <span className="term-node__status term-node__status--busy" title={`${agentLabel} is working`}>
             <AgentMascot agentId={agentId} />
@@ -6694,8 +6748,8 @@ export function TerminalNode({
               <MdViewHintButton
                 hint={mdHint}
                 tooltip={commandTooltip(mdMode ? 'Back to the terminal' : `Open ${mdHint.label.toLowerCase()}`, 'node.toggleMarkdown')}
-                // The same flip as the chord handler and the context-menu item.
-                onToggle={() => updateNodeData(id, (n) => ({ mdMode: !n.data.mdMode }))}
+                // The same flip as the chord handler, draft carry included.
+                onToggle={toggleMdView}
               />
             )
           }

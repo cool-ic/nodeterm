@@ -3,6 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAgentStatus } from '../state/agentStatus'
+import { clearQueuedSendsForTest } from '../state/chatQueued'
 
 /**
  * The composer must never type into a TUI dialog: `sendText` pastes and presses Enter, and Enter
@@ -21,7 +22,7 @@ const { sendChatPrompt, session } = vi.hoisted(() => {
   const session = {
     api: {
       chat: { readTranscript: async () => ({ messages: [], found: true }) },
-      pty: { sendChatPrompt }
+      pty: { sendChatPrompt, paneOwner: async () => ({ panePid: 1, tty: '/dev/ttys001', command: 'claude', argv: ['claude'], pids: [2] }) }
     }
   }
   return { sendChatPrompt, session }
@@ -62,6 +63,7 @@ const enter = (ta: HTMLTextAreaElement): void => {
 
 beforeEach(() => {
   sendChatPrompt.mockClear()
+  clearQueuedSendsForTest()
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)

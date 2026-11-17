@@ -11,6 +11,7 @@ import {
   type Dispatch,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type SetStateAction
 } from 'react'
 import { useAgentStatus } from '../state/agentStatus'
@@ -27,6 +28,18 @@ import { Spinner } from '../components/Spinner'
 import { builtinSlashCommands, sanitizeChatCatalog, type ChatCatalogEntry } from '@shared/chat-catalog'
 import { prepareQuickOpenFiles, type QuickOpenIndexedFile } from '../lib/quickOpenSearch'
 import { commandSegments, mentionsSlashToken } from '../lib/chatComposerHighlight'
+import { SHELL_MODE_HINT, draftFromDisplay, isShellDraft, shellDisplayText, showsShellMode } from '../lib/chatShellMode'
+import {
+  KEYBOARD_STEP_PX,
+  completeMenuMax,
+  composerHeight,
+  readComposerHeight,
+  writeComposerHeight
+} from '../lib/chatComposerHeight'
+import { useChatDraft } from '../state/chatDraft'
+
+/** How long the composer shows why a terminal draft was not carried over. */
+const CARRY_NOTE_MS = 12_000
 import {
   CATALOG_REUSE_MS,
   applyCompletion,
@@ -125,6 +138,14 @@ export function ChatComposer({
   const usage = useContextUsage({ sessionId, nodeId, scoped: false })
   const [composerWidth, setComposerWidth] = useState<number | null>(null)
   const [attachNote, setAttachNote] = useState<{ text: string; failed?: boolean } | null>(null)
+  // Why a terminal draft was not carried over on the last ⌘M flip (lib/chatDraftCarry.ts). Editing
+  // the draft clears it (the store does); otherwise it goes after CARRY_NOTE_MS.
+  const carryNote = useChatDraft((s) => s.notes[nodeId] ?? null)
+  useEffect(() => {
+    if (carryNote === null) return
+    const t = setTimeout(() => useChatDraft.getState().setNote(nodeId, null), CARRY_NOTE_MS)
+    return () => clearTimeout(t)
+  }, [carryNote, nodeId])
   const [dropping, setDropping] = useState(false)
   // A picker command on its way into the pane. `/model` and `/effort` are local pickers that fire
   // NO hook, so the agent state stays `done` and the send gate stays open: a second click (or an
@@ -148,6 +169,24 @@ export function ChatComposer({
   // Until the core catalog answers — and for good on a surface that has none (a relay tab) — the `/`
   // menu shows the shared built-in table for this agent.
   const listboxId = useId()
+  // Shell mode (lib/chatShellMode.ts): a draft starting with `!` shows its `!` beside the textarea,
+  // not in it. The completion below then stands down by itself: the caret snapshot holds the TEXT
+  // the textarea shows, which is not the draft, so no trigger is derived (Claude's TUI offers no
+  // `/` menu in shell mode either).
+  const shell = showsShellMode(agentId) && isShellDraft(value)
+  const display = shellDisplayText(value, shell)
+  const shellHintId = useId()
+  // Where to put the caret after the textarea's text shifted by the `!` (entering or leaving shell
+  // mode): a controlled value change moves it to the end.
+  const pendingCaretRef = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    const at = pendingCaretRef.current
+    const el = inputRef.current
+    if (at === null || el === null) return
+    pendingCaretRef.current = null
+    el.setSelectionRange(at, at)
+    // Keyed on the DRAFT: typing `!` into an empty box changes the draft but not what is shown.
+  }, [value])
   const [caretSnap, setCaretSnap] = useState<{ value: string; start: number; end: number } | null>(null)
   const trigger: CompletionTrigger | null =
     !disabled && caretSnap && caretSnap.value === value ? completionTriggerAt(value, caretSnap.start, caretSnap.end) : null
@@ -219,7 +258,8 @@ export function ChatComposer({
   // text or none, and a command name is not a word. A half-typed `/tid` keeps its underline: until it
   // names a command, it is a misspelling.
   const knownNames = useMemo(() => new Set(catalog.map((e) => e.name)), [catalog])
-  const segments = useMemo(() => commandSegments(value, knownNames), [value, knownNames])
+  // None in shell mode: the line is a shell command, not a prompt.
+  const segments = useMemo(() => (shell ? null : commandSegments(value, knownNames)), [shell, value, knownNames])
   const highlightRef = useRef<HTMLDivElement>(null)
   const syncHighlightScroll = useCallback(() => {
     const ta = inputRef.current
@@ -230,6 +270,128 @@ export function ChatComposer({
     hl.scrollTop = ta.scrollTop
   }, [])
   useLayoutEffect(syncHighlightScroll, [segments, syncHighlightScroll])
+
+  // The textarea's height (lib/chatComposerHeight.ts): it grows with the draft, or keeps the height
+  // the user dragged the grip to. Set by hand, never through a style prop: the auto-grow has to
+  // measure the draft at the textarea's natural height first.
+  const composeRef = useRef<HTMLDivElement>(null)
+  const [setHeight, setSetHeight] = useState<number | null>(readComposerHeight)
+  /** The `/` and `@` menu's max-height follows the room above the composer (a custom property on
+   *  the composer root, read by `.term-chat__complete`), so it never runs under the panel header. */
+  const sizeCompleteMenu = useCallback((inner: number, composer: number) => {
+    const max = completeMenuMax({ inner, composer })
+    const el = composeRef.current
+    if (el === null) return
+    if (max === null) el.style.removeProperty('--chat-complete-max')
+    else el.style.setProperty('--chat-complete-max', `${max}px`)
+  }, [])
+  /** The bounds to size against, measured with the textarea at its natural (two-row) height. Null
+   *  while it has no box (a collapsed node): there is nothing to measure. */
+  const measureInput = useCallback(() => {
+    const ta = inputRef.current
+    if (ta === null) return null
+    const top = ta.scrollTop
+    ta.style.height = 'auto'
+    const min = ta.offsetHeight
+    if (min === 0) {
+      ta.style.height = ''
+      return null
+    }
+    // Inner space: from the top of the thread to the bottom of the composer (both children of the
+    // panel). The thread flexes, so this does not change with the textarea's height.
+    const compose = composeRef.current
+    const thread = ta.closest('.term-chat')?.querySelector<HTMLElement>(':scope > .term-chat__thread')
+    const inner =
+      compose === null || thread === null || thread === undefined
+        ? 0
+        : compose.offsetTop + compose.offsetHeight - thread.offsetTop
+    const chrome = (compose?.offsetHeight ?? min) - min
+    return { ta, top, min, content: ta.scrollHeight, inner, chrome }
+  }, [])
+  const fitInput = useCallback(() => {
+    const m = measureInput()
+    if (m === null) return
+    const height = composerHeight({ ...m, set: setHeight })
+    m.ta.style.height = `${height}px`
+    sizeCompleteMenu(m.inner, height + m.chrome)
+    // Collapsing to the natural height for the measurement moved the scroll; put it back.
+    m.ta.scrollTop = m.top
+    syncHighlightScroll()
+  }, [measureInput, setHeight, sizeCompleteMenu, syncHighlightScroll])
+  useLayoutEffect(fitInput, [value, fitInput])
+  // A resized panel (node resize, a collapsed node expanded) changes the bounds.
+  useEffect(() => {
+    const panel = inputRef.current?.closest('.term-chat')
+    if (panel === null || panel === undefined || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => fitInput())
+    ro.observe(panel)
+    return () => ro.disconnect()
+  }, [fitInput])
+  /** Sets the height to `target` (clamped as it will be drawn) and, when `save`, remembers it. */
+  const resizeInput = (target: number | null, save: boolean) => {
+    if (target === null) {
+      setSetHeight(null)
+      if (save) writeComposerHeight(null)
+      return
+    }
+    const m = measureInput()
+    const next = m === null ? Math.round(target) : composerHeight({ ...m, set: target })
+    if (m !== null) {
+      m.ta.style.height = `${next}px`
+      sizeCompleteMenu(m.inner, next + m.chrome)
+    }
+    setSetHeight(next)
+    if (save) writeComposerHeight(next)
+  }
+  const dragRef = useRef<{ pointerId: number; startY: number; startHeight: number; scale: number } | null>(null)
+  const onGripPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const ta = inputRef.current
+    if (e.button !== 0 || ta === null) return
+    // The canvas zoom scales the node: a screen pixel of pointer travel is not a layout pixel.
+    const scale = ta.offsetHeight > 0 ? ta.getBoundingClientRect().height / ta.offsetHeight : 1
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startY: e.clientY,
+      startHeight: ta.offsetHeight,
+      scale: scale > 0 ? scale : 1
+    }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+  const onGripPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current
+    if (d === null || d.pointerId !== e.pointerId) return
+    // The grip is on the TOP edge: dragging up makes the box taller.
+    resizeInput(d.startHeight + (d.startY - e.clientY) / d.scale, false)
+  }
+  const onGripPointerEnd = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current
+    if (d === null || d.pointerId !== e.pointerId) return
+    dragRef.current = null
+    resizeInput(d.startHeight + (d.startY - e.clientY) / d.scale, true)
+  }
+  // A cancelled drag (the system took the pointer) keeps the height it reached: a cancel event's
+  // coordinates are not a position the user chose.
+  const onGripPointerCancel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = dragRef.current
+    if (d === null || d.pointerId !== e.pointerId) return
+    dragRef.current = null
+    const ta = inputRef.current
+    if (ta !== null && ta.offsetHeight > 0) resizeInput(ta.offsetHeight, true)
+  }
+  const onGripKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const ta = inputRef.current
+    if (ta === null) return
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault()
+      e.stopPropagation()
+      const step = e.key === 'ArrowUp' ? KEYBOARD_STEP_PX : -KEYBOARD_STEP_PX
+      resizeInput(ta.offsetHeight + step, true)
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      e.stopPropagation()
+      resizeInput(null, true)
+    }
+  }
   // A composer that cannot flip to the terminal (no `onShowTerminal`) does not offer a built-in that
   // opens a dialog there: the dialog would be invisible and the next Enter would answer it.
   const offered = onShowTerminal ? catalog : catalog.filter((e) => !e.interactive)
@@ -460,6 +622,14 @@ export function ChatComposer({
       })
       return
     }
+    // Backspace at the very start of a shell-mode line leaves shell mode, as in Claude's TUI: the `!`
+    // goes and the text stays.
+    if (shell && e.key === 'Backspace' && !composing && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
+      e.preventDefault()
+      pendingCaretRef.current = 0
+      onChange(display)
+      return
+    }
     if (menuOpen && e.key === 'Enter') closeMenu()
     // Shift+Enter falls through to the textarea's own newline; an IME commit is not a send.
     const action = chatKeyAction({
@@ -477,7 +647,7 @@ export function ChatComposer({
   const labelDisabled = disabled || agentBusy || pickerBusy || sendUnconfirmed
 
   return (
-    <div className="term-chat__compose">
+    <div ref={composeRef} className="term-chat__compose">
       {menuOpen && (
         <div
           ref={menuRef}
@@ -520,7 +690,7 @@ export function ChatComposer({
         ref={composerRef}
         className={`term-chat__composer${dropping ? ' term-chat__composer--drop' : ''}${
           disabled ? ' term-chat__composer--disabled' : ''
-        }`}
+        }${shell ? ' term-chat__composer--shell' : ''}`}
         // Read by the shortcut dictation paths (lib/chatComposerDictation.ts
         // `composerFromElement`) so ⌘⇧D / hold-to-talk with the caret here fills THIS draft.
         data-chat-composer-id={composerId}
@@ -529,6 +699,34 @@ export function ChatComposer({
         onDragLeave={onDragLeave}
         onDrop={onDrop}
       >
+        <div
+          className="term-chat__composer-grip"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize the message box"
+          title={
+            setHeight === null
+              ? 'Drag to resize the message box'
+              : 'Drag to resize the message box. Double-click to let it grow with your text again.'
+          }
+          tabIndex={0}
+          // Keep the caret in the textarea, and start no text selection.
+          onMouseDown={(e) => e.preventDefault()}
+          onPointerDown={onGripPointerDown}
+          onPointerMove={onGripPointerMove}
+          onPointerUp={onGripPointerEnd}
+          onPointerCancel={onGripPointerCancel}
+          onDoubleClick={() => resizeInput(null, true)}
+          onKeyDown={onGripKeyDown}
+        />
+        <div className="term-chat__composer-row">
+          {/* Always this slot, so the field after it keeps its position and the textarea is never
+              remounted (which would drop the keyboard) when shell mode starts or ends. */}
+          {shell && (
+            <span className="term-chat__shell-mark" aria-hidden="true">
+              !
+            </span>
+          )}
         <div className="term-chat__composer-field">
           {segments !== null && (
             <div ref={highlightRef} className="term-chat__composer-highlight" aria-hidden="true">
@@ -550,9 +748,15 @@ export function ChatComposer({
             className={`term-chat__composer-input${segments !== null ? ' term-chat__composer-input--over' : ''}`}
             spellCheck={segments === null}
             onScroll={syncHighlightScroll}
-            value={value}
+            value={display}
+            aria-describedby={shell ? shellHintId : undefined}
             onChange={(e) => {
-              onChange(e.target.value)
+              const next = draftFromDisplay(e.target.value, shell)
+              // A `!` typed at the very start enters shell mode: it leaves the text, so the caret
+              // moves back one.
+              const entering = !shell && showsShellMode(agentId) && isShellDraft(next)
+              if (entering) pendingCaretRef.current = Math.max(0, (e.target.selectionStart ?? 1) - 1)
+              onChange(next)
               const caret = e.target.selectionStart ?? e.target.value.length
               // A new token (or none) forgets an Esc on the previous one.
               if (dismissedAt !== null && completionTriggerAt(e.target.value, caret)?.start !== dismissedAt) setDismissedAt(null)
@@ -582,6 +786,12 @@ export function ChatComposer({
             rows={2}
           />
         </div>
+        </div>
+        {carryNote !== null && (
+          <div className="term-chat__carry-note" role="status">
+            {carryNote}
+          </div>
+        )}
         <div className="term-chat__toolbar">
           {pathsForFiles && (
             <>
@@ -657,6 +867,11 @@ export function ChatComposer({
           </button>
         </div>
       </div>
+      {shell && (
+        <div id={shellHintId} className="term-chat__shell-hint">
+          {SHELL_MODE_HINT}
+        </div>
+      )}
     </div>
   )
 }

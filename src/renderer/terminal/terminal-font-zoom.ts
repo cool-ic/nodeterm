@@ -134,6 +134,31 @@ export function nextTerminalFontSizeOverride(
 }
 
 /**
+ * PURE. The one-line notice a font-size step earns, or null when there is nothing to say (a reset
+ * that changes nothing). A decrease refused at the minimum is reported explicitly; the local
+ * fork keeps font enlargement unbounded.
+ */
+export function fontZoomNoticeText(
+  action: TerminalFontZoomAction,
+  prev: number | undefined,
+  next: number | undefined,
+  global: number
+): string | null {
+  const now = next ?? global
+  if (action === 'reset') {
+    return prev === undefined ? null : `Terminal font size reset to default (${now})`
+  }
+  if (next === prev) {
+    const before = prev ?? global
+    if (action === 'decrease' && before <= TERMINAL_FONT_SIZE_MIN) {
+      return `Terminal font size ${before} (minimum)`
+    }
+    return null
+  }
+  return `Terminal font size ${now}`
+}
+
+/**
  * PURE. `visual` with the node's override applied — returned BY IDENTITY when there is nothing to
  * override, because the result is the dependency the terminals' live re-option effects hang off
  * (same rule as `mergeProjectVisuals`).

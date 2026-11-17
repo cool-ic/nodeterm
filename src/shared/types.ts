@@ -1,4 +1,8 @@
-import type { ChatInterruptResult, ChatPromptResult, EmptyPromptResult, TextDeliveryResult } from './text-delivery'
+import type {
+  ChatDraftPutResult,
+  ChatDraftTakeResult,
+  ChatInterruptResult,
+  ChatPromptResult, EmptyPromptResult, TextDeliveryResult } from './text-delivery'
 import type { ChatScreenRead } from './agents/claude-screen'
 import type { PushWebhookMinted, PushWebhookResult, PushWebhookTokenInfo } from './push-webhook'
 import type { IdentitySeedEntry } from './agent-identity-seed'
@@ -218,6 +222,18 @@ export interface PtyCreateOptions {
    * "not connected" overlay and re-spawns when the master is back.
    */
   requireRemote?: boolean
+  /**
+   * "If this create turns out to be a COLD start, I want the persisted scrollback back." Set by a
+   * caller that would otherwise replay the snapshot into its own emulator (i.e. not a node being
+   * opened for the first time with an `initialCommand`).
+   *
+   * It exists because the emulator is the wrong place for it on a tmux-backed session: tmux puts
+   * the client on the alternate screen at attach, hiding anything written before it. With this
+   * set, core writes the snapshot into the new PANE instead and answers
+   * `PtyCreateResult.scrollbackSeeded`. Ignored on a warm attach, a co-attach join, an SSH-project
+   * node and the non-tmux backends — there the caller's own replay still applies.
+   */
+  restoreScrollback?: boolean
   /**
    * The ONE way a terminal may run on THIS machine while it sits on an SSH project's canvas: the
    * local-account login node Settings → Accounts drops onto whatever canvas is active. Core refuses
@@ -448,6 +464,12 @@ export interface PtyCreateResult {
    * checked. Nothing was joined or started, and the existing session was left untouched.
    */
   unavailable?: 'ssh' | 'codex-account' | 'join-only' | 'held-elsewhere' | 'new-only'
+  /**
+   * Core already put the persisted scrollback (and the "session restored" separator) into the new
+   * tmux pane — see `PtyCreateOptions.restoreScrollback`. The caller must NOT replay the snapshot
+   * into its emulator: tmux paints it and owns it as history. Only ever set with `fresh: true`.
+   */
+  scrollbackSeeded?: boolean
 }
 
 /** Payload of `pty:recycled` — see IPC.ptyRecycled and `recycleAction` in the renderer. */
@@ -1336,9 +1358,6 @@ export interface TmuxStatus {
   persistence?: {
     enabled: boolean
     backend: 'tmux' | 'zellij' | 'session-host' | null
-    /** Session host only: the CONNECTED host speaks `watch-attach`, so a live link viewer can join a
-     *  node nobody holds open. Absent = no / not known yet. */
-    watchJoin?: boolean
   } | null
   /**
    * The optional Zellij backend (@shared/session-backend): whether a `zellij` binary was found and
@@ -1407,8 +1426,8 @@ export interface PtyApi {
    *  `everySocket` (optional, trailing) widens a kill for a session we hold NOTHING for to every
    *  local tmux socket the name could be on. Opt-in for one caller — the session-memory panel's
    *  speculative kill of a row it swept off either socket. An ordinary node-× must not set it: it
-   *  takes the same unheld branch after an app restart, and `nodeterm-rmt` holds sessions another
-   *  machine's nodeterm SSHed in to spawn. */
+   *  takes the same unheld branch after an app restart, and the legacy `nodeterm-rmt` holds sessions
+   *  a pre-unification build on another machine SSHed in to spawn. */
   destroy(persistKey: string, opts?: { everySocket?: boolean }): void
   /** Ends a node's persistent session so the SAME node id respawns in a new cwd ("move into
    *  worktree"). Same tmux kill as `destroy`, opposite intent: the node stays on the canvas, so
@@ -1472,6 +1491,12 @@ export interface PtyApi {
    *  chat view's last send) lets core take it back out of the agent's input box when the Esc landed
    *  before the reply started; it comes back as `restored`. Never rejects on the desktop. */
   interruptChat(persistKey: string, agentId: string, sentText?: string): Promise<ChatInterruptResult>
+  /** ⌘M chat → terminal: type the chat draft into the agent's EMPTY input box, unsent. Never
+   *  rejects on the desktop. */
+  putChatDraft(persistKey: string, agentId: string, text: string): Promise<ChatDraftPutResult>
+  /** Terminal → ⌘M chat: take a draft that can be read back exactly out of the agent's input box
+   *  (it is cleared there). Never rejects on the desktop. */
+  takeChatDraft(persistKey: string, agentId: string): Promise<ChatDraftTakeResult>
   /** Is tmux available on this host (else the silent plain-shell fallback), plus a suggested
    *  install command for the "tmux not found" banner. */
   tmuxStatus(): Promise<TmuxStatus>
@@ -2354,6 +2379,10 @@ export interface Settings {
   /** Draw the canvas dot grid (Settings → Appearance). Display only — snapping and align-to-grid
    *  are unchanged. Default ON in every appearance; read through `showCanvasDots`. */
   canvasDots: boolean
+  /** Pulse the RUNNING chip on board cards (Settings → Appearance). Off = the same chip, held still.
+   *  The node header's mascot is not affected. Default ON; read through `pulseBoardRunning`, so only
+   *  a literal false stops it. */
+  boardRunningPulse: boolean
   /** The Liquid Glass slider (Settings → Appearance), 0 = Clear … 1 = Tinted. null = the Readable
    *  tick, where text keeps 4.5:1 (renderer/lib/glassContrast.ts `resolveGlassSlider`). */
   glassTint: number | null
@@ -2665,6 +2694,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // reads as noise to users who navigate by the trail chords/Dock buttons instead.
   showResumeCard: false,
   canvasDots: true,
+  boardRunningPulse: true,
   glassTint: null,
   glassBlurWhileMoving: true,
   usagePercentMode: 'remaining',
@@ -2866,10 +2896,10 @@ export interface SshProjectApi {
    * mounted, and must be awaited BEFORE disconnect (which kills the master). `nodeIds` are
    * raw node ids; main maps them to `nt-<id>` session names.
    *
-   * `everySocket` widens the kill to every tmux socket on the host rather than the `nodeterm-rmt`
-   * one an SSH project spawns on. Opt-in for ONE caller — the session-memory panel, whose rows are
-   * swept off both sockets. Project deletion stays narrow: `node-terminal` on that host belongs to
-   * a nodeterm running ON it, not to us.
+   * `everySocket` widens the kill to every tmux socket on the host rather than the `node-terminal`
+   * one an SSH project spawns on (shared with a nodeterm running ON the host). Opt-in for ONE
+   * caller — the session-memory panel, whose rows are swept off both sockets. Project deletion
+   * stays narrow: the legacy `nodeterm-rmt` holds only what an older build left behind.
    */
   killSessions(
     projectId: string,
@@ -3361,10 +3391,24 @@ export interface SessionMemoryRow {
   /** Everything below it (MCP servers, headless browsers, …). */
   childrenMb: number
   childCount: number
+  /** The whole tree: the pane's own process plus everything below it. */
   totalMb: number
+  /** The biggest single process in the tree, pane process included. Part of `totalMb`. */
+  largestMb: number
+  /** Its name, cleaned for display (`processLabel`). Absent when the table carried no name. */
+  largestName?: string
   /** `#{pane_current_command}` — the agent/shell label. */
   command: string
 }
+
+/**
+ * What a sweep's numbers are, because the three measures answer differently for the same process:
+ * on a Mac an idle MCP server measured 242 MB of footprint and 4 MB of rss (most of it compressed).
+ *  - `footprint`: macOS phys_footprint, Activity Monitor's "Memory" column;
+ *  - `rss`: resident memory: Linux, and every SSH host, which is read with `ps` whatever it runs;
+ *  - `working-set`: Windows, Task Manager's "Working set" column.
+ */
+export type SessionMemoryMetric = 'footprint' | 'rss' | 'working-set'
 
 /**
  * `ok: false` means the sweep could not run (no tmux binary, unreadable process table). It is NOT
@@ -3376,6 +3420,8 @@ export interface SessionMemoryReport {
   ok: boolean
   rows: SessionMemoryRow[]
   mem: MemInfo | null
+  /** The measure `rows` are in. Absent when the sweep read no process table. */
+  metric?: SessionMemoryMetric
   /**
    * Live nodeterm sessions on this machine that the sweep could NOT measure — today, Zellij-backed
    * ones (the sweep reads tmux). Absent/0 = none. `null` = could not tell. Local scope only. The
@@ -3595,6 +3641,11 @@ export interface ContextWindowUsage {
 export interface ContextApi {
   /** Fires whenever a session's context fill changes. Returns unsubscribe. */
   onUpdate(listener: (usage: ContextWindowUsage) => void): () => void
+  /**
+   * Fires when a Claude session's transcript records Remote Control (`/remote-control`) connecting
+   * or disconnecting. Fed by the same transcript tails as `onUpdate`. Returns unsubscribe.
+   */
+  onRemoteControl(listener: (update: { nodeId: string; sessionId: string; on: boolean }) => void): () => void
   /**
    * Ask the core to start (or refresh) tracking a session's transcript so the meter populates
    * without waiting for a live hook event — e.g. on node mount after an app restart, when
@@ -5078,11 +5129,6 @@ export interface NodeTerminalApi {
     list(): Promise<import('./station-handover').StationHandoverRecord[]>
     onChanged(cb: (records: import('./station-handover').StationHandoverRecord[]) => void): () => void
   }
-  /** Live links (src/core/watch-link/service.ts): a read-only, expiring browser link to one terminal,
-   *  hosted by THIS machine. Owner-only (`watchLink:*` is host-only). Desktop: real. Server Edition:
-   *  the real bridge, whose create answers `unsupported` until that edition has a license layer.
-   *  Relay tab: an inert stub (a peer's terminals are not this machine's to publish). */
-  watchLink: import('./watch-link-types').WatchLinkApi
 }
 
 /** T201 read-only trust view: one surviving agent node's reach, as the ownership ledger sees it.

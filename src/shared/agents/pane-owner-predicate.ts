@@ -68,7 +68,6 @@ export const AGENT_BINARIES: Record<string, readonly string[]> = {
   gemini: ['gemini'],
   opencode: ['opencode'],
   grok: ['grok'],
-  antigravity: ['agy'],
   // The `qoder` command is a bash dispatcher that execs `$(type -P qodercli)`, so the argv this
   // predicate reads carries the SYMLINK path (`/Users/f/.local/bin/qodercli`) and never the
   // versioned target (`…/qoder/bin/qodercli/qodercli-1.1.67`). MEASURED in a tmux pane on this host
@@ -76,6 +75,11 @@ export const AGENT_BINARIES: Record<string, readonly string[]> = {
   // `/Users/f/.local/bin/qodercli --permission-mode …`), which is what keeps this name stable
   // across the CLI's own self-updates.
   qoder: ['qodercli'],
+  // `agy-bin` (issue #1373): on Linux `agy` is commonly a shell wrapper that ends in
+  // `exec …/agy-bin "$@"`, so after the exec the foreground group holds `agy-bin` and no `agy` at
+  // all. Reported from the field, not measured here — the name is Antigravity's own and collides
+  // with nothing a plain terminal runs, so admitting it widens the predicate by that one binary.
+  antigravity: ['agy', 'agy-bin'],
   cursor: ['cursor-agent']
 }
 

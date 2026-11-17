@@ -42,6 +42,7 @@ import { useGlassA11y } from './lib/useGlassA11y'
 import { GlassRefraction } from './components/GlassRefraction'
 import { isLiquidGlass } from './lib/appTheme'
 import { useTypewriterSound } from './terminal/useTypewriterSound'
+import { pulseBoardRunning } from './lib/boardRunningPulse'
 
 export default function App() {
   useTypewriterSound()
@@ -112,6 +113,15 @@ export default function App() {
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = appTheme
   }, [appTheme])
+
+  // Settings → Appearance → Pulse RUNNING on board cards. Off ⇒ `data-nt-board-pulse='off'`, which
+  // the `.kanban-badge--running` rule in styles.css keys off; absent leaves the pulse as before.
+  const boardPulse = pulseBoardRunning(useSettings((s) => s.settings.boardRunningPulse))
+  useLayoutEffect(() => {
+    const root = document.documentElement
+    if (boardPulse) delete root.dataset.ntBoardPulse
+    else root.dataset.ntBoardPulse = 'off'
+  }, [boardPulse])
 
   // Liquid Glass (Settings → Appearance). `data-nt-glass` switches the chrome rules in styles.css
   // on, and `--glass-chrome-bg` is the ONE fill every glass chrome surface uses: the resolved

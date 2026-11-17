@@ -23,7 +23,6 @@ export type SettingsSectionId =
   | 'presence'
   | 'remote'
   | 'team-access'
-  | 'live-links'
   | 'ssh'
   | 'updates'
   | 'privacy'

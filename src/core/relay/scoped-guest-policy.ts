@@ -391,6 +391,8 @@ export const SCOPED: Readonly<Record<string, Check>> = Object.freeze({
   [IPC.ptySendToEmptyPrompt]: nodeArg0,
   [IPC.ptyReadChatScreen]: nodeArg0,
   [IPC.ptyInterruptChat]: nodeArg0,
+  [IPC.ptyPutChatDraft]: nodeArg0,
+  [IPC.ptyTakeChatDraft]: nodeArg0,
   [IPC.ptyTmuxStatus]: pass,
   [IPC.ptyPaneCommand]: nodeArg0,
   [IPC.ptyPaneCwd]: nodeArg0,
@@ -580,6 +582,7 @@ export const SCOPED_REFUSED: ReadonlySet<string> = new Set<string>([
   IPC.agentRateLimited,
   IPC.agentUnreadClear,
   IPC.agentSubagentActivity,
+  IPC.agentRemoteControl,
   IPC.presenceSync,
   IPC.presencePeer,
   // Hosted-team verbs: answered by the Server Edition's hosted service only, never on Team Access.

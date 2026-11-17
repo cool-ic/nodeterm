@@ -83,12 +83,13 @@ the production paging, not a second implementation of it.
 | `model-effort-utf16` | The 100-character cap counts **UTF-16 code units** (Swift `utf16.count`), not bytes or scalars. A model of 50 × U+1F9EA (100 units) is kept, and an effort of 101 units is absent. |
 | `thinking` | Thinking blocks (`thinking`, `redacted_thinking`). The reader **drops** them by default: a thinking-only record yields no message, and a mixed record keeps only its text. The port must match this. (The desktop ⌘M panel opts in with `page.thinking: true` and then gets a `{kind:"thinking", text, ms?}` part for each block whose `thinking` text is non-blank: `text` is capped at 16384 UTF-16 units, and `ms` is this record's timestamp minus that of the newest `user` record before it (a prompt, a `tool_result` or a hidden meta line), present only when both stamps exist and the gap is ≥ 0 — see the `ChatPart` doc in `src/shared/types.ts`. The phone's `chat.page` never sets it, so these fixtures are unchanged.) |
 | `local-commands` | Slash-command records (see **Local commands** below). An `isMeta` caveat is skipped; `/model` plus its ANSI-coloured `<local-command-stdout>` become ONE assistant tool part `{name:"/model", arg:"", result}`; `/effort` with padded args (trimmed) answered on `<local-command-stderr>`; `/compact` with an arg longer than the 200-unit cap; `/exit` with an empty stdout (no `result`); a skill invocation (`<command-message>` before `<command-name>`) whose `isMeta` array body is skipped; a stdout with no command right before it (its own `command output` tool, capped to three lines); and a user message that only mentions `<command-name>` in prose (stays a user message). |
-| `bash-mode` | `!` bash-mode records: `<bash-input>` becomes a tool part named `!` with the command as `arg`; the ONE following record carrying `<bash-stdout>…</bash-stdout><bash-stderr>…</bash-stderr>` sets its `result` (non-empty parts joined by `\n`, then the `summarizeResult` cap), including an empty stdout with a stderr. |
+| `bash-mode` | `!` bash-mode records: `<bash-input>` becomes a tool part named `!` with the command as `arg`; the ONE following record carrying `<bash-stdout>…</bash-stdout><bash-stderr>…</bash-stderr>` sets its `result` (non-empty parts joined by `\n`, lines kept, the `BASH_OUTPUT_MAX` cap), including an empty stdout with a stderr, and a command that printed nothing (`result: ""`). |
 | `meta-turns` | `isMeta` rule 1: a peer hand-back (`promptSource` + `origin.kind:"peer"` + `turnOrigin`), a scheduled wakeup (`turnOrigin:"scheduled"` + `scheduledTaskId`), an auto-continuation (`origin.kind:"auto-continuation"`), a `promptSource`-only, an `origin`-only and a `turnOrigin`-only record (the last two with no `promptSource`, so each field is pinned on its own) are all KEPT; the caveat and a skill body (none of the three fields) are skipped. Three of the kept records then render as system chips (see **System-injected records**): BOTH `origin.kind:"peer"` records — the hand-back and the `origin`-only one — as `Agent message`, and the auto-continuation as `System`; the others stay user messages. |
 | `system-records` | Every rule of **System-injected records**: a full agent completion (nested `<usage>`, a result over three lines), a status + summary completion, a monitor `<event>`, a summary alone (the `notified` result), a repeated `<task-id>` with a summary over the 200-unit cap, a whole element with no `origin`, the same whole element sent by a human (`origin.kind:"human"`, and `promptSource:"typed"` with no `origin`; both stay user messages), two malformed notifications (unknown tags only; plain prose), a message that only MENTIONS the element (stays a user message), a subagent `<agent-message>` hand-back with its frame lines, a `<cross-session-message>` (its `from-name` is the arg), a report over the 16384-unit cap, a peer record with no element, an auto-continuation and a multi-line coordinator prompt. |
 | `teammate-messages` | Rule **2b** of **System-injected records**: an idle notification with a report, one with no fields, a failed one (`failureReason`), a plain message whose summary is escaped (`&quot;`) and whose body quotes the close tag, a record holding two elements (a report, then a message), an unverified sender (`verified="false"`), the same text typed by a human (by `origin` and by `promptSource` alone — both stay user messages), the frame line with no element and an element with no `teammate_id` (both stay user messages). |
 | `pasted-content` | **Pasted content**: a span between typed lines, backtick runs inside (a five-backtick fence) and the same id twice, an array text part beside an image, a pasted `<task-notification>` (stays the user's paste), a close tag with a different id inside a span (content), an empty paste, a same-id open nested inside a span (the span ends at the FIRST close), text that is not the CLI's grammar (no id, an upper-case or three- or five-digit id, a missing newline after the open or before the close: all left as typed) and an unclosed span (left as typed). |
 | `queued-prompts` | **Queued prompts**: a typed prompt queued mid-turn (between a tool result and the reply), one with no `origin`, an array prompt with an image (its text block only), a paste inside one (fenced, as in a typed prompt), and six attachments that stay hidden: a task notification, a peer message (`isMeta`), a coordinator message, a non-human `origin`, a blank prompt and a non-`queued_command` attachment. |
+| `abandoned-prompts` | **Abandoned prompts**: a queued prompt cancelled with Esc (its parent is the interrupt marker) and a sent-then-edited array prompt are hidden; a raw `/compact` left beside its command record is hidden and the command stays; a prompt the model answered before a re-send, a prompt whose only later sibling is a sidechain record, a prompt typed during a pending tool call (its later sibling is the tool-result record), and the newest unanswered prompt are all kept. |
 
 **`rich`** is a second desktop-only opt-in, beside `thinking`: the ⌘M panel reads with
 `page.rich: true` (`ChatParseOptions.rich`) to get the parts only it draws. The fixtures never set
@@ -168,13 +169,18 @@ on the paged and unpaged paths alike:
    {`bash-stdout`, `bash-stderr`} (bash family) → **output**. Its text is each tag's content, in
    record order, with ANSI escapes removed (`\x1b[` CSI `[0-?]*[ -/]*[@-~]`, then OSC
    `\x1b][^\x07\x1b]*(\x07|\x1b\\)`, then two-byte `\x1b[@-_]`), trimmed, empty parts dropped,
-   joined by `\n`, then capped like a tool result (first three lines joined by a space, first 500
-   UTF-16 units). An empty text produces nothing.
-5. A non-empty output sets `result` on the command's tool part when the **last pushed message** is
-   a command of the **same family** that has no result yet. Otherwise it is pushed as its own
-   assistant message `{kind:"tool", name:"command output", arg:"", result}`. Any pushed message
-   ends the wait, and so does an attached output (a second output does not overwrite). A record
-   that pushes nothing does NOT end it: a skipped `isMeta` record, an empty output, a metadata-only
+   joined by `\n`. The **bash** family's text then keeps its lines, capped at its first 16384 UTF-16
+   units (`BASH_OUTPUT_MAX`: the chat view shows the first line under the command and the rest when
+   opened); the **slash** family's is capped like a tool result (first three lines joined by a
+   space, first 500 UTF-16 units). An empty slash text produces nothing.
+5. An output sets `result` on the command's tool part when the **last pushed message** is a command
+   of the **same family** that has no result yet — for the bash family even when it is empty (`""`:
+   the command ran and printed nothing); for the slash family only when it is non-empty. Otherwise
+   a non-empty output is pushed as its own assistant message
+   `{kind:"tool", name:"command output", arg:"", result}`, and an empty one pushes nothing. Any
+   pushed message ends the wait, and so does an attached output (a second output does not
+   overwrite). A record that pushes nothing does NOT end it: a skipped `isMeta` record, an empty
+   slash output, an empty bash output with no command waiting, a metadata-only
    record, a thinking-only assistant record or a tool_result-only user record.
 6. "Trimmed" everywhere in these rules means JS `String.prototype.trim`, which strips JS `\s`:
    ASCII whitespace plus U+00A0, U+FEFF, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F and
@@ -322,6 +328,38 @@ attachment record becomes ONE user message, at its own line (`key` = its offset,
 
 The text then goes through `expandPastedContent` like any other user text (see **Pasted content**),
 and the find-bar index emits the same user line. Every other attachment yields nothing.
+
+## Abandoned prompts (the Swift port must replicate this exactly)
+
+A transcript is a tree: each record names its `parentUuid`, and the model is sent the chain from the
+newest record back to the root. When a prompt's request is cancelled before anything answers it
+(Esc on a queued prompt, or Esc right after sending, which puts the text back in the input), Claude
+Code leaves the prompt in the file and attaches the next prompt to the SAME parent. The model never
+saw the cancelled one, so `parseChatRecords` (`abandonedPromptUuids`) skips it, on the paged and
+unpaged paths alike, before every other rule (it pushes nothing and moves no clock).
+
+Over the records of the read (a paged read: the window's complete lines), a record is skipped when
+all of these hold:
+
+1. `type` is `"user"`, `isSidechain` is not `true` and `isMeta` is not `true`;
+2. `uuid` and `parentUuid` are both strings;
+3. its `message.content` is a non-blank string (JS `trim`), or an array that has an element with
+   `type:"text"` and a non-empty string `text` and no element with `type:"tool_result"`;
+4. no record in the read has `parentUuid` equal to its `uuid` (any record type counts);
+5. a LATER record in the read has the same `parentUuid`, `type` `"user"` or `"assistant"`,
+   `isSidechain` not `true`, a different `uuid`, and a `message.content` that is NOT an array
+   holding an element with `type:"tool_result"`.
+
+The last clause of rule 5 is measured: a prompt typed while a tool call is pending interrupts the
+call, and Claude Code attaches the prompt and the call's tool-result record to the same parent (the
+interrupt marker and the answer hang off the result). That prompt has no child and a later sibling,
+yet the request that follows carries its text.
+
+Both checks see only the read's records, so on a paged read a sibling in a NEWER window is not
+seen and the prompt is shown, exactly as before this rule. Measured over 133 real transcripts
+(5,886 prompts): 6 records match, and the model received none of them. A second set (306
+transcripts, 2,899 prompts) gave 9 matches before the tool-result clause, one of them the answered
+prompt above, and 8 after it.
 
 ## Renderer rules that follow from these records (desktop; iOS notes)
 

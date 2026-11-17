@@ -28,7 +28,13 @@ import {
   type RpcMessage
 } from '../../shared/rpc'
 import { IPC } from '../../shared/ipc'
-import type { ChatInterruptResult, ChatPromptResult, EmptyPromptResult } from '../../shared/text-delivery'
+import type {
+  ChatDraftPutResult,
+  ChatDraftTakeResult,
+  ChatInterruptResult,
+  ChatPromptResult,
+  EmptyPromptResult
+} from '../../shared/text-delivery'
 import type { ChatScreenRead } from '../../shared/agents/claude-screen'
 import type { GitHubControlApi, GitHubIssuesApi } from '../../shared/github-issues'
 import {
@@ -93,15 +99,6 @@ import { buildStubApi, unsupported } from './stubs'
 import { sanitizeStationNotices } from '@shared/station-notice'
 import { sanitizeOutcomeRecords } from '@shared/station-outcome'
 import { sanitizeHandoverRecords } from '@shared/station-handover'
-import type {
-  ControlChangeResult,
-  ControlSupport,
-  CreateWatchLinkResult,
-  RevokeAllOutcome,
-  WatchChatMessage,
-  WatchLinkNotice,
-  WatchLinkView
-} from '@shared/watch-link-types'
 import { mountPickerRoot, openDirectoryPicker } from './dialog-picker'
 import { encodePcmForWire } from './speech-encode'
 import { type FrameTransport, WebSocketFrameTransport } from './frame-transport'
@@ -314,6 +311,15 @@ export function buildRealApi(
       client
         .request(IPC.ptyInterruptChat, persistKey, agentId, sentText)
         .catch(() => ({ sent: false, reason: 'failed' })) as Promise<ChatInterruptResult>,
+    // Real: core registers both. A failed request is `failed`, which changes nothing on either side.
+    putChatDraft: (persistKey, agentId, text) =>
+      client
+        .request(IPC.ptyPutChatDraft, persistKey, agentId, text)
+        .catch(() => ({ put: false, reason: 'failed' })) as Promise<ChatDraftPutResult>,
+    takeChatDraft: (persistKey, agentId) =>
+      client
+        .request(IPC.ptyTakeChatDraft, persistKey, agentId)
+        .catch(() => ({ taken: false, reason: 'failed' })) as Promise<ChatDraftTakeResult>,
     // A failed read is unknown, never evidence that persistence is available.
     tmuxStatus: () =>
       client
@@ -737,6 +743,7 @@ export function buildFilesApi(
 
   const context: ContextApi = {
     onUpdate: (listener) => client.subscribe(IPC.contextUpdate, listener as Listener),
+    onRemoteControl: (listener) => client.subscribe(IPC.agentRemoteControl, listener as Listener),
     ensure: (sessionId, cwd, accountId, nodeId, agentId) =>
       client.cast(IPC.contextEnsure, sessionId, cwd, accountId, nodeId, agentId)
   }
@@ -1097,50 +1104,6 @@ export function buildTriggersApi(client: RpcClient): Pick<NodeTerminalApi, 'trig
   }
 }
 
-/**
- * The Server Edition's live links — the REAL bridge, backed by the same core service the desktop
- * registers (src/core/watch-link/service.ts). Its browser tabs are the server's own user (owner
- * clients), so the host-only `watchLink:` prefix does not refuse them. Until that edition has a license
- * layer the service answers create `unsupported` and list `[]` (R43). Kept OUT of every builder a relay
- * tab spreads (and out of the scoped-guest / access-policy BUILDERS lists): a relay tab shows another
- * machine's terminals, which are not this browser's to publish — relay-api.ts takes the inert stub.
- * A dropped socket answers create `network`; revoke and revokeAll reject, so the UI can say the stop
- * did not reach the server.
- */
-export function buildWatchLinkApi(client: RpcClient): Pick<NodeTerminalApi, 'watchLink'> {
-  return {
-    watchLink: {
-      create: (req) =>
-        (client.request(IPC.watchLinkCreate, req) as Promise<CreateWatchLinkResult>).catch(
-          (): CreateWatchLinkResult => ({ ok: false, error: 'network' })
-        ),
-      list: () => (client.request(IPC.watchLinkList) as Promise<WatchLinkView[]>).catch(() => []),
-      revoke: async (linkId) => {
-        await client.request(IPC.watchLinkRevoke, linkId)
-      },
-      // Rejects on a dropped socket, like revoke: the server half did not happen and the UI must say so.
-      revokeAll: () => client.request(IPC.watchLinkRevokeAll) as Promise<RevokeAllOutcome>,
-      kick: (linkId, viewerId) =>
-        (client.request(IPC.watchLinkKick, linkId, viewerId) as Promise<boolean>).catch(() => false),
-      sendChat: (linkId, text) =>
-        (client.request(IPC.watchLinkChatSend, linkId, text) as Promise<WatchChatMessage | null>).catch(() => null),
-      chatHistory: (linkId) =>
-        (client.request(IPC.watchLinkChatHistory, linkId) as Promise<WatchChatMessage[]>).catch(() => []),
-      setControl: (linkId, enabled) =>
-        (client.request(IPC.watchLinkSetControl, linkId, enabled) as Promise<ControlChangeResult>).catch(() => false),
-      setPassword: (linkId, password) =>
-        (client.request(IPC.watchLinkSetPassword, linkId, password) as Promise<ControlChangeResult>).catch(() => false),
-      allowControl: (linkId) => (client.request(IPC.watchLinkAllowControl, linkId) as Promise<boolean>).catch(() => false),
-      controlSupport: (nodeId) =>
-        (client.request(IPC.watchLinkControlSupport, nodeId) as Promise<ControlSupport>).catch((): ControlSupport => 'unknown'),
-      onState: (cb) => client.subscribe(IPC.watchLinkState, ((links: WatchLinkView[]) => cb(links)) as Listener),
-      onChat: (cb) =>
-        client.subscribe(IPC.watchLinkChat, ((linkId: string, msg: WatchChatMessage) => cb(linkId, msg)) as Listener),
-      onNotice: (cb) => client.subscribe(IPC.watchLinkNotice, ((n: WatchLinkNotice) => cb(n)) as Listener)
-    }
-  }
-}
-
 export function buildSessionMemoryApi(client: RpcClient): Pick<NodeTerminalApi, 'sessionMemory'> {
   return {
     sessionMemory: {
@@ -1497,7 +1460,6 @@ export async function installWsBridge(): Promise<boolean> {
     ...buildSpeechApi(client),
     ...buildUsageApi(client),
     ...buildSessionMemoryApi(client),
-    ...buildWatchLinkApi(client),
     ...buildRecentConversationsApi(client),
     ...buildWallpaperApi(client),
     ...buildRunConfigApi(client),

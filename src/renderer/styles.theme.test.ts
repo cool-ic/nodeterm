@@ -132,7 +132,20 @@ describe('every CSS variable resolves', () => {
     '--cmascot-h',
     '--cmascot-sheet-w',
     '--cmascot-sheet-h', // notch HUD sprite sheets
-    '--swimlane-color' // GlobalKanbanView swimlane left border, per project
+    '--swimlane-color', // GlobalKanbanView swimlane left border, per project
+    '--paper-font-size', // paperLayoutStyle: geometry belongs to each terminal/editor view
+    '--paper-tile-size',
+    '--paper-margin-block',
+    '--paper-margin-inline',
+    '--paper-md-font', // PaperMarkdownEditor/Read: inline per-document palette and metrics
+    '--paper-md-line-height',
+    '--paper-md-ink',
+    '--paper-md-muted',
+    '--paper-md-accent',
+    '--paper-md-code',
+    '--paper-md-dry-ink',
+    '--paper-md-wet',
+    '--chat-complete-max' // ChatComposer, the `/` menu's room above the composer (completeMenuMax)
   ])
 
   it('references no variable that is never defined', () => {

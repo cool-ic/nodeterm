@@ -64,6 +64,7 @@ import {
   wheelGestureReporting
 } from './wheel-gesture'
 import { isBrowserRuntime } from '@renderer/bridge/runtime'
+import { useRemoteControl } from '@renderer/state/remoteControl'
 import { WheelZoomBurstLimiter, clampWheelZoomSpeed, nextWheelZoom } from './wheel-zoom'
 import { canCopyFilesToClipboard, selectedLocalFilePaths } from './canvas-file-copy'
 import {
@@ -147,8 +148,6 @@ import { CommandPalette, type Command } from '../components/CommandPalette'
 import { Tooltip } from '../components/Tooltip'
 import {
   IconBranch,
-  IconBroadcast,
-  IconChat,
   IconCanvasView,
   IconChevronLeft,
   IconChevronRight,
@@ -188,7 +187,6 @@ import {
   SettingsPage,
   SourceControlPanel,
   ExplorerPanel,
-  LiveChatDrawer,
   ShortcutsPanel,
   OnboardingFlow,
   DictationOverlay,
@@ -284,20 +282,6 @@ import {
 } from '../lib/projectLimitGate'
 import { countOpenProjects, decideOpen } from '@shared/project-limit'
 import { opensProject, type OpenAction } from '../lib/projectOpens'
-import { requireProOr } from '../state/upgradeGate'
-import { startWatchLinkSync, useWatchLinks } from '../state/watchLinks'
-import { liveLinkNoticeEffect } from '../lib/liveLink'
-import {
-  liveLinkCommands,
-  liveLinkMenuItemsFor,
-  liveLinkPrepare,
-  liveLinkRemoteFacts,
-  openLiveLink,
-  stopAllConfirm,
-  stopAllLiveLinks,
-  type LiveLinkAvailabilityFacts,
-  type LiveLinkTarget
-} from '../lib/liveLinkEntry'
 import { RemotePicker } from '../components/RemotePicker'
 import { WorktreeDialog } from '../components/WorktreeDialog'
 import { SpawnTeamDialog } from '../components/SpawnTeamDialog'
@@ -311,6 +295,7 @@ import {
   waitingBeforeRestart
 } from '../lib/nextNeedingYou'
 import { liveProjectJumpTarget, projectJumpDigit } from '../lib/projectJump'
+import { adjacentProjectId } from '../lib/projectCycle'
 import {
   liveZoomShortcutAction,
   liveZoomShortcutContext,
@@ -325,6 +310,7 @@ import {
   normalizeTerminalFontSize,
   patchProjectFontSize,
   requestTerminalFontZoom,
+  fontZoomNoticeText,
   type TerminalFontZoomRequest
 } from '../terminal/terminal-font-zoom'
 import { isMacPlatform, isWindowsPlatform } from '@shared/platform-utils'
@@ -489,15 +475,6 @@ const sshDisconnect = (scopeId: string): Promise<unknown> =>
 import { opensInEditor } from '../lib/openTarget'
 import { displacedFilesPatch } from '../lib/filesNode'
 import { newEntryPath, parentDir } from '../lib/explorerCreate'
-import {
-  liveChatShown,
-  nextLiveChat,
-  readLiveChatLink,
-  readLiveChatPinned,
-  writeLiveChatLink,
-  writeLiveChatPinned,
-  type LiveChatState
-} from '../lib/liveChatPin'
 import {
   explorerIsOpen,
   nextExplorerPin,
@@ -932,7 +909,7 @@ import {
   createCodexAccountLoginNode,
   createSystemLoginNode,
   isAccountLoginNode,
-  systemAccountDisplay,
+  systemAccountDisplayOn,
   createAgentNode,
   createBrowserNode,
   createDinoNode,
@@ -3706,169 +3683,8 @@ export function Canvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are read at call time
   }, [api, persist])
 
-  // ── Live links (Task 17) ────────────────────────────────────────────────────────────────────
-  // A browser view of ONE terminal. The store (state/watchLinks) mirrors this machine's core
-  // registry — `window.nodeTerminal`, never a relay session's api: links are made on the machine
-  // that runs the terminal. Started ONCE per Canvas mount; without it the store stays empty and no
-  // LIVE chip ever appears. What a notice does is lib/liveLink's `liveLinkNoticeEffect` (tested
-  // there): the info strip — `not-persistent` and `control-locked` stay on screen — and, for
-  // `control-taken` (a security event), an OS notification under the notification consent alone — not
-  // the agent-done preference — once per link per 5 s.
-  const liveNotifyAtRef = useRef(new Map<string, number>())
-  useEffect(
-    () =>
-      startWatchLinkSync(window.nodeTerminal, (n) => {
-        const fx = liveLinkNoticeEffect(n, useSettings.getState().settings, Date.now(), liveNotifyAtRef.current)
-        if (fx.strip) setNotice({ kind: 'info', ...fx.strip })
-        if (fx.os) void window.nodeTerminal.notify(fx.os)
-      }),
-    []
-  )
-  // The Live chat drawer (lib/liveChatPin — the Explorer's pin pattern, its own keys): which link it
-  // follows and whether it is docked are this machine's view state, in localStorage only. Opened by
-  // the popover's "Open chat" (`nodeterm:live-chat`, `{ linkId }` — this is its ONE listener, pinned
-  // in lib/nodeterm-events.test.ts) and by the palette's "Live chat".
-  const [liveChat, setLiveChat] = useState<LiveChatState>(() => ({
-    pinned: readLiveChatPinned(),
-    dismissed: false,
-    open: false,
-    linkId: readLiveChatLink()
-  }))
-  // A primitive count, not the list: a push about one link's viewers must not re-render the canvas.
-  // A pinned drawer is rendered only while a link is live (`liveChatShown`); the pin is kept.
-  const liveLinkCount = useWatchLinks((s) => s.links.length)
-  const liveChatRef = useRef(liveChat)
-  liveChatRef.current = liveChat
-  useEffect(() => {
-    const on = (e: Event): void => {
-      const linkId = (e as CustomEvent<{ linkId?: unknown }>).detail?.linkId
-      if (typeof linkId !== 'string' || !linkId) return
-      // Open chat on a chip IS a pick: the drawer comes back to this link next time.
-      writeLiveChatLink(linkId)
-      setLiveChat((s) => nextLiveChat(s, { kind: 'open', linkId }))
-    }
-    window.addEventListener('nodeterm:live-chat', on)
-    return () => window.removeEventListener('nodeterm:live-chat', on)
-  }, [])
-  const pickLiveChatLink = useCallback((linkId: string) => {
-    writeLiveChatLink(linkId)
-    setLiveChat((s) => nextLiveChat(s, { kind: 'open', linkId }))
-  }, [])
-  const closeLiveChat = useCallback(() => setLiveChat((s) => nextLiveChat(s, { kind: 'close' })), [])
-  const toggleLiveChatPin = useCallback(() => {
-    setLiveChat((s) => {
-      const next = nextLiveChat(s, { kind: 'pin' })
-      writeLiveChatPinned(next.pinned)
-      return next
-    })
-  }, [])
-  /** True while a kanban card modal is open (either board): the drawer then sits above its scrim. */
+  /** True while a kanban card modal is open (either board): a check-feed popup waits for it. */
   const [cardModalOpen, setCardModalOpen] = useState(false)
-  const [liveLinkDialog, setLiveLinkDialog] = useState<LiveLinkTarget | null>(null)
-  const closeLiveLinkDialog = useCallback(() => setLiveLinkDialog(null), [])
-  /** The facts the ONE availability rule reads, for the node's OWN project (H4): a node of a relay
-   *  tab — shown on the Omni board or in the sidebar while a local tab is active — is judged by the
-   *  relay session, not by whichever tab is on screen. Read at call time, never memoized. */
-  const liveLinkFacts = useCallback(
-    (projectId: string): LiveLinkAvailabilityFacts => ({
-      serverEdition: isBrowserRuntime(),
-      source: sessionForProject(projectId).source,
-      activeLinks: useWatchLinks.getState().links.length
-    }),
-    []
-  )
-  /** Every entry point ends here: availability (with its reason in the info strip), THEN the Pro
-   *  gate, then the dialog — see lib/liveLinkEntry `openLiveLink`. */
-  const openLiveLinkFor = useCallback(
-    (target: LiveLinkTarget) =>
-      openLiveLink(
-        {
-          facts: liveLinkFacts,
-          requirePro: requireProOr,
-          show: setLiveLinkDialog,
-          notice: (text) => setNotice({ kind: 'info', text })
-        },
-        target
-      ),
-    [liveLinkFacts]
-  )
-  // The card modal's "Share live link" action (it cannot reach Canvas state). Its detail names the
-  // card's PROJECT, so an Omni-board card of another tab is judged by its own session.
-  useEffect(() => {
-    const on = (e: Event): void => {
-      const d = (e as CustomEvent<{ nodeId?: unknown; title?: unknown; projectId?: unknown }>).detail
-      if (typeof d?.nodeId !== 'string' || typeof d.projectId !== 'string') return
-      const title = typeof d.title === 'string' && d.title.trim() ? d.title : 'Terminal'
-      openLiveLinkFor({ nodeId: d.nodeId, title, projectId: d.projectId })
-    }
-    window.addEventListener('nodeterm:live-link', on)
-    return () => window.removeEventListener('nodeterm:live-link', on)
-  }, [openLiveLinkFor])
-  /**
-   * The "Share live link…" row for one node — ONE builder behind the canvas node menu, the
-   * sessions-sidebar row of ANY project, and both boards' card menus (R49). The active project's
-   * node comes from the live canvas; any other project's from its stored copy: a link does not
-   * need the node on screen (core attaches join-only). Declared before `selectionItems`, which
-   * lists it in its deps (a stale closure otherwise).
-   */
-  const liveLinkMenuItems = useCallback((_nodeId: string, _projectId?: string): MenuItem[] => [], [])
-
-  /**
-   * R47: before core looks the node up, publish pending edits of the canvas on screen — a node
-   * opened seconds ago is not in the saved project yet and would answer `node-missing`. The same
-   * rule a board comment's delivery uses (`syncMessageScope`): never saved over an unresolved
-   * external-edit conflict. A background project's node needs no flush: its stored copy is what was
-   * last written.
-   */
-  const liveLinkPrepareFor = useCallback(
-    (target: LiveLinkTarget) => (): Promise<string | null> =>
-      liveLinkPrepare({
-        needed:
-          target.projectId === useProjects.getState().activeProjectId &&
-          dirtyRef.current &&
-          nodesRef.current.some((n) => n.id === target.nodeId),
-        conflict: !!conflictRef.current,
-        save: persist
-      }),
-    [persist]
-  )
-
-  /** R63: the create dialog's "only while open" note reads the LOCAL core's session protection — the
-   *  core that hosts the link (never a relay tab's peer). Stable, so the dialog reads it once. */
-  const readLocalPersistence = useCallback(() => localSession.api.pty.tmuxStatus(), [])
-  /** Where the dialog's node runs — R63 (`remoteNode`) and the machine the Control warning names
-   *  (`sshTarget`) — from the NODE's own SSH binding first, then its project's (lib/liveLinkEntry).
-   *  The node is read from the live canvas for the active project, else the stored copy. */
-  const liveLinkRemoteFor = useCallback((target: LiveLinkTarget) => {
-    const store = useProjects.getState()
-    const project = store.getProject(target.projectId)
-    return liveLinkRemoteFacts({
-      nodeId: target.nodeId,
-      projectId: target.projectId,
-      activeProjectId: store.activeProjectId,
-      live: nodesRef.current,
-      stored: project?.nodes,
-      projectSsh: project?.ssh?.server
-    })
-  }, [])
-
-  /** R48: "Stop all" revokes every link of the LICENSE — other machines' included — and cannot be
-   *  undone, so the palette asks first, with the same sentence and danger button as Settings. R62:
-   *  what it reached is ALWAYS said — a success too, since with no link listed here nothing else on
-   *  screen changes, and a server call that failed leaves other machines' links running. */
-  const confirmStopAllLiveLinks = useCallback(
-    () =>
-      setConfirm(
-        stopAllConfirm({
-          close: () => setConfirm(null),
-          stop: () =>
-            void stopAllLiveLinks(() => window.nodeTerminal.watchLink.revokeAll()).then((r) =>
-              setNotice({ kind: r.ok ? 'info' : 'error', text: r.text })
-            )
-        })
-      ),
-    [setConfirm]
-  )
 
   /** Re-runs the active-project load effect by bumping the store's `reloadNonce`.
    *
@@ -5059,6 +4875,11 @@ export function Canvas() {
   // Feed per-session context-window fill from main into the transient store.
   useEffect(() => {
     return window.nodeTerminal.context.onUpdate((u) => useContextWindow.getState().set(u))
+  }, [])
+
+  // Claude Remote Control on/off per node (transcript-read in core) into its transient store.
+  useEffect(() => {
+    return window.nodeTerminal.context.onRemoteControl((u) => useRemoteControl.getState().set(u))
   }, [])
 
   // Prevent a stray file drop (outside a terminal body) from navigating the whole window to
@@ -10337,6 +10158,26 @@ export function Canvas() {
     return true
   }, [switchProject])
 
+  // `project.next` / `project.prev` (Ctrl+Tab / Ctrl+Shift+Tab): Chrome-style cycling through the
+  // OPEN project tabs, wrapping at both ends. With the global swimlane kanban up it scrolls to
+  // the neighbouring swimlane instead, the same substitution the ⌘1-9 jump makes above.
+  const cycleProject = useCallback((dir: 1 | -1): boolean => {
+    const { projects, activeProjectId: current } = useProjects.getState()
+    const globalKanban = isGlobalKanbanOpen()
+    const from = globalKanban
+      ? useViewMode.getState().highlightedSwimlaneId ?? current
+      : current
+    const targetId = adjacentProjectId(projects, from, dir)
+    if (!targetId) return false
+    if (globalKanban) {
+      useViewMode.getState().setHighlightedSwimlaneId(targetId)
+      window.dispatchEvent(new CustomEvent('nodeterm:swimlane-jump', { detail: { projectId: targetId } }))
+      return true
+    }
+    switchProject(targetId)
+    return true
+  }, [switchProject])
+
   const copyGesture = useCallback((e: GlobalKeyEvent): boolean => {
     if (!((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === 'c')) return false
     // Native text selection wins (markdown, editor and terminal keep their normal copy path).
@@ -10670,6 +10511,8 @@ export function Canvas() {
       'panel.explorer': () => { showExplorer('toggle'); return true },
       'panel.sourceControl': () => { setScOpen((v) => !v); return true },
       'app.reopenLastClosed': reopenLastClosedCommand,
+      'project.next': () => cycleProject(1),
+      'project.prev': () => cycleProject(-1),
       'canvas.undo': () => { undo(); return true },
       'canvas.redo': () => { redo(); return true },
       'canvas.goBack': () => { goBack(); return true },
@@ -10922,10 +10765,30 @@ export function Canvas() {
     const onFontZoom = (e: Event): void => {
       const d = (e as CustomEvent<TerminalFontZoomRequest>).detail
       if (!d?.nodeId) return
+      const globalSize = useSettings.getState().settings.fontSize
       const node = nodesRef.current.find((n) => n.id === d.nodeId)
-      if (!node || node.type !== 'terminal') return
+      if (!node) {
+        // Not on THIS canvas: a global-board card of another project. Its size is stored content,
+        // so write it through the store's own-write path (like the icon of an off-canvas node), then
+        // persist. A relay tab's node belongs to the host's core and stays untouched.
+        const st = useProjects.getState()
+        const owner = nodeOwner(st.projects, d.nodeId)
+        const stored = owner?.nodes.find((n) => n.id === d.nodeId)
+        if (!owner || owner.remote || !stored || (stored.kind ?? 'terminal') !== 'terminal') return
+        const storedPrev = normalizeTerminalFontSize(stored.terminalFontSize)
+        const storedNext = nextTerminalFontSizeOverride(d.action, storedPrev, globalSize)
+        const storedText = fontZoomNoticeText(d.action, storedPrev, storedNext, globalSize)
+        if (storedText) setNotice({ kind: 'info', text: storedText })
+        if (storedNext === storedPrev) return
+        st.applyOwnNodeMutation(owner.id, { op: 'upsert', node: { ...stored, terminalFontSize: storedNext } })
+        void persist()
+        return
+      }
+      if (node.type !== 'terminal') return
       const prev = normalizeTerminalFontSize(node.data.terminalFontSize)
-      const next = nextTerminalFontSizeOverride(d.action, prev, useSettings.getState().settings.fontSize)
+      const next = nextTerminalFontSizeOverride(d.action, prev, globalSize)
+      const noticeText = fontZoomNoticeText(d.action, prev, next, globalSize)
+      if (noticeText) setNotice({ kind: 'info', text: noticeText })
       if (next === prev) return
       setNodes((ns) =>
         ns.map((n) => (n.id === d.nodeId ? { ...n, data: { ...n.data, terminalFontSize: next } } : n))
@@ -10946,7 +10809,7 @@ export function Canvas() {
     }
     window.addEventListener(TERMINAL_FONT_ZOOM_EVENT, onFontZoom)
     return () => window.removeEventListener(TERMINAL_FONT_ZOOM_EVENT, onFontZoom)
-  }, [setNodes, markDirty, nodesRef])
+  }, [setNodes, markDirty, nodesRef, persist])
 
   // Apply the accent color as a CSS variable.
   useEffect(() => {
@@ -10992,7 +10855,6 @@ export function Canvas() {
       toggleCollapseNodes,
       toggleMarkdown,
       reloadTerminals,
-      liveLinkMenuItems: (nodeId) => liveLinkMenuItems(nodeId),
       branchClaude,
       transferConversation,
       restartAgentNode,
@@ -11019,7 +10881,6 @@ export function Canvas() {
       toggleCollapseNodes,
       toggleMarkdown,
       reloadTerminals,
-      liveLinkMenuItems,
       branchClaude,
       transferConversation,
       restartAgentNode,
@@ -11050,13 +10911,11 @@ export function Canvas() {
   const nodeActionCtxFor = useCallback(
     (projectId: string): NodeActionCtx => {
       const writes = nodeWritesFor(projectId)
-      const liveLink = (nodeId: string): MenuItem[] => liveLinkMenuItems(nodeId, projectId)
       if (liveCanvasHolds(nodesProjectIdRef.current, useProjects.getState().activeProjectId, projectId)) {
         return {
           ...liveNodeActionCtx(),
           setNodesColor: writes.setColor,
-          pickNodeIcon: writes.pickIcon,
-          liveLinkMenuItems: liveLink
+          pickNodeIcon: writes.pickIcon
         }
       }
       const project = useProjects.getState().getProject(projectId)
@@ -11069,7 +10928,6 @@ export function Canvas() {
         grokModels: () => grokModelList(),
         cursorModels: () => cursorModelList(),
         writes,
-        liveLinkMenuItems: liveLink,
         connectedProjectIdForHost,
         refuse: () =>
           window.dispatchEvent(
@@ -11077,7 +10935,7 @@ export function Canvas() {
           )
       })
     },
-    [nodeWritesFor, liveLinkMenuItems, liveNodeActionCtx, gatewayModels, gatewayStatus, gatewayError, connectedProjectIdForHost]
+    [nodeWritesFor, liveNodeActionCtx, gatewayModels, gatewayStatus, gatewayError, connectedProjectIdForHost]
   )
 
   /** A kanban card's rows from the node builder (BOARD_NODE_ACTION_IDS), for a node of `projectId`. */
@@ -11181,9 +11039,16 @@ export function Canvas() {
       const accounts = accountsForProject(useSettings.getState().settings.claudeAccounts, project)
       // The system entry shows the user's custom label / detected email so it stays
       // distinguishable from managed accounts (falls back to "System account").
-      const systemLabel = systemAccountDisplay(
-        useSettings.getState().settings.systemAccountLabel,
-        useSystemAccount.getState().email
+      // On an SSH project the system row is the HOST's `~/.claude`, so it is named after the host
+      // (its detected email when known) — never after this machine's label or login.
+      const projectHostKey = project?.ssh ? sshHostKey(project.ssh.server) : undefined
+      const systemLabel = systemAccountDisplayOn(
+        projectHostKey,
+        {
+          label: useSettings.getState().settings.systemAccountLabel,
+          email: useSystemAccount.getState().email
+        },
+        projectHostKey ? useSystemAccount.getState().remoteEmails[projectHostKey] : undefined
       )
       // ✓ marks what a bare "New Claude" resolves to: the project default while it still
       // exists, else the system account (mirrors resolveNewNodeAccount's stale-id guard).
@@ -11204,9 +11069,10 @@ export function Canvas() {
         .settings.codexAccounts.filter(
           (a) => !a.pending && (codexHostKey ? a.host === codexHostKey : !a.host)
         )
-      const codexSystemLabel = systemAccountDisplay(
-        undefined,
-        useSystemCodexAccount.getState().email
+      const codexSystemLabel = systemAccountDisplayOn(
+        codexHostKey,
+        { email: useSystemCodexAccount.getState().email },
+        codexHostKey ? useSystemCodexAccount.getState().remoteEmails[codexHostKey] : undefined
       )
       const itemForBuiltin = (aid: (typeof BUILTIN_AGENT_IDS)[number]): MenuItem => {
         // Claude gets an account picker submenu when ≥1 account exists. The System row is an
@@ -17193,8 +17059,6 @@ export function Canvas() {
                   void writeDisk()
                 }
               },
-              // Works for any project: a live link needs no node on screen (R49).
-              ...liveLinkMenuItems(id, projectId),
               { type: 'separator' },
               { label: 'End session', icon: <IconTrash />, danger: true, onClick: () => closeSession(projectId, id) }
             ]
@@ -17206,8 +17070,7 @@ export function Canvas() {
       renameSession,
       closeSession,
       writeDisk,
-      selectionItems,
-      liveLinkMenuItems
+      selectionItems
     ]
   )
 
@@ -18344,22 +18207,6 @@ export function Canvas() {
     travelToNodeRef.current = travelToNode
   })
 
-  /** The Live chat drawer sits above a kanban card modal (z 57 over 55) — opened from the card's LIVE
-   *  chip — but never above Settings, which stays on top. `kanbanOpen` too: the per-project board
-   *  reports a closed modal on change, not on unmount, so a board closed with its card open would
-   *  leave the flag behind. */
-  const liveChatRaised = cardModalOpen && kanbanOpen && !settingsOpen
-
-  /** The Live chat drawer's "Go to terminal": a modal drawer gives way to the canvas first (its scrim
-   *  would cover the node); a docked one stays. The project switch, a closed project's reopen and the
-   *  board's "open the card" are `travelToNode`'s. */
-  const goToLiveChatNode = useCallback(
-    (nodeId: string) => {
-      if (!liveChatRef.current.pinned) setLiveChat((s) => nextLiveChat(s, { kind: 'close' }))
-      travelToNode(nodeId)
-    },
-    [travelToNode]
-  )
 
   // ── "Open recent": resume a past agent conversation from its CLI's own history ──────────────
   // The list is THIS machine's (window.nodeTerminal: the desktop's core, or the Server Edition's
@@ -19516,7 +19363,6 @@ export function Canvas() {
     hostedBookmarks,
     copyHostedInviteCode,
     forgetHostedTeam,
-    confirmStopAllLiveLinks,
     shareBlockedReason,
     openShareWithTeam,
   ])
@@ -20328,18 +20174,6 @@ export function Canvas() {
         />
       )}
 
-      {liveChatShown(liveChat, liveLinkCount) && (
-        <LiveChatDrawer
-          linkId={liveChat.linkId}
-          pinned={liveChat.pinned}
-          raised={liveChatRaised}
-          beside={liveChat.pinned && explorerOpen && explorer.pinned && !liveChatRaised}
-          onPickLink={pickLiveChatLink}
-          onClose={closeLiveChat}
-          onTogglePin={toggleLiveChatPin}
-          onGoToNode={goToLiveChatNode}
-        />
-      )}
 
       {/* The one-time clone notice for a project whose git-shared capability switch arrived
           already on (PR 3 Task 3.4). Self-contained against the projects store: it re-evaluates on
@@ -20560,18 +20394,12 @@ export function Canvas() {
         />
       )}
 
-      {null}
       {/* The surfaces below are not on the dialog stack, so the popup is told about them here: it
           must not land on the setup tour, Settings, the palette, a dictation in progress, …. The
           kanban card modal registers on the stack itself; `cardModalOpen` is belt and braces. */}
 
       {/* The free-tier limit moment (docs/project-limit.md). Close is the ordinary non-destructive close — never
           `endSessions`: the limit only ever blocks a NEW open, it never ends anything. */}
-      {null}
-      {liveLinkDialog && (
-        null
-      )}
-
       {remotePicker && (
         <RemotePicker
           x={remotePicker.x}

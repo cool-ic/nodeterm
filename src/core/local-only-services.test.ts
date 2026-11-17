@@ -1,7 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { fetchCheck, fetchPopupImage } from './check'
 import { createPushNotify, createLiveUpdatePush, createHostAuthCache } from './push-notify'
-import { createWatchLinkApi } from './watch-link/api'
 import { createPushWebhookClient } from './push-webhook'
 import { initLicense, getStoredEntitlement } from './license'
 import { initProjectLimit } from './project-limit'
@@ -20,9 +19,6 @@ it('never contacts a cloud service or reads an entitlement, including with old s
  const deps = { env: { NODETERM_API_BASE: 'https://old-cloud.invalid' }, isPackaged: () => true, mobilePushEnabled: () => true } as any
  await createPushNotify(deps)._flushNow(); await createLiveUpdatePush(deps)._flushNow()
  expect(await createHostAuthCache({}).get({} as any)).toBe('drop')
- const links = createWatchLinkApi({ apiBase: 'https://old-cloud.invalid', fetch: network as any })
- expect((await links.create('old-token', 'hash', 60)).ok).toBe(false)
- expect(await links.revokeAll('old-token')).toBe(false)
  const hooks = createPushWebhookClient(deps)
  expect((await hooks.mint()).ok).toBe(false)
  expect(network).not.toHaveBeenCalled()
