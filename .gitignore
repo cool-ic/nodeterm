@@ -2,6 +2,7 @@ node_modules
 node_modules/
 out/
 dist/
+dist.noindex/
 *.log
 .DS_Store
 .vite/
